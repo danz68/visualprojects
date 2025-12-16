@@ -8401,13 +8401,9 @@ function updateMini(meta, bandOrNull) {
 
   window.addEventListener("keydown", onKeyDown);
 
-																		 
   
   tip.addEventListener('contextmenu', e=>{e.preventDefault();e.stopPropagation();});
-															   
-  
 
-																  
   
   let _dzvTip_lastInnerW = window.innerWidth;
   function _dzvTip_onResizeGuarded() {
@@ -9342,6 +9338,8 @@ function dzvInitMajorFocus(svg, opts = {}) {
         );
         if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 		window.dzv.focusing=false;
+		if (window.dzv.hide_tip) window.dzv.hide_tip();
+        if (window.dzv.hide_highlight) window.dzv.hide_highlight();
       }
     };
 
@@ -9436,6 +9434,8 @@ function dzvInitMajorFocus(svg, opts = {}) {
         state.raf = 0;
         clearFocusInstant();
         if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+		if (window.dzv.hide_tip) window.dzv.hide_tip();
+        if (window.dzv.hide_highlight) window.dzv.hide_highlight();
       }
     };
 
@@ -11021,70 +11021,6 @@ form_search.addEventListener("submit", function (e) {
     if (ev.button !== 0) return;
     if (!dzvMenu.contains(ev.target)) hideMenu();
   }
-		  
-				
-							  
-							  
-						  
-						 
-				   
-				   
-						  
-
-																											
-
-									   
-											 
-							
-	 
-											 
-	 
-							   
-						  
-						  
-									
-						
-												  
-						  
-									   
-										 
-																																																		
-									  
-						
-	 
-
-									   
-											 
-																   
-							
-	 
-											 
-	 
-											   
-											   
-													   
-															   
-	   
-	 
-
-								  
-															   
-							
-	 
-											 
-	 
-									 
-																	 
-															 
-	 
-
-																				 
-																				 
-																		  
-																			  
-																			 
-	   
-
 
   
 
@@ -11573,6 +11509,13 @@ const hub = dzvInitClickResolver(svg, {
 });
 
 </script>
+
+
+
+
+
+
+
 
 </body>
 </html>
