@@ -8636,7 +8636,15 @@ function dzvInitHoverFullPathHighlight(svg, opts = {}) {
 
   let raf = 0;
    window.dzv.pending_hit = null;
-
+   
+   
+  function hide_force()
+  {
+    if (raf) cancelAnimationFrame(raf);
+	raf=0;
+	window.dzv.pending_hit = null;
+	hide();
+  }  
   function _tick() {
     raf = 0;
 
@@ -8715,6 +8723,7 @@ function dzvInitHoverFullPathHighlight(svg, opts = {}) {
   return {
     showForHit,
     hide,
+	hide_force,
     destroy() {
       svg.removeEventListener("pointermove", onPointerMove);
       svg.removeEventListener("pointerleave", onPointerLeave);
@@ -8732,7 +8741,7 @@ function dzvInitHoverFullPathHighlight(svg, opts = {}) {
 // usage:
 const highlight_stuff = dzvInitHoverFullPathHighlight(svg, { minHeightPx: 10, isPinned: () => isPinned() });
 window.dzv = window.dzv || {};
-window.dzv.hide_highlight = highlight_stuff.hide;
+window.dzv.hide_highlight = highlight_stuff.hide_force;
 window.dzv.show_highlight = highlight_stuff.showForHit;
 
 
@@ -11511,7 +11520,6 @@ const hub = dzvInitClickResolver(svg, {
 });
 
 </script>
-
 
 
 </body>
