@@ -8674,7 +8674,9 @@ function dzvInitHoverFullPathHighlight(svg, opts = {}) {
     if (cfg.isPinned()) return;
    
     window.dzv.pending_hit = null;
-    if (!raf) raf = requestAnimationFrame(_tick);
+	if (raf) cancelAnimationFrame(raf);
+    //if (!raf) 
+	raf = requestAnimationFrame(_tick);
 	//_tick();
   }
 
@@ -11509,11 +11511,6 @@ const hub = dzvInitClickResolver(svg, {
 });
 
 </script>
-
-
-
-
-
 
 
 
