@@ -8043,6 +8043,7 @@ function updateMini(meta, bandOrNull) {
 
 
   function showTip() { 
+    if (window.dzv.focusing) return;
     tip.style.pointerEvents = !!state.locked ? "auto":"none";
     const b = dzvBandLadderForMeta(state.meta);
   
@@ -9171,7 +9172,7 @@ function dzvInitMajorFocus(svg, opts = {}) {
     if (state.activeMajor === majorId && state.session) return true;
     if (window.dzv.hide_tip) window.dzv.hide_tip();
     if (window.dzv.hide_highlight) window.dzv.hide_highlight();
-
+    window.dzv.focusing = true; 
     stopAnim();
     clearFocusInstant();
 
@@ -9299,6 +9300,7 @@ function dzvInitMajorFocus(svg, opts = {}) {
           "transform", `matrix(1 0 0 ${s.syTarget} 0 ${targetYc - s.syTarget * baseCenterY})`
         );
         if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+		window.dzv.focusing=false;
       }
     };
 
@@ -11375,12 +11377,6 @@ form_search.addEventListener("submit", function (e) {
 
 })();
 </script>
-
-
-
-
-
-
 
 
 </body>
