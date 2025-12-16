@@ -8060,6 +8060,7 @@ function updateMini(meta, bandOrNull) {
 	
     tip.style.pointerEvents = !!state.locked ? "auto":"none";
     const b = dzvBandLadderForMeta(state.meta);
+	
   
     const list = b.list;
     const cur = cfg.bandwidthUSD;
@@ -8076,7 +8077,7 @@ function updateMini(meta, bandOrNull) {
     tip.style.display = "block"; 
    
    }
-  function hideTip() { tip.style.display = "none"; tipPos.pinned = false; }
+  function hideTip() { tip.style.display = "none"; tipPos.pinned = false; if (window.dzv.hide_highlight) window.dzv.hide_highlight();}
 
   // ------------------------ locking / clicking ------------------------
 
@@ -8092,6 +8093,7 @@ function updateMini(meta, bandOrNull) {
     updateMini(meta, null);
 
     showTip();
+	
 
     if (keepCurrentScreenPos) {
       const left = parseFloat(tip.style.left || "0");
@@ -8104,6 +8106,12 @@ function updateMini(meta, bandOrNull) {
     } else {
       setTipPosPinned(clientX, clientY);
 	  //tip.style.pointerEvents = "none";
+    }
+	
+	if (window.dzv && typeof window.dzv.show_highlight === "function") {
+	  const el = document.getElementById(baseId + " - label");
+	  if (el)
+      try { window.dzv.show_highlight(el); } catch (_) {}
     }
 
     return true;
@@ -8230,6 +8238,7 @@ function updateMini(meta, bandOrNull) {
   }
 
   function _hideHoverIfNotLocked() {
+    
     if (state.locked) return;
 	if (window.is_menu && window.is_menu()) return;
     _hoverShown = false;
@@ -8391,14 +8400,14 @@ function updateMini(meta, bandOrNull) {
   tip.addEventListener("pointerdown", stop, { passive: true });
 
   window.addEventListener("keydown", onKeyDown);
-  //window.addEventListener("resize", onWindowChange);
-  //window.addEventListener("scroll", onWindowChange, { passive: true });
+
+																		 
   
   tip.addEventListener('contextmenu', e=>{e.preventDefault();e.stopPropagation();});
-  //svg.addEventListener('selectstart', e=>e.preventDefault());
+															   
   
 
-  //window.addEventListener("resize", unlock, { passive: true }); 
+																  
   
   let _dzvTip_lastInnerW = window.innerWidth;
   function _dzvTip_onResizeGuarded() {
@@ -8456,8 +8465,10 @@ function updateMini(meta, bandOrNull) {
       tip.removeEventListener("pointerdown", stop);
 
       window.removeEventListener("keydown", onKeyDown);
-      //window.removeEventListener("resize", onWindowChange);
-      //window.removeEventListener("scroll", onWindowChange);
+      window.removeEventListener("resize", _dzvTip_onResizeGuarded);
+      window.removeEventListener("scroll", _dzvTip_onResizeGuarded);
+	  window.removeEventListener("orientationchange", _dzvTip_onResizeGuarded);
+	  document.removeEventListener("fullscreenchange", _dzvTip_onResizeGuarded);
 
       tip.remove();
     },
@@ -8628,19 +8639,20 @@ function dzvInitHoverFullPathHighlight(svg, opts = {}) {
   }
 
   let raf = 0;
-  let pendingHit = null;
+   window.dzv.pending_hit = null;
 
   function _tick() {
     raf = 0;
 
+
     if (cfg.isPinned()) {
-      pendingHit = null;
-      hide();
+      //window.dzv.pending_hit = null;
+      //hide();
       return;
     }
 
-    const hit = pendingHit;
-    pendingHit = null;
+    const hit = window.dzv.pending_hit;
+    window.dzv.pending_hit = null;
     if (!hit) hide();
     else showForHit(hit);
   }
@@ -8653,8 +8665,11 @@ function dzvInitHoverFullPathHighlight(svg, opts = {}) {
 	
     if (cfg.isPinned()) return;
 
-    pendingHit = t.closest(cfg.hitSelector);
-    if (!raf) raf = requestAnimationFrame(_tick);
+    window.dzv.pending_hit = t.closest(cfg.hitSelector);
+	if (raf) cancelAnimationFrame(raf);
+    //if (!raf) 
+	raf = requestAnimationFrame(_tick);
+	//_tick();
   }
 
 
@@ -8662,13 +8677,14 @@ function dzvInitHoverFullPathHighlight(svg, opts = {}) {
   function onPointerLeave() {
     if (cfg.isPinned()) return;
    
-    pendingHit = null;
+    window.dzv.pending_hit = null;
     if (!raf) raf = requestAnimationFrame(_tick);
+	//_tick();
   }
 
 
   function onPointerDown(ev) {
-  
+
     const t = ev.target;
     if (!(t instanceof Element)) return;
 	
@@ -8678,23 +8694,25 @@ function dzvInitHoverFullPathHighlight(svg, opts = {}) {
     let pH = t.closest(cfg.hitSelector);
     if (pH)
 	{
-	 if (pendingHit !== pH)
+	 if (window.dzv.pending_hit !== pH)
 	  {
-	   pendingHit = pH;
+	   window.dzv.pending_hit = pH;
 	   
 	   showForHit(pH);
 	  }
 	}
 	else
 	{
-	 pendingHit = null;
+	 window.dzv.pending_hit = null;
 	 hide();
 	}
   }
   
+  
+  
   svg.addEventListener("pointermove", onPointerMove, { passive: true });
   svg.addEventListener("pointerleave", onPointerLeave, { passive: true });
-  svg.addEventListener("pointerdown", onPointerDown, { passive: true });
+  //svg.addEventListener("pointerdown", onPointerDown, { passive: true });
 
   return {
     showForHit,
@@ -8702,10 +8720,10 @@ function dzvInitHoverFullPathHighlight(svg, opts = {}) {
     destroy() {
       svg.removeEventListener("pointermove", onPointerMove);
       svg.removeEventListener("pointerleave", onPointerLeave);
-	  svg.removeEventListener("pointerdown", onPointerDown);
+	  //svg.removeEventListener("pointerdown", onPointerDown);
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
-      pendingHit = null;
+      window.dzv.pending_hit = null;
       hide();
     },
   };
@@ -11003,69 +11021,69 @@ form_search.addEventListener("submit", function (e) {
     if (ev.button !== 0) return;
     if (!dzvMenu.contains(ev.target)) hideMenu();
   }
-if (false)
-  (function () {
-    const LONG_PRESS_MS = 600;
-    const MOVE_TOLERANCE = 10;
-    let pressTimer = null;
-    let pointerId = null;
-    let startX = 0;
-    let startY = 0;
-    let downTarget = null;
+		  
+				
+							  
+							  
+						  
+						 
+				   
+				   
+						  
 
-    function clearPressTimer() { if (pressTimer !== null) { clearTimeout(pressTimer); pressTimer = null; } }
+																											
 
-    function onPointerDownForMenu(ev) {
-      if (ev.pointerType !== "touch") return;
-	  if (window.activeTouches)
-	   {
-	    if (window.activeTouches.size>1) return;
-	   }
-      pointerId = ev.pointerId;
-      startX = ev.clientX;
-      startY = ev.clientY;
-      downTarget = ev.target || svg;
-      clearPressTimer();
-      pressTimer = window.setTimeout(function () {
-        pressTimer = null;
-        if (pointerId === null) return;
-        const target = downTarget || svg;
-        const fakeEvt = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, view: window, clientX: startX, clientY: startY, button: 2 });
-        target.dispatchEvent(fakeEvt);
-      }, LONG_PRESS_MS);
-    }
+									   
+											 
+							
+	 
+											 
+	 
+							   
+						  
+						  
+									
+						
+												  
+						  
+									   
+										 
+																																																		
+									  
+						
+	 
 
-    function onPointerMoveForMenu(ev) {
-      if (ev.pointerType !== "touch") return;
-      if (pointerId === null || ev.pointerId !== pointerId) return;
-	  if (window.activeTouches)
-	   {
-	    if (window.activeTouches.size>1) return;
-	   }
-      const dx = Math.abs(ev.clientX - startX);
-      const dy = Math.abs(ev.clientY - startY);
-      if (dx > MOVE_TOLERANCE || dy > MOVE_TOLERANCE) {
-        clearPressTimer(); pointerId = null; downTarget = null;
-      }
-    }
+									   
+											 
+																   
+							
+	 
+											 
+	 
+											   
+											   
+													   
+															   
+	   
+	 
 
-    function cancelLongPress(ev) {
-      if (ev.pointerType && ev.pointerType !== "touch") return;
-	  if (window.activeTouches)
-	   {
-	    if (window.activeTouches.size>1) return;
-	   }
-      if (pointerId === null) return;
-      if (ev.pointerId != null && ev.pointerId !== pointerId) return;
-      clearPressTimer(); pointerId = null; downTarget = null;
-    }
+								  
+															   
+							
+	 
+											 
+	 
+									 
+																	 
+															 
+	 
 
-    svg.addEventListener("pointerdown", onPointerDownForMenu, { passive: true });
-    svg.addEventListener("pointermove", onPointerMoveForMenu, { passive: true });
-    svg.addEventListener("pointerup", cancelLongPress, { passive: true });
-    svg.addEventListener("pointercancel", cancelLongPress, { passive: true });
-    svg.addEventListener("pointerleave", cancelLongPress, { passive: true });
-  })();
+																				 
+																				 
+																		  
+																			  
+																			 
+	   
 
 
   
@@ -11251,6 +11269,11 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
   function nowMs() { return (performance && performance.now) ? performance.now() : Date.now(); }
   function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx*dx + dy*dy; }
 
+  function isEventInRoot(e) {
+    const path = (typeof e.composedPath === "function") ? e.composedPath() : null;
+    return path ? path.includes(rootEl) : rootEl.contains(e.target);
+  }
+
   function clearSingle() {
     if (st.singleTimer) { clearTimeout(st.singleTimer); st.singleTimer = 0; }
   }
@@ -11306,6 +11329,7 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
 
   function onPointerDownCapture(e) {
     if (destroyed) return;
+    if (!isEventInRoot(e)) return;
 
     const hitEl = cfg.hitTest(e);
 
@@ -11326,7 +11350,7 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
       return;
     }
 
-    try { rootEl.setPointerCapture?.(e.pointerId); } catch (_) {}
+    //try { rootEl.setPointerCapture?.(e.pointerId); } catch (_) {}
 
     st.down = {
       id: e.pointerId,
@@ -11349,6 +11373,7 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
     if (moved2 > cfg.longPressMovePx * cfg.longPressMovePx) clearLongPress();
   }
 
+	  
   function onPointerUpCapture(e) {
     if (destroyed) return;
     if (!st.down || st.down.id !== e.pointerId) return;
@@ -11413,9 +11438,7 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
     // If native contextmenu is about to happen anywhere over your root,
     // route it into onContext and cancel pending single.
     // (Useful on some browsers that still emit contextmenu after long-press.)
-    const path = (typeof e.composedPath === "function") ? e.composedPath() : null;
-    const inRoot = path ? path.includes(rootEl) : rootEl.contains(e.target);
-    if (!inRoot) return;
+    if (!isEventInRoot(e)) return;
 
     clearSingle();
     clearLongPress();
@@ -11550,13 +11573,6 @@ const hub = dzvInitClickResolver(svg, {
 });
 
 </script>
-
-
-
-
-
-
-
 
 </body>
 </html>
