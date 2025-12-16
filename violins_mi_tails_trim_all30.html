@@ -7016,7 +7016,7 @@ function dzvInitHtmlTooltip(svg, opts = { showPercentileAtBandCenter: true }) {
     hoverDelayMs: opts.hoverDelayMs ?? 500,
 
     constraintSelector: opts.constraintSelector ?? "g#axes_1 g#patch_2 path",
-    padInConstraint: opts.padInConstraint ?? 8,
+    padInConstraint: opts.padInConstraint ?? 0,
 
     bg: opts.bg ?? "rgba(248, 246, 242, 1.0)",
     fg: opts.fg ?? "#1f2328",
@@ -7387,7 +7387,7 @@ rowTitle.addEventListener("pointerdown", (e) => {
 
   function setTipPosPinned(clientX, clientY) {
    
-    const pad = 14;
+    let pad = 14;
     const cons = getConstraintRect();
     const innerPad = cfg.padInConstraint;
 
@@ -7402,10 +7402,12 @@ rowTitle.addEventListener("pointerdown", (e) => {
     const maxLeft = cons.right - innerPad - W;
     const maxTop = cons.bottom - innerPad - H;
 
-    if (left < minLeft) left = minLeft;
-    if (top < minTop) top = minTop;
     if (left > maxLeft) left = maxLeft;
+    if (left < minLeft) left = minLeft;
+    
+    
     if (top > maxTop) top = maxTop;
+	if (top < minTop) top = minTop;
 
     tipPos.left = left;
     tipPos.top = top;
@@ -7432,10 +7434,12 @@ rowTitle.addEventListener("pointerdown", (e) => {
     const maxLeft = cons.right - innerPad - W;
     const maxTop = cons.bottom - innerPad - H;
 
-    if (left < minLeft) left = minLeft;
-    if (top < minTop) top = minTop;
     if (left > maxLeft) left = maxLeft;
+    if (left < minLeft) left = minLeft;
+    
+    
     if (top > maxTop) top = maxTop;
+	if (top < minTop) top = minTop;
 
     tipPos.left = left;
     tipPos.top = top;
@@ -8044,6 +8048,16 @@ function updateMini(meta, bandOrNull) {
 
   function showTip() { 
     if (window.dzv.focusing) return;
+	const cs = getComputedStyle(svg);
+	const cons = getConstraintRect();
+	
+	
+	if (cons.width < cfg.tipWidth)
+	  tip.style.width = `${cons.width}px`;
+	else
+	  tip.style.width = `${cfg.tipWidth}px`;
+
+	
     tip.style.pointerEvents = !!state.locked ? "auto":"none";
     const b = dzvBandLadderForMeta(state.meta);
   
@@ -8135,15 +8149,22 @@ function updateMini(meta, bandOrNull) {
   }
   function stop(ev) { ev.stopPropagation(); }
 
-  function onSvgPointerDown(ev) {
+  function onSvgPointerDown(ev, target) {
+
     const isPrimaryClick = (ev.pointerType === "mouse") ? (ev.button === 0) : true;
     if (!isPrimaryClick) return;
+	
 
-    const target = ev.target;
+
+    if (!target) target = ev.target;
     if (!(target instanceof Element)) return;
+	
+	
 
     const hit = target.closest(cfg.hitSelector);
     if (!hit) { unlock(); return; }
+	
+	//console.log(ev);
 
     const id = hit.getAttribute("id") || "";
     const baseId = id.split(" - ")[0].trim();
@@ -8186,7 +8207,9 @@ function updateMini(meta, bandOrNull) {
       renderBand(state.meta, xUSD);
     }
   }
-
+ 
+ window.dzv.on_show_tooltip = onSvgPointerDown;
+ 
   // ------------------------ hover (delayed show), warp-aware ------------------------
 
   cfg.hoverDelayMs = cfg.hoverDelayMs ?? 500;
@@ -8359,7 +8382,7 @@ function updateMini(meta, bandOrNull) {
 
   // ------------------------ listeners wiring ------------------------
 
-  svg.addEventListener("pointerdown", onSvgPointerDown, { passive: true });
+  //svg.addEventListener("pointerdown", onSvgPointerDown, { passive: true });
   svg.addEventListener("pointermove", onSvgPointerMove_HoverDelay, { passive: true });
   svg.addEventListener("pointerleave", onSvgPointerLeave_HoverDelay, { passive: true });
 
@@ -8371,7 +8394,7 @@ function updateMini(meta, bandOrNull) {
   //window.addEventListener("resize", onWindowChange);
   //window.addEventListener("scroll", onWindowChange, { passive: true });
   
-  tip.addEventListener('contextmenu', e=>e.preventDefault());
+  tip.addEventListener('contextmenu', e=>{e.preventDefault();e.stopPropagation();});
   //svg.addEventListener('selectstart', e=>e.preventDefault());
   
 
@@ -8424,7 +8447,7 @@ function updateMini(meta, bandOrNull) {
     destroy() {
       _clearHoverTimer();
 
-      svg.removeEventListener("pointerdown", onSvgPointerDown);
+      //svg.removeEventListener("pointerdown", onSvgPointerDown);
       svg.removeEventListener("pointermove", onSvgPointerMove_HoverDelay);
       svg.removeEventListener("pointerleave", onSvgPointerLeave_HoverDelay);
 
@@ -10155,6 +10178,7 @@ window.dzv.majorFocus = dzvInitMajorFocus(svg, {
   }
 
   function toggleWarpStateAnimated() { animateTo(isWarped ? 0 : 1, 500); }
+  window.dzv.swap_axis_warp = toggleWarpStateAnimated;
   
   let dzvTextScale = 1.0;
   window.dzvSetTextScale = function(scale){
@@ -10190,7 +10214,7 @@ window.dzv.majorFocus = dzvInitMajorFocus(svg, {
     return v || null;
   }
 
-  let menuContextMajor = null;
+  window.dzv.context_menu = null;
   
   let reduced = true;
 
@@ -10809,11 +10833,11 @@ form_search.addEventListener("submit", function (e) {
       rowZoom.style.cursor = "pointer";
       zoomSpan.dataset.enabled = "1";
     } else {
-      if (menuContextMajor) {
+      if (window.dzv.context_menu) {
         zoomSpan.textContent = "Zoom";
 		zoomSpan.style.color = "#000";
 
-		const maj =getViolin(menuContextMajor+"-0000");
+		const maj =getViolin(window.dzv.context_menu+"-0000");
 
 		if (maj)
 		  {
@@ -10859,7 +10883,7 @@ form_search.addEventListener("submit", function (e) {
 	  
       hideMenu();
     } else {
-      const maj = menuContextMajor;
+      const maj = window.dzv.context_menu;
       if (!maj) return;
       //if (window.dzvFocusMajorId) window.dzvFocusMajorId(maj);
 	  window.dzv.majorFocus.focusMajor(maj+'-0000');
@@ -10868,6 +10892,8 @@ form_search.addEventListener("submit", function (e) {
       hideMenu();
     }
   });
+  
+  
 
   let menuVisible = false;
   function ismenu()
@@ -10897,6 +10923,7 @@ form_search.addEventListener("submit", function (e) {
   function showMenuAt(x, y) {
     if (window.dzv.hide_tip) window.dzv.hide_tip();
 	if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+	justHideMenu();
 	labelOverlapCheckbox.checked = hideOverlappedLabels;
     labelsCheckbox.checked = showMajorLabels;
     scaleCheckbox.checked  = isWarped;
@@ -10970,13 +10997,13 @@ form_search.addEventListener("submit", function (e) {
       
     }
   }
- 
+ window.dzv.show_menu = showMenuAt;
   
   function onDocMouseDown(ev) {
     if (ev.button !== 0) return;
     if (!dzvMenu.contains(ev.target)) hideMenu();
   }
-
+if (false)
   (function () {
     const LONG_PRESS_MS = 600;
     const MOVE_TOLERANCE = 10;
@@ -11040,29 +11067,8 @@ form_search.addEventListener("submit", function (e) {
     svg.addEventListener("pointerleave", cancelLongPress, { passive: true });
   })();
 
-  svg.addEventListener("contextmenu", function (ev) {
-    ev.preventDefault();
-    menuContextMajor = (function getMajorFromNode(node) {
-      while (node && node !== svg) {
-	    
-        const id = node.id || "";
-		
-        if (id) {
-          let m;
-          m = id.match(/^(\d{2})-\d{4} - (?:area|edge)$/);
-          if (m) return m[1];
-          m = id.match(/^(\d{2})-\d{4} - label$/);
-          if (m) return m[1];
-          
-        }
-        node = node.parentNode;
-      }
-      return null;
-    })(ev.target);
-	
-    showMenuAt(ev.clientX, ev.clientY);
-    document.addEventListener("mousedown", onDocMouseDown, { once: true });
-  });
+
+  
 
   dzvMenu.addEventListener("mousedown", function (ev) { ev.stopPropagation(); });
 
@@ -11168,186 +11174,9 @@ form_search.addEventListener("submit", function (e) {
   });
 
 
-  let lastTapTimeX = 0;
-  let lastTapX = -1000000;
-  let lastTapY = -1000000;
   
-  const axis_area = svg.querySelector(`g[id="matplotlib.axis_1"]`);
+ 
 
-
-  svg.addEventListener("pointerdown", function (ev) {
-    //if (ev.pointerType !== "touch") return;
-
-    if (!axis_area) return;
-	
-	 const box = axis_area.getBoundingClientRect();
-	 //console.log(box, ev.clientY);
-	 if (!box ||  ev.clientY<box.y)
-	   return;
-
-  
-    const now = performance.now();
-    const dt = now - lastTapTimeX;
-    const dx = ev.clientX - lastTapX;
-    const dy = ev.clientY - lastTapY;
-    const dist2 = dx * dx + dy * dy;
-    if (dt < 500 && dist2 < 400) {
-      toggleWarpStateAnimated();
-	  if (window.dzv.swap_warp)
-	     window.dzv.swap_warp();
-      
-      lastTapTimeX = 0;
-	  lastTapX = -1000000;
-	  lastTapY = -1000000;
-	  
-    } else {
-      lastTapTimeX = now;
-      lastTapX = ev.clientX;
-      lastTapY = ev.clientY;
-    }
-  });
-
-
-    let lastTapTime = 0;
-	let startX = null;
-	let startY = null;
-	const MIN_DIST = 50;   // px
-	const MAX_OFF  = 40;   // max vertical drift
-
-	svg.addEventListener("pointerdown", e => {
-	  if (e.pointerType !== "touch") return;
-	  startX = e.clientX;
-	  startY = e.clientY;
-	});
-
-	svg.addEventListener("pointerup", e => {
-	  if (e.pointerType !== "touch") return;
-	  if (startX === null) return;
-	  
-	  //"matplotlib.axis_1"
-
-	   
-	 if (!axis_area) return;
-	 const box = axis_area.getBoundingClientRect();
-	 if (!box ||  e.clientY<box.y)
-	   return;
-	  //console.log("click",e.clientY, "axis",box.height) 
-
-	  const dx = e.clientX - startX;
-	  const dy = e.clientY - startY;
-      startX = null;
-	           // too short                 too diagonal
-	  if ((Math.abs(dx) < MIN_DIST) || (Math.abs(dy) > MAX_OFF))
-	    return;
-		
-	 const now = performance.now();
-     const dt = now - lastTapTime;
-	 if (dt>1000)
-	  if ((dx < 0 && isWarped) || (dx > 0 && !isWarped)) 
-	   {
-		  // swipe left or right if any sense
-		  toggleWarpStateAnimated();
-		  if (window.dzv.swap_warp)
-	        window.dzv.swap_warp();
-		  lastTapTime = now;
-	    } 
-     
-	  
-	});
-	
-  let lastTapTime2 = 0;
-  let lastTapX2 = -1000000;
-  let lastTapY2 = -1000000;
-  
-  function getMajorFromNode(node) {
-    while (node && node !== svg) {
-      const id = node.id || "";
-      if (id) {
-        let m;
-        m = id.match(/^(\d{2})-\d{4} - (?:area|edge|label)$/);
-        if (m) return m[1];
-
-        m = id.match(/^(\d{2}) - major-border$/);
-        if (m) return m[1];
-
-        m = id.match(/^major label:\s*(\d{2})$/);
-        if (m) return m[1];
-      }
-      node = node.parentNode;
-    }
-    return null;
-  }
-
-  svg.addEventListener("pointerdown", function (ev) {
-    //if (ev.pointerType !== "touch") return;
-
-
-  let onaxis = false;
-  
-  if (axis_area) 
-    {
-	 const box = axis_area.getBoundingClientRect();
-	 if (box &&  ev.clientY>box.y)
-	   onaxis = true;
-	}   
-    const now = performance.now();
-    const dt = now - lastTapTime2;
-    const dx = ev.clientX - lastTapX2;
-    const dy = ev.clientY - lastTapY2;
-    const dist2 = dx * dx + dy * dy;
-    if (dt < 500 && dist2 < 400 && !onaxis) {
-      if (window.dzvFocusMajor) {
-        //animateFocusBackAndClear();
-		window.dzv.majorFocus.clearFocus();
-	    window.dzvFocusMajor = null;
-	  
-		//console.log('ptrdown1');
-      } else {
-        let major = getMajorFromNode(ev.target);
-
-        if (major) {
-		  //console.log('ptrdown2');
-          //clearFocus();
-          //focusMajor(major);
-		  window.dzv.majorFocus.focusMajor(major+'-0000');
-	      window.dzvFocusMajor = major;
-        }
-      }
-      lastTapTime2 = 0;
-	  lastTapX2 = -1000000;
-	  lastTapY2 = -1000000;
-	  
-    } else {
-      lastTapTime2 = now;
-      lastTapX2 = ev.clientX;
-      lastTapY2 = ev.clientY;
-    }
-  });
-
-
-
-	function refreshMajorMarkersFont() {
-	  try {
-		const cs = getComputedStyle(svg);
-		const ss = parseFloat(cs.getPropertyValue('--ss')) || 1;
-
-		const BASE_FONT  = 8;   // same as in createMarkerText
-		const BASE_HALO  = 2.0; // same halo width
-		const fontPx     = BASE_FONT * (ss);
-		const haloPx     = BASE_HALO * (ss);
-
-		// majors’ markers: created with qid="q10|q25|q50|q75|q90"
-		svg.querySelectorAll('text[qid]').forEach(t => {
-		  t.style.fontSize    = fontPx + 'px';
-		  t.style.strokeWidth = String(haloPx);
-		});
-	  } catch (_) {}
-	}
-
-	// expose for other scripts (optional but useful)
-	if (typeof window !== "undefined") {
-	  window.dzvRefreshMajorMarkers = refreshMajorMarkersFont;
-	}
 
 
   if (typeof window !== "undefined") {
@@ -11360,7 +11189,7 @@ form_search.addEventListener("submit", function (e) {
 
 	};
   }
-
+/*
   if (typeof document !== "undefined") {
     document.addEventListener("pointerdown", function (ev) {
       if (ev.pointerType !== "touch") return;
@@ -11369,14 +11198,364 @@ form_search.addEventListener("submit", function (e) {
       if (!dzvMenu.contains(ev.target)) hideMenu();
     }, { passive: true });
   }
-  
+*/
   window.addEventListener("resize", hideMenu, { passive: true }); 
   window.addEventListener("orientationchange", hideMenu, { passive: true }); 
   document.addEventListener("fullscreenchange", hideMenu);
   
 
 })();
+
+
+
+
+// dzv_click_resolver.js
+// Unified single vs double vs context with "single delayed until sure".
+
+export function dzvInitClickResolver(rootEl, opts = {}) {
+  if (!rootEl) throw new Error("dzvInitClickResolver: missing rootEl");
+
+  const cfg = {
+    // callbacks
+    onSingle: opts.onSingle || null,     // ({hitEl, clientX, clientY, pointerType, originalEvent})
+    onDouble: opts.onDouble || null,     // same payload
+    onContext: opts.onContext || null,   // ({kind:"contextmenu"|"longpress", ...payload})
+
+    // hit testing (optional)
+    hitTest: opts.hitTest || ((e) => e.target),
+
+    // thresholds
+    tapMaxMs: (opts.tapMaxMs ?? 280),
+    tapMaxMovePx: (opts.tapMaxMovePx ?? 10),
+
+    dblMaxMs: (opts.dblMaxMs ?? 330),
+    dblMaxDistPx: (opts.dblMaxDistPx ?? 18),
+
+    longPressMs: (opts.longPressMs ?? 520),
+    longPressMovePx: (opts.longPressMovePx ?? 12),
+
+    // if true, prevent native context menu when we handle it
+    suppressNativeContextMenu: (opts.suppressNativeContextMenu ?? true),
+  };
+
+  let destroyed = false;
+
+  const st = {
+    down: null,          // {id,t,x,y, pointerType, button, hitEl}
+    lastTap: null,       // {t,x,y, pointerType, hitEl}
+    singleTimer: 0,      // pending single fire
+    longPressTimer: 0,
+    longPressFired: false,
+  };
+
+  function nowMs() { return (performance && performance.now) ? performance.now() : Date.now(); }
+  function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx*dx + dy*dy; }
+
+  function clearSingle() {
+    if (st.singleTimer) { clearTimeout(st.singleTimer); st.singleTimer = 0; }
+  }
+  function clearLongPress() {
+    if (st.longPressTimer) { clearTimeout(st.longPressTimer); st.longPressTimer = 0; }
+  }
+  function fire(fn, payload) { if (fn) fn(payload); }
+
+  function armLongPress(e, hitEl) {
+    clearLongPress();
+    st.longPressFired = false;
+
+    // long-press only for touch/pen, primary button only
+    if (e.pointerType === "mouse") return;
+    if (typeof e.button === "number" && e.button !== 0) return;
+
+    const x0 = e.clientX, y0 = e.clientY, id0 = e.pointerId;
+    st.longPressTimer = setTimeout(() => {
+      st.longPressTimer = 0;
+      if (!st.down || st.down.id !== id0) return;
+
+      const moved2 = dist2(x0, y0, st.down.x, st.down.y);
+      if (moved2 > cfg.longPressMovePx * cfg.longPressMovePx) return;
+
+      st.longPressFired = true;
+      clearSingle(); // context wins over pending single
+      fire(cfg.onContext, {
+        kind: "longpress",
+        hitEl,
+        clientX: st.down.x,
+        clientY: st.down.y,
+        pointerType: st.down.pointerType,
+        originalEvent: e,
+      });
+    }, cfg.longPressMs);
+  }
+
+  function scheduleSingle(e, hitEl) {
+    clearSingle();
+    const payload = {
+      hitEl,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      pointerType: e.pointerType || "mouse",
+      originalEvent: e,
+    };
+    // The key: delay single until dbl window has passed.
+    st.singleTimer = setTimeout(() => {
+      st.singleTimer = 0;
+      fire(cfg.onSingle, payload);
+    }, cfg.dblMaxMs);
+  }
+
+  function onPointerDownCapture(e) {
+    if (destroyed) return;
+
+    const hitEl = cfg.hitTest(e);
+
+    // Right-click: treat as context immediately.
+    if ((e.pointerType === "mouse") && (e.button === 2)) {
+      clearSingle();
+      clearLongPress();
+      st.down = null;
+      if (cfg.suppressNativeContextMenu) { e.preventDefault(); e.stopPropagation(); }
+      fire(cfg.onContext, {
+        kind: "contextmenu",
+        hitEl,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        pointerType: "mouse",
+        originalEvent: e,
+      });
+      return;
+    }
+
+    try { rootEl.setPointerCapture?.(e.pointerId); } catch (_) {}
+
+    st.down = {
+      id: e.pointerId,
+      t: nowMs(),
+      x: e.clientX,
+      y: e.clientY,
+      pointerType: e.pointerType || "mouse",
+      button: (typeof e.button === "number" ? e.button : 0),
+      hitEl,
+    };
+
+    armLongPress(e, hitEl);
+  }
+
+  function onPointerMoveCapture(e) {
+    if (destroyed) return;
+    if (!st.down || st.down.id !== e.pointerId) return;
+
+    const moved2 = dist2(st.down.x, st.down.y, e.clientX, e.clientY);
+    if (moved2 > cfg.longPressMovePx * cfg.longPressMovePx) clearLongPress();
+  }
+
+  function onPointerUpCapture(e) {
+    if (destroyed) return;
+    if (!st.down || st.down.id !== e.pointerId) return;
+
+    clearLongPress();
+
+    const dt = nowMs() - st.down.t;
+    const moved2 = dist2(st.down.x, st.down.y, e.clientX, e.clientY);
+
+    const isTap = (st.down.button === 0) &&
+                  (dt <= cfg.tapMaxMs) &&
+                  (moved2 <= cfg.tapMaxMovePx * cfg.tapMaxMovePx) &&
+                  !st.longPressFired;
+
+    if (!isTap) { st.down = null; return; }
+
+    const t = nowMs();
+    const hitEl = st.down.hitEl;
+    const pt = st.down.pointerType;
+
+    // Double-tap detection
+    let isDouble = false;
+    if (st.lastTap && st.lastTap.pointerType === pt) {
+      const dt2 = t - st.lastTap.t;
+      const d2  = dist2(st.lastTap.x, st.lastTap.y, e.clientX, e.clientY);
+      if (dt2 <= cfg.dblMaxMs && d2 <= cfg.dblMaxDistPx * cfg.dblMaxDistPx) {
+        isDouble = true;
+      }
+    }
+
+    if (isDouble) {
+      clearSingle();               // cancel pending single (the whole point)
+      st.lastTap = null;
+      fire(cfg.onDouble, {
+        hitEl,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        pointerType: pt,
+        originalEvent: e,
+      });
+    } else {
+      // Start "maybe single" timer.
+      st.lastTap = { t, x: e.clientX, y: e.clientY, pointerType: pt, hitEl };
+      scheduleSingle(e, hitEl);
+    }
+
+    st.down = null;
+  }
+
+  function onPointerCancelCapture(e) {
+    if (destroyed) return;
+    if (st.down && st.down.id === e.pointerId) {
+      clearLongPress();
+      st.down = null;
+    }
+  }
+
+  function onContextMenuCapture(e) {
+    if (destroyed) return;
+    if (!cfg.suppressNativeContextMenu) return;
+
+    // If native contextmenu is about to happen anywhere over your root,
+    // route it into onContext and cancel pending single.
+    // (Useful on some browsers that still emit contextmenu after long-press.)
+    const path = (typeof e.composedPath === "function") ? e.composedPath() : null;
+    const inRoot = path ? path.includes(rootEl) : rootEl.contains(e.target);
+    if (!inRoot) return;
+
+    clearSingle();
+    clearLongPress();
+    e.preventDefault();
+    e.stopPropagation();
+
+    fire(cfg.onContext, {
+      kind: "contextmenu",
+      hitEl: cfg.hitTest(e),
+      clientX: e.clientX,
+      clientY: e.clientY,
+      pointerType: "mouse",
+      originalEvent: e,
+    });
+  }
+
+  // Capture-phase so overlays or inner elements don’t break sequencing.
+  document.addEventListener("pointerdown", onPointerDownCapture, true);
+  document.addEventListener("pointermove", onPointerMoveCapture, true);
+  document.addEventListener("pointerup", onPointerUpCapture, true);
+  document.addEventListener("pointercancel", onPointerCancelCapture, true);
+  document.addEventListener("contextmenu", onContextMenuCapture, true);
+
+  return {
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      clearSingle();
+      clearLongPress();
+      document.removeEventListener("pointerdown", onPointerDownCapture, true);
+      document.removeEventListener("pointermove", onPointerMoveCapture, true);
+      document.removeEventListener("pointerup", onPointerUpCapture, true);
+      document.removeEventListener("pointercancel", onPointerCancelCapture, true);
+      document.removeEventListener("contextmenu", onContextMenuCapture, true);
+    }
+  };
+}
+
+
+const svg = document.getElementById("dzv_gen");
+const axis_area = svg.querySelector(`g[id="matplotlib.axis_1"]`);
+const hub = dzvInitClickResolver(svg, {
+  hitTest: (e) => e.target, // or your model-based hit decode
+  onSingle: ({hitEl, clientX, clientY, originalEvent}) => {
+    // show tooltip / lock / select — only after dbl window passed
+	 if (window.dzv.on_show_tooltip)
+	    window.dzv.on_show_tooltip(originalEvent, hitEl);
+  },
+  onDouble: ({hitEl, clientX, clientY}) => {
+    // focus mode / drilldown
+  let onaxis = false;
+  
+  if (axis_area) 
+    {
+	 const box = axis_area.getBoundingClientRect();
+	 if (box &&  clientY>box.y)
+	   onaxis = true;
+	}  
+
+  if (!onaxis)	
+   {
+      if (window.dzvFocusMajor) {
+
+		window.dzv.majorFocus.clearFocus();
+	    window.dzvFocusMajor = null;
+
+      } else {
+	    let major;
+		let node = hitEl;
+	    while (node && node !== svg) {
+	    
+        const id = node.id || "";
+		
+        if (id) {
+          let m;
+          m = id.match(/^(\d{2})-\d{4} - (?:area|edge|label)$/);
+          if (m) 
+		  {
+		    major = m[1];
+			break;
+		  } 
+          
+        }
+        node = node.parentNode;
+       }
+	  
+
+        if (major) {
+		  window.dzv.majorFocus.focusMajor(major+'-0000');
+	      window.dzvFocusMajor = major;
+        }
+      }
+  
+    }
+  else
+   {
+
+     if (window.dzv.swap_axis_warp)
+	   window.dzv.swap_axis_warp();
+	 if (window.dzv.swap_warp)
+	    window.dzv.swap_warp();
+   }
+	
+  },
+  onContext: ({kind, hitEl, clientX, clientY}) => {
+    // context menu / pin / whatever
+	
+	if (window.dzv.show_menu)
+	  {
+	    window.dzv.context_menu = null;
+		let node = hitEl;
+	    while (node && node !== svg) {
+	    
+        const id = node.id || "";
+		
+        if (id) {
+          let m;
+          m = id.match(/^(\d{2})-\d{4} - (?:area|edge|label)$/);
+          if (m) 
+		  {
+		    window.dzv.context_menu = m[1];
+			break;
+		  } 
+          
+        }
+        node = node.parentNode;
+       }
+		
+	    window.dzv.show_menu(clientX, clientY);
+	  }
+  },
+});
+
 </script>
+
+
+
+
+
+
 
 
 </body>
