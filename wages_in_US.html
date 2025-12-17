@@ -7353,6 +7353,9 @@ function dzvInitHtmlTooltip(svg, opts = { showPercentileAtBandCenter: true }) {
   const rowMetaPre = document.createElement("div");
   rowMetaPre.style.opacity = "0.9";
   rowMetaPre.style.marginBottom = "5px";
+  rowMetaPre.style.whiteSpace = "nowrap";
+  rowMetaPre.style.overflow = "hidden";
+  rowMetaPre.style.textOverflow = "ellipsis";
   //rowMetaPre.style.fontSize = "0.9em";
 
   const rowTitle = document.createElement("div");
@@ -7366,6 +7369,11 @@ function dzvInitHtmlTooltip(svg, opts = { showPercentileAtBandCenter: true }) {
   const rowMeta = document.createElement("div");
   rowMeta.style.opacity = "0.9";
   rowMeta.style.marginBottom = "8px";
+  rowMeta.style.whiteSpace = "pre-line";
+  rowMeta.style.whiteSpace = "nowrap";
+  rowMeta.style.overflow = "hidden";
+  rowMeta.style.textOverflow = "ellipsis";
+  
 
   const rowBand = document.createElement("div");
   rowBand.style.display = "none";
@@ -7373,6 +7381,10 @@ function dzvInitHtmlTooltip(svg, opts = { showPercentileAtBandCenter: true }) {
   rowBand.style.paddingTop = "6px";
   rowBand.style.borderTop = `1px solid ${cfg.border}`;
   rowBand.style.cursor = "pointer";
+  rowBand.style.whiteSpace = "pre-line";
+  
+  rowBand.style.overflow = "hidden";
+  rowBand.style.textOverflow = "ellipsis";
 
   const miniWrap = document.createElement("div");
   miniWrap.style.marginTop = "2px";
@@ -8283,7 +8295,7 @@ function updateMini(meta, bandOrNull) {
     const empText = meta.emp > 0 ? `${cfg.fmtInt(meta.emp)} registered workers` : "";
     const qsText = ``;
 
-    rowMeta.style.whiteSpace = "pre-line";
+    
     rowMeta.textContent = (empText && qsText) ? `${empText}\n${qsText}` : (empText || qsText || "");
   }
 
@@ -8346,28 +8358,64 @@ function updateMini(meta, bandOrNull) {
 		const bworkers = round_workers(pc0/100, meta.emp);
 		const aworkers = round_workers(pc1/100, meta.emp);
 		
+		function bandSplitLine(leftStr, rightStr, pcBelow, pcIn, pcAbove) {
+		  const parts = [];
+		  const push = (label, v) => {
+			if (Number.isFinite(v) && v > 0) parts.push([label, `${v.toFixed(1)}%`]);
+		  };
+
+		  // fixed order
+		  push("below", pcBelow);
+		  push("in",    pcIn);
+		  push("above", pcAbove);
+
+		  if (!parts.length) return `Vs band $${leftStr}–$${rightStr}: —`;
+
+		  const labs = parts.map(p => p[0]).join("/");
+		  const vals = parts.map(p => p[1]).join(" / ");
+		  return `Vs band $${leftStr}–$${rightStr}: ${labs} = ${vals}`;
+		}
+
+
+
+		// example:
+		// row2.textContent = bandSplitLine("35.5k","36.5k", pc0, 100*prob, pc1);
+
+
+		
 		//rowBand.textContent = `$${left} + Δ${dif}    |    ${wtxt}    |    p ≈ ${pc0.toFixed(1)}  +  Δ${(100*prob).toFixed(1)}%`;
+		const one_digit = (cfg.bandwidthUSD < 1000) || !window.dzv.tooltip_snap;
+		
+		rowBand.style.lineHeight = "1.4";
+		/*
+		rowBand.textContent = `Estimated band ($${dif}): \n` +
+		                      bandSplitLine(
+							     one_digit ? `${(x0/1000).toFixed(1)}k`:`${x0/1000}k`, 
+								 one_digit ? `${(x1/1000).toFixed(1)}k`:`${x1/1000}k`, 
+								 pc0, 100*prob, pc1);
+								 */
+		
 		  {
-		    rowBand.style.whiteSpace = "pre-line";
+		    
 			
 			const head =
-             (cfg.bandwidthUSD < 1000) || !window.dzv.tooltip_snap ? 
+             one_digit ? 
 			  `Estimated band ($${dif}): \n${(100 * prob).toFixed(1)}% earn $${(x0/1000).toFixed(1)}k–$${(x1/1000).toFixed(1)}k;`
 			  :
 			  `Estimated band ($${dif}): \n${(100 * prob).toFixed(1)}% earn $${x0/1000}k–$${x1/1000}k;`;
 			  
 			const below = (pc0 > 0)
-			  ? ` ${pc0.toFixed(1)}% earn less;`
+			  ? ` ${pc0.toFixed(1)}% less;`
 			  : ``;
 
 			const above = (pc1 > 0)
-			  ? ` ${pc1.toFixed(1)}% earn more;`
+			  ? ` ${pc1.toFixed(1)}% more;`
 			  : ``;
 			  
 			  
 			const s = head + below + above;
 			rowBand.textContent = s.trim().slice(0, -1) + '.';
-			rowBand.style.lineHeight = "1.4";
+			
 			                      
 		    
 		  }
