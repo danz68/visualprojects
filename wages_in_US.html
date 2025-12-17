@@ -5052,7 +5052,16 @@
 }
 
 // unchanged API; now robust to packed vs expanded path syntax
+
+const lerpPathDCache = new Map();
+
 function lerpPathD(d0, d1, t) {
+ 
+ const cacheKey = d0+"XX"+d1+"XX"+String(Math.round(t*20));
+ if (lerpPathDCache.has(cacheKey)) {
+    return lerpPathDCache.get(cacheKey);
+  }
+  
   d0 = normalizePathDStrict(d0);
   d1 = normalizePathDStrict(d1);
 
@@ -5076,7 +5085,9 @@ function lerpPathD(d0, d1, t) {
       out[i] = String(lerp(+a, +b, t));
     }
   }
-  return out.join(" ");
+  const oo = out.join(" ");
+  lerpPathDCache.set(cacheKey, oo);
+  return oo;
 }
 
 
@@ -5939,7 +5950,8 @@ window.dzv.auto_hide_overlap = true;
 	
 	function txt_scale() {
 		
-		const cs = getComputedStyle(svg);
+		//const cs = getComputedStyle(svg);
+		//return parseFloat(cs.getAttribute("--ss"));
 		
 		const parent = svg.parentElement;
 		if (!parent) return 1;
@@ -6015,23 +6027,66 @@ window.dzv.auto_hide_overlap = true;
     return g;
   }
 
-  function bringLayerFront(axes, layerLab) {
-    svg.appendChild(layerLab);
-	return;
-    if (!axes || !layerLab) return;
+function bringLayerFront(axes, layerLab) {
+  if (!layerLab) return;
 
-    const hover = axes.querySelector("g#dzv-hover-highlight-layer");
-    if (hover && hover.parentNode === axes) {
-      if (layerLab.parentNode === axes) axes.insertBefore(layerLab, hover);
-      return;
-    }
-    if (layerLab.parentNode === axes) axes.appendChild(layerLab);
-  }
+  // keep your semantics: move to the end of `svg`
+  const parent = svg;
 
-  function getPlotBox(patchPath) {
+  // already on top -> do nothing (no DOM mutation)
+  if (parent.lastElementChild === layerLab) return;
+
+  parent.appendChild(layerLab);
+}
+
+
+  function getPlotBox_(patchPath) {
     const bb = patchPath.getBBox();
     return { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
   }
+// Drop-in: caches getBBox(), auto-invalidates when the element’s geometry-related attrs change.
+// No manual invalidate calls needed.
+
+const _plotBoxCache = new WeakMap(); // el -> { valid:boolean, box:{x,y,width,height}, obs:MutationObserver }
+
+function getPlotBox(patchPath) {
+  if (!patchPath) return { x: 0, y: 0, width: 0, height: 0 };
+
+  let rec = _plotBoxCache.get(patchPath);
+  if (rec && rec.valid) return rec.box;
+
+  let bb;
+  try {
+    bb = patchPath.getBBox();
+  } catch (_) {
+    return { x: 0, y: 0, width: 0, height: 0 };
+  }
+
+  const box = { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
+
+  if (!rec) {
+    rec = { valid: true, box, obs: null };
+
+    const obs = new MutationObserver(() => {
+      const r = _plotBoxCache.get(patchPath);
+      if (r) r.valid = false;
+    });
+
+    // Invalidate on the common “bbox can change” knobs for a path
+    obs.observe(patchPath, {
+      attributes: true,
+      attributeFilter: ["d", "transform", "style", "class", "stroke-width", "vector-effect"]
+    });
+
+    rec.obs = obs;
+    _plotBoxCache.set(patchPath, rec);
+  } else {
+    rec.box = box;
+    rec.valid = true;
+  }
+
+  return box;
+}
 
   function usdToX_current(usd, view, dzv) {
     const u = (usd - view.usd_min) / (view.usd_max - view.usd_min);
@@ -6270,7 +6325,7 @@ function PrefixMarker(textEl, label, v, marker = "*", highlight_part = "") {
 }
 
 
-  function setTextStyle(state, t, v, fontSizeUserUnits) {
+  function setTextStyle(state, t, v, fontSizeUserUnits,ss) {
     const dzv = state.dzv;
 
     t.style.paintOrder = "stroke fill";
@@ -6284,7 +6339,7 @@ function PrefixMarker(textEl, label, v, marker = "*", highlight_part = "") {
     t.setAttribute("fill", fill);
 
 
-	const ss = txt_scale();	    
+	//const ss = txt_scale();	    
 	let fontPx =  fontSizeUserUnits*ss;//(window.medium_font_px);
 
 	t.setAttribute('font-family', window.medium_face); //state.fontFamily
@@ -6315,7 +6370,7 @@ function PrefixMarker(textEl, label, v, marker = "*", highlight_part = "") {
 
 
   
-  function mplY_to_svgY(svg, vl) {
+  function mplY_to_svgY(svg, vl, b) {
   // Matplotlib-space patch2 vertical extent (given as attrs, same space as yc)
   const yTop_mpl = parseFloat(svg.getAttribute("ymin"));
   const yBot_mpl = parseFloat(svg.getAttribute("ymax"));
@@ -6324,9 +6379,9 @@ function PrefixMarker(textEl, label, v, marker = "*", highlight_part = "") {
   const yperc = 1.0 - (y_mpl-yTop_mpl)/(yBot_mpl-yTop_mpl);
 
   // SVG-space patch2 vertical extent (real pixel/user-unit coords in SVG)
-  const patch = svg.querySelector('g#figure_1 > g#axes_1 > g#patch_2 path');
-  if (!patch) throw new Error("patch2 path not found");
-  const b = patch.getBBox();
+  //const patch = svg.querySelector('g#figure_1 > g#axes_1 > g#patch_2 path');
+  //if (!patch) throw new Error("patch2 path not found");
+  //const b = patch.getBBox();
   const yTop_svg = b.y;
   const yBot_svg = b.y + b.height;
 
@@ -6409,7 +6464,7 @@ function measureUnclippedBBox(svg, textEl) {
  
 const _clamp_state = new WeakMap(); // textEl -> { ready,pending, baseX,baseY, lastDx,lastDy }
 
-function clampTextByXY(textEl, containerEl, padx = 0, pady = 0) {
+function clampTextByXY_(textEl, containerEl, padx = 0, pady = 0) {
   if (!textEl || !containerEl) return;
 
   let st = _clamp_state.get(textEl);
@@ -6544,11 +6599,197 @@ function clampTextByXY(textEl, containerEl, padx = 0, pady = 0) {
 
 
 
+// Requires: const _clamp_state = new WeakMap(); // textEl -> state
+
+function clampTextByXY(textEl, containerEl, padx = 0, pady = 0) {
+  if (!textEl || !containerEl) return;
+
+  let st = _clamp_state.get(textEl);
+  if (!st) {
+    st = {
+      ready: false, pending: false,
+      baseX: null, baseY: null, lastDx: 0, lastDy: 0,
+
+      // cached geometry at (baseX,baseY)
+      cacheKey: "",
+      wPx: 0, hPx: 0,
+      relLeft0: 0, relTop0: 0,        // bbox.left/top relative to container rect at base
+      invJ: null                       // 2x2 inverse Jacobian: maps (dxPx,dyPx)->(dxSvg,dySvg)
+    };
+    _clamp_state.set(textEl, st);
+  }
+
+  // ---- first effective run: wait for paint+fonts (NO movement yet) ----
+  if (!st.ready) {
+    if (st.pending) return;
+    st.pending = true;
+
+    void getComputedStyle(textEl).transform;
+    containerEl.getBoundingClientRect();
+    textEl.getBoundingClientRect();
+
+    const raf2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const fontsReady = (document.fonts && document.fonts.ready)
+      ? document.fonts.ready.catch(() => {})
+      : Promise.resolve();
+
+    Promise.all([raf2(), fontsReady]).then(() => {
+      st.ready = true;
+      st.pending = false;
+      clampTextByXY(textEl, containerEl, padx, pady);
+    });
+    return;
+  }
+
+  // ---- helpers ----
+  function getXY(el) {
+    const x = (el.x && el.x.baseVal && el.x.baseVal.length) ? el.x.baseVal.getItem(0).value : parseFloat(el.getAttribute("x") || "0");
+    const y = (el.y && el.y.baseVal && el.y.baseVal.length) ? el.y.baseVal.getItem(0).value : parseFloat(el.getAttribute("y") || "0");
+    return [x, y];
+  }
+  function setXY(el, x, y) {
+    el.setAttribute("x", x);
+    el.setAttribute("y", y);
+  }
+  function makeCacheKey(el) {
+    const cs = getComputedStyle(el);
+    // include anything that affects size and mapping: font, content, computed CSS transform, plus SVG screen CTM
+    let m = null;
+    try { m = (typeof el.getScreenCTM === "function") ? el.getScreenCTM() : null; } catch (_) { m = null; }
+    const ctm = m ? `${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}` : "null";
+    return [
+      el.textContent || "",
+      cs.fontFamily || "",
+      cs.fontStyle || "",
+      cs.fontWeight || "",
+      cs.fontSize || "",
+      cs.letterSpacing || "",
+      cs.wordSpacing || "",
+      cs.textAnchor || "",
+      cs.transform || "none",
+      ctm
+    ].join("|");
+  }
+  function buildCacheAtBase() {
+    // ensure at base (unclamped) for cache measurements
+    setXY(textEl, st.baseX, st.baseY);
+
+    const cons0 = containerEl.getBoundingClientRect();
+    const b0 = textEl.getBoundingClientRect();
+    if (!(cons0.width > 0 && cons0.height > 0 && b0.width > 0 && b0.height > 0)) return false;
+
+    st.wPx = b0.width;
+    st.hPx = b0.height;
+    st.relLeft0 = b0.left - cons0.left;
+    st.relTop0  = b0.top  - cons0.top;
+
+    const eps = 1; // SVG unit probe step
+
+    // probe X
+    setXY(textEl, st.baseX + eps, st.baseY);
+    const bx = textEl.getBoundingClientRect();
+
+    // probe Y
+    setXY(textEl, st.baseX, st.baseY + eps);
+    const by = textEl.getBoundingClientRect();
+
+    // restore base
+    setXY(textEl, st.baseX, st.baseY);
+
+    // J maps (dxSvg,dySvg) -> (dLeftPx,dTopPx)
+    const a = (bx.left - b0.left) / eps; // d(left)/d(x)
+    const c = (bx.top  - b0.top ) / eps; // d(top )/d(x)
+    const b = (by.left - b0.left) / eps; // d(left)/d(y)
+    const d = (by.top  - b0.top ) / eps; // d(top )/d(y)
+
+    const det = a * d - b * c;
+    if (!isFinite(det) || Math.abs(det) < 1e-9) return false;
+
+    // invJ maps (dxPx,dyPx) -> (dxSvg,dySvg)
+    st.invJ = {
+      a:  d / det,
+      b: -b / det,
+      c: -c / det,
+      d:  a / det
+    };
+
+    return true;
+  }
+
+  // ---- establish / refresh base (prevents “cumulative” clamp) ----
+  const [curX, curY] = getXY(textEl);
+  if (st.baseX === null || st.baseY === null) {
+    st.baseX = curX; st.baseY = curY; st.lastDx = 0; st.lastDy = 0;
+    st.cacheKey = ""; // force cache build
+  } else {
+    const expX = st.baseX + st.lastDx;
+    const expY = st.baseY + st.lastDy;
+    if (Math.abs(curX - expX) > 1e-6 || Math.abs(curY - expY) > 1e-6) {
+      // external reposition -> accept as new base and rebuild cache
+      st.baseX = curX; st.baseY = curY; st.lastDx = 0; st.lastDy = 0;
+      st.cacheKey = ""; // force cache build
+    }
+  }
+
+  // ---- (re)build cached size + Jacobian only when something relevant changes ----
+  const key = makeCacheKey(textEl);
+  if (key !== st.cacheKey || !st.invJ) {
+    st.cacheKey = key;
+    if (!buildCacheAtBase()) return;
+  }
+
+  // ---- clamp using cached bbox size + cached Jacobian (NO extra BCR probes) ----
+  const cons = containerEl.getBoundingClientRect();
+  if (!(cons.width > 0 && cons.height > 0)) return;
+
+  // predicted bbox at base (screen px)
+  const left0 = cons.left + st.relLeft0;
+  const top0  = cons.top  + st.relTop0;
+  const right0 = left0 + st.wPx;
+  const bottom0 = top0 + st.hPx;
+
+  const L = cons.left + padx,  R = cons.right - padx;
+  const T = cons.top  + pady,  B = cons.bottom - pady;
+
+  let dxPx = 0, dyPx = 0;
+
+  if (right0 > R) {
+    dxPx = -(right0 - R);
+    if (left0 + dxPx < L) dxPx = (L - left0);
+  }
+  if (left0 < L) dxPx = (L - left0);
+
+  if (bottom0 > B) {
+    dyPx = -(bottom0 - B);
+    if (top0 + dyPx < T) dyPx = (T - top0);
+  }
+  if (top0 < T) dyPx = (T - top0);
+
+  let tx = st.baseX;
+  let ty = st.baseY;
+
+  if (!dxPx && !dyPx) {
+    st.lastDx = 0; st.lastDy = 0;
+  } else {
+    const inv = st.invJ;
+    const dxSvg = inv.a * dxPx + inv.b * dyPx;
+    const dySvg = inv.c * dxPx + inv.d * dyPx;
+
+    st.lastDx = dxSvg;
+    st.lastDy = dySvg;
+
+    tx = st.baseX + st.lastDx;
+    ty = st.baseY + st.lastDy;
+  }
+
+  // single final apply (no intermediate "probe" setXY calls)
+  if (Math.abs(curX - tx) > 1e-6 || Math.abs(curY - ty) > 1e-6) {
+    setXY(textEl, tx, ty);
+  }
+}
 
 
-
-
-  function tryPlaceOne(state, rec, items, plot, placedBoxes, mode) {
+  function tryPlaceOne(state, rec, items, plot, placedBoxes, mode, ss) {
     const v = rec.v;
     const t = rec.t;
 	let midet=0, madet=0;
@@ -6577,7 +6818,7 @@ function clampTextByXY(textEl, containerEl, padx = 0, pady = 0) {
 
     let x0 = usdToX_current(usd, state.view, state.dzv);
 	const vio = state.svg.querySelector(v.select_meta_string);
-	const y_svg_unfocused = mplY_to_svgY(svg, vio);
+	const y_svg_unfocused = mplY_to_svgY(svg, vio, plot);
     let y0 = mapYThroughFocusWrapper(svg, y_svg_unfocused);
     const scl = (mode === "focus") ? (madet - v.workers)/(madet-midet):0;
     let fs0 = (mode !== "focus") ? state.axisFontPx : (v.level<=1 ? state.axisFontPx : state.axisFontPx - (scl**5) * (state.axisFontPx - state.minFont));
@@ -6600,7 +6841,7 @@ function clampTextByXY(textEl, containerEl, padx = 0, pady = 0) {
 		//x0 += state.axisFontPx/4;
 		
 
-		setTextStyle(state, t, v, fs0);
+		setTextStyle(state, t, v, fs0, ss);
 		t.setAttribute("text-anchor", "start");
 		//t.setAttribute("visibility", "visible");
 
@@ -6647,7 +6888,7 @@ function clampTextByXY(textEl, containerEl, padx = 0, pady = 0) {
 
 
      
-        let mark = setTextStyle(state, t, v, fs);
+        let mark = setTextStyle(state, t, v, fs, ss);
 
         t.setAttribute("x", String(c.x));
         t.setAttribute("y", String(c.y));
@@ -6855,14 +7096,14 @@ function clampTextByXY(textEl, containerEl, padx = 0, pady = 0) {
 		  state.rec.forEach((rec, id) => {
 			   rec.t.setAttribute("visibility", "hidden");
 			});
-		  //dzvLabelsOnWarpFrame(); 
+
 		  
 		  } catch (_) {}
         }
       });
     } catch (_) {}
 
-    //dzvLabelsOnWarpFrame();
+
   }
   let runs=0;
   let time_first;
@@ -6883,15 +7124,18 @@ function clampTextByXY(textEl, containerEl, padx = 0, pady = 0) {
       return;
     }
 	
-	   
-	if (runs==1)
+	 
+	if (runs===1)
 	 {
+	   void svg.offsetWidth;
 	   state.layer_labels.style.opacity = "0";
 
 	  }
     bringLayerFront(state.axes, state.layer_labels);
 
     const mode = state.focusMajorId ? "focus" : "global";
+	
+  
 	const plot = getPlotBox(state.patchPath);
 	const items = create_maximal_list(state)
 	
@@ -6902,6 +7146,7 @@ function clampTextByXY(textEl, containerEl, padx = 0, pady = 0) {
     const used = new Set();
 
     let placedCount = 0;
+	const ss = txt_scale();
     for (let i = 0; i < items.length; i++) {
       if (placedCount >= target && target > 0) break;
 
@@ -6910,7 +7155,7 @@ function clampTextByXY(textEl, containerEl, padx = 0, pady = 0) {
       if (!rec) continue;
 	  
 
-      const ok = tryPlaceOne(state, rec, items, plot, placed, mode);
+      const ok = tryPlaceOne(state, rec, items, plot, placed, mode,ss);
       if (ok) {
         used.add(v.id);
         placedCount++;
@@ -6927,13 +7172,15 @@ function clampTextByXY(textEl, containerEl, padx = 0, pady = 0) {
 
 	if (runs===1)
 	 {
-      
-	  
+
+		
        time_first = window.setTimeout(function () {
 			time_first = null;
+			void svg.offsetWidth;
 			state.layer_labels.style.opacity="1";
 			void svg.offsetWidth;
-		  }, 20);
+			
+		  }, 1);
          
 	  }
 	  
@@ -6944,6 +7191,7 @@ let _labels_busy = false;
 let _labels_rerun = false;
 
 function dzvLabelsOnWarpFrame() {
+  if (!window.dzv.fit_gate.firstDone) return;
   // --- guard: prevent concurrent/interfering runs ---
   if (_labels_busy) { _labels_rerun = true; return; }
   _labels_busy = true;
@@ -8747,6 +8995,9 @@ window.dzv.show_highlight = highlight_stuff.showForHit;
 
 
 function dzvApplyWarpingMeta(svg, t) {
+  if (window.dzv.hide_tip) window.dzv.hide_tip();
+  if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+	
   if (!svg) throw new Error("dzvApplyWarpingMeta: missing svg");
   const geomMeta = svg.querySelector("g#dzv-geom-metadata");
   if (!geomMeta) throw new Error("dzvApplyWarpingMeta: missing g#dzv-geom-metadata");
@@ -9347,15 +9598,16 @@ function dzvInitMajorFocus(svg, opts = {}) {
         wrapper.setAttribute(
           "transform", `matrix(1 0 0 ${s.syTarget} 0 ${targetYc - s.syTarget * baseCenterY})`
         );
-        if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+        
 		window.dzv.focusing=false;
 		if (window.dzv.hide_tip) window.dzv.hide_tip();
         if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+		if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
       }
     };
 
     state.raf = requestAnimationFrame(tick);
-    //if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+
     return true;
   }
 
@@ -9444,9 +9696,9 @@ function dzvInitMajorFocus(svg, opts = {}) {
       } else {
         state.raf = 0;
         clearFocusInstant();
-        if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 		if (window.dzv.hide_tip) window.dzv.hide_tip();
         if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+		if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
       }
     };
 
@@ -9566,7 +9818,12 @@ window.dzv.majorFocus = dzvInitMajorFocus(svg, {
 			
 			//const ss = MEDIUM_PX / FONT_BASE / Math.sqrt(smi) ;
 			const ss = Math.sqrt(MEDIUM_PX/FONT_BASE / smi);
-		    svg.style.setProperty('--ss', String(ss));
+			
+			let cs = window.getComputedStyle(svg);
+	
+	        const sse = cs.getPropertyValue("--ss");
+			if (sse !== String(ss))
+		      svg.style.setProperty('--ss', String(ss));
 
 			
 	  
@@ -9575,6 +9832,31 @@ window.dzv.majorFocus = dzvInitMajorFocus(svg, {
 	
 
 	
+    let one = 0;
+	
+	window.dzv.fit_gate = { firstDone: false, pending: false };
+
+	function _dzvAfterFitStableOnce(cb) {
+	  if (window.dzv.fit_gate.firstDone) {
+		requestAnimationFrame(cb);
+		return;
+	  }
+	  if (window.dzv.fit_gate.pending) return;
+	  window.dzv.fit_gate.pending = true;
+
+	  const fontsReady = (document.fonts && document.fonts.ready)
+		? document.fonts.ready.catch(() => {})
+		: Promise.resolve();
+
+	  // 2 RAFs = “after styles applied + after first paint”
+	  const raf2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+	  Promise.all([fontsReady, raf2()]).then(() => {
+		window.dzv.fit_gate.firstDone = true;
+		window.dzv.fit_gate.pending = false;
+		cb();
+	  });
+	}
 
     function fit() {
 	 
@@ -9586,7 +9868,11 @@ window.dzv.majorFocus = dzvInitMajorFocus(svg, {
 		const ch = rect.height;
 			  
       if (cw <= 0 || ch <= 0) return;
-
+	  
+	  
+	  let todo=0;
+      if (one===0)
+	  {
       svg.setAttribute("preserveAspectRatio", "none");
 
 	  svg.style.position   = "";       // or "static"
@@ -9599,42 +9885,55 @@ window.dzv.majorFocus = dzvInitMajorFocus(svg, {
       svg.style.maxHeight  = "100%";
   
       svg.style.pointerEvents = svg.style.pointerEvents || "auto";
+	  one = 1;
+	  todo+=1;
+	  }
+	 
 
       const sx = cw / VB.vw;
       const sy = ch / VB.vh;
 	  const s = Math.min(sx,sy);
 	  
+	  let cs = window.getComputedStyle(svg);
+	
+	  const ssx = cs.getPropertyValue("--sx");
+	  const ssy = cs.getPropertyValue("--sy");
 	  
-	  svg.style.setProperty("--sx", String(sx));
-	  svg.style.setProperty("--sy", String(sy));
+	  if ((ssx !== String(sx))  || (ssy !== String(sy)))
+	    {
+		  svg.style.setProperty("--sx", String(sx));
+		  svg.style.setProperty("--sy", String(sy));
+		  todo+=1;
+		}
 
 	  
-	  
+	  if (todo>0)
+	  {
 	  if (window.labelsAuto)
 	    {
 		  window.autosize();
 		}
 		
 	  if (typeof window !== "undefined" && typeof window.dzvRefreshLabels === "function")
-	    window.dzvRefreshLabels(); //do not remove!! ticks...
+	    {
+	      window.dzvRefreshLabels(); //do not remove!! ticks...
+		}
 		
-	
-
-	  
-	  //let browser_zoom = ((window.outerWidth - 10) / window.innerWidth);
-				
-	  //svg.style.setProperty("--ss", String(browser_zoom));
-	  
-	  svg.getBoundingClientRect();   // flush style/layout with new vars
-	  svg.getScreenCTM();            // flush CTM too (helps iOS)
 	  
 	  if (typeof window !== "undefined" && typeof window.dzvLabelsOnWarpFrame === "function") 
-  	    window.dzvLabelsOnWarpFrame();
-	  
+	    {
+  	     window.dzvLabelsOnWarpFrame();
+				 _dzvAfterFitStableOnce(() => {
+			// run the same code you currently run in fit for labels:
+			window.dzvLabelsOnWarpFrame();  // whatever your function is called
+		  });
+		  
+		}
+	  }
 
 
     }
-
+/*
     function eventToSvgPoint(evt) {
       const pt = svg.createSVGPoint();
       pt.x = evt.clientX; pt.y = evt.clientY;
@@ -9643,12 +9942,12 @@ window.dzv.majorFocus = dzvInitMajorFocus(svg, {
       const sp = pt.matrixTransform(ctm.inverse());
       return { x: sp.x, y: sp.y };
     }
-
+*/
     window.addEventListener("resize", fit, { passive: true });
     window.addEventListener("orientationchange", fit, { passive: true });
     document.addEventListener("fullscreenchange", fit);
 
-    window.SvgFitter = { fit, eventToSvgPoint };
+    //window.SvgFitter = { fit, eventToSvgPoint };
 
     if (document.readyState === "loading") {
 	  
@@ -11520,6 +11819,7 @@ const hub = dzvInitClickResolver(svg, {
 });
 
 </script>
+
 
 
 </body>
