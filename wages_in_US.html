@@ -7387,6 +7387,8 @@ function dzvInitHtmlTooltip(svg, opts = { showPercentileAtBandCenter: true }) {
   const STROKE_BASE = 2.0;
 
   const miniSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  
+  
   miniSvg.setAttribute("width", String(MINI_W));
   miniSvg.setAttribute("height", String(MINI_H));
   miniSvg.setAttribute("viewBox", `0 0 ${MINI_W} ${MINI_H}`);
@@ -7397,6 +7399,7 @@ function dzvInitHtmlTooltip(svg, opts = { showPercentileAtBandCenter: true }) {
   miniSvg.style.background = cfg.panelBg;
   miniSvg.style.touchAction = "none";
   miniSvg.style.cursor = "crosshair";
+  miniSvg.style.touchAction = "none";
 
   const miniBand = document.createElementNS("http://www.w3.org/2000/svg", "rect");
   miniBand.setAttribute("fill", "rgba(0,0,0,0.12)");
@@ -7430,6 +7433,7 @@ function dzvInitHtmlTooltip(svg, opts = { showPercentileAtBandCenter: true }) {
   tip.appendChild(miniWrap);
   
   document.body.appendChild(tip);
+  window.miniSvg = miniSvg;
   
    function dzvRobustSigmaFromIcdf(icdf) {
   const pLo = 0.023, pHi = 0.977;
@@ -7476,21 +7480,20 @@ function dzvBandLadderForMeta(meta) {
 rowBand.style.pointerEvents = "auto";
 window.dzv.tooltip_snap = true;
 
+
 miniSvg.addEventListener("pointerdown", (e) => {
-  // Only if the actual hit is inside rowBand
   if (!miniSvg.contains(e.target)) return;
-  
+
   const isPrimaryClick = (e.pointerType === "mouse") ? (e.button === 0) : true;
   if (!isPrimaryClick) return;
-	
-
+  
   e.preventDefault();
   e.stopPropagation();
-
-  window.dzv.tooltip_snap = !window.dzv.tooltip_snap;
-  //console.log(window.dzv.tooltip_snap);
+  
+  //actual action moved to global resolver on dblslick
+  //window.dzv.tooltip_snap = !window.dzv.tooltip_snap;
+  
 }, { capture: true });
-
 
 rowBand.addEventListener("pointerdown", (e) => {
   // Only if the actual hit is inside rowBand
@@ -7521,6 +7524,9 @@ rowMetaPre.addEventListener("pointerdown", (e) => {
   const isPrimaryClick = (e.pointerType === "mouse") ? (e.button === 0) : true;
   if (!isPrimaryClick) return;
   
+  e.preventDefault();
+  e.stopPropagation();
+  
   if (state.meta.level==2)
     {
      if (window.dzvFocusMajor)
@@ -7543,6 +7549,11 @@ rowMetaPre.addEventListener("pointerdown", (e) => {
 rowTitle.addEventListener("pointerdown", (e) => {
   // Only if the actual hit is inside rowBand
   if (!rowTitle.contains(e.target)) return;
+  const isPrimaryClick = (e.pointerType === "mouse") ? (e.button === 0) : true;
+  if (!isPrimaryClick) return;
+  
+  e.preventDefault();
+  e.stopPropagation();
   
   if (state.meta.level==1)
     {
@@ -8720,7 +8731,7 @@ function updateMini(meta, bandOrNull) {
   svg.addEventListener("pointerleave", onSvgPointerLeave_HoverDelay, { passive: true });
 
   miniSvg.addEventListener("pointermove", onMiniPointerMove, { passive: true });
-  //miniSvg.addEventListener("pointerdown", stop, { passive: true });
+  miniSvg.addEventListener("pointerdown", stop, { passive: true });
   tip.addEventListener("pointerdown", stop, { passive: true });
 
   window.addEventListener("keydown", onKeyDown);
@@ -11823,6 +11834,7 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
 }
 
 
+
 const svg = document.getElementById("dzv_gen");
 const axis_area = svg.querySelector(`g[id="matplotlib.axis_1"]`);
 const hub = dzvInitClickResolver(svg, {
@@ -11915,6 +11927,22 @@ const hub = dzvInitClickResolver(svg, {
 	    window.dzv.show_menu(clientX, clientY);
 	  }
   },
+});
+
+
+if (window.miniSvg)
+dzvInitClickResolver(window.miniSvg, {
+  hitTest: (e) => e.target,
+
+  // disable single for this element (or just leave it null)
+  onSingle: null,
+
+  onDouble: ({ originalEvent }) => {
+
+  try { window.dzv.tooltip_snap = !window.dzv.tooltip_snap; } catch (err) { console.error("toggle", err); }
+}
+
+
 });
 
 </script>
