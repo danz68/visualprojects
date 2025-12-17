@@ -7303,10 +7303,20 @@ function dzvInitHtmlTooltip(svg, opts = { showPercentileAtBandCenter: true }) {
     return svgView.usd_min + clamp01(u) * (svgView.usd_max - svgView.usd_min);
   }
 
+  let min_bw = 500;
   function gridBand(xUSD, bw) {
     const b = Math.max(1e-9, bw);
-    const k = Math.floor(xUSD / b);
-    const x0 = k * b;
+	let k, x0;
+	if (window.dzv.tooltip_snap)
+	  {
+        k = Math.floor(xUSD / b);
+		x0 = k * b;
+	  }
+	else 
+	  {
+	   k = Math.floor(xUSD / min_bw);
+       x0 = k * min_bw;
+	   }
     const x1 = x0 + b;
     const xc = x0 + 0.5 * b;
     return { x0, x1, xc };
@@ -7464,10 +7474,31 @@ function dzvBandLadderForMeta(meta) {
 // hook:
 
 rowBand.style.pointerEvents = "auto";
+window.dzv.tooltip_snap = true;
+
+miniSvg.addEventListener("pointerdown", (e) => {
+  // Only if the actual hit is inside rowBand
+  if (!miniSvg.contains(e.target)) return;
+  
+  const isPrimaryClick = (e.pointerType === "mouse") ? (e.button === 0) : true;
+  if (!isPrimaryClick) return;
+	
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  window.dzv.tooltip_snap = !window.dzv.tooltip_snap;
+  //console.log(window.dzv.tooltip_snap);
+}, { capture: true });
+
 
 rowBand.addEventListener("pointerdown", (e) => {
   // Only if the actual hit is inside rowBand
   if (!rowBand.contains(e.target)) return;
+  
+  const isPrimaryClick = (e.pointerType === "mouse") ? (e.button === 0) : true;
+  if (!isPrimaryClick) return;
+	
 
   e.preventDefault();
   e.stopPropagation();
@@ -7487,6 +7518,9 @@ rowBand.addEventListener("pointerdown", (e) => {
 rowMetaPre.addEventListener("pointerdown", (e) => {
   // Only if the actual hit is inside rowBand
   if (!rowMetaPre.contains(e.target)) return;
+  const isPrimaryClick = (e.pointerType === "mouse") ? (e.button === 0) : true;
+  if (!isPrimaryClick) return;
+  
   if (state.meta.level==2)
     {
      if (window.dzvFocusMajor)
@@ -8304,8 +8338,11 @@ function updateMini(meta, bandOrNull) {
 		//rowBand.textContent = `$${left} + Δ${dif}    |    ${wtxt}    |    p ≈ ${pc0.toFixed(1)}  +  Δ${(100*prob).toFixed(1)}%`;
 		  {
 		    rowBand.style.whiteSpace = "pre-line";
-
+			
 			const head =
+             (cfg.bandwidthUSD < 1000) || !window.dzv.tooltip_snap ? 
+			  `Estimated band ($${dif}): \n${(100 * prob).toFixed(1)}% earn $${(x0/1000).toFixed(1)}k–$${(x1/1000).toFixed(1)}k;`
+			  :
 			  `Estimated band ($${dif}): \n${(100 * prob).toFixed(1)}% earn $${x0/1000}k–$${x1/1000}k;`;
 			  
 			const below = (pc0 > 0)
@@ -8442,7 +8479,7 @@ function updateMini(meta, bandOrNull) {
     const svgX = (xPx - tx) / sx;
     return svgX_to_USD_linear(svgX);
   }
-  function stop(ev) { ev.stopPropagation(); }
+  //function stop(ev) { ev.stopPropagation(); }
 
   function onSvgPointerDown(ev, target) {
 
@@ -8683,7 +8720,7 @@ function updateMini(meta, bandOrNull) {
   svg.addEventListener("pointerleave", onSvgPointerLeave_HoverDelay, { passive: true });
 
   miniSvg.addEventListener("pointermove", onMiniPointerMove, { passive: true });
-  miniSvg.addEventListener("pointerdown", stop, { passive: true });
+  //miniSvg.addEventListener("pointerdown", stop, { passive: true });
   tip.addEventListener("pointerdown", stop, { passive: true });
 
   window.addEventListener("keydown", onKeyDown);
