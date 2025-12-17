@@ -11515,6 +11515,7 @@ form_search.addEventListener("submit", function (e) {
 // dzv_click_resolver.js
 // Unified single vs double vs context with "single delayed until sure".
 
+
 export function dzvInitClickResolver(rootEl, opts = {}) {
   if (!rootEl) throw new Error("dzvInitClickResolver: missing rootEl");
 
@@ -11547,6 +11548,7 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
     down: null,          // {id,t,x,y, pointerType, button, hitEl}
     lastTap: null,       // {t,x,y, pointerType, hitEl}
     singleTimer: 0,      // pending single fire
+    pendingSingle: null, // payload for single
     longPressTimer: 0,
     longPressFired: false,
   };
@@ -11561,11 +11563,21 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
 
   function clearSingle() {
     if (st.singleTimer) { clearTimeout(st.singleTimer); st.singleTimer = 0; }
+    st.pendingSingle = null;
   }
   function clearLongPress() {
     if (st.longPressTimer) { clearTimeout(st.longPressTimer); st.longPressTimer = 0; }
   }
   function fire(fn, payload) { if (fn) fn(payload); }
+
+  function firePendingSingleNow() {
+    if (!st.pendingSingle) return;
+    const payload = st.pendingSingle;
+    st.pendingSingle = null;
+    if (st.singleTimer) { clearTimeout(st.singleTimer); st.singleTimer = 0; }
+    st.lastTap = null;
+    fire(cfg.onSingle, payload);
+  }
 
   function armLongPress(e, hitEl) {
     clearLongPress();
@@ -11598,17 +11610,22 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
 
   function scheduleSingle(e, hitEl) {
     clearSingle();
-    const payload = {
+
+    st.pendingSingle = {
       hitEl,
       clientX: e.clientX,
       clientY: e.clientY,
       pointerType: e.pointerType || "mouse",
       originalEvent: e,
     };
-    // The key: delay single until dbl window has passed.
+
+    // delay single until dbl window has passed (unless we early-fire on move)
     st.singleTimer = setTimeout(() => {
       st.singleTimer = 0;
-      fire(cfg.onSingle, payload);
+      const payload = st.pendingSingle;
+      st.pendingSingle = null;
+      st.lastTap = null;
+      if (payload) fire(cfg.onSingle, payload);
     }, cfg.dblMaxMs);
   }
 
@@ -11635,8 +11652,6 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
       return;
     }
 
-    //try { rootEl.setPointerCapture?.(e.pointerId); } catch (_) {}
-
     st.down = {
       id: e.pointerId,
       t: nowMs(),
@@ -11652,13 +11667,26 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
 
   function onPointerMoveCapture(e) {
     if (destroyed) return;
-    if (!st.down || st.down.id !== e.pointerId) return;
 
-    const moved2 = dist2(st.down.x, st.down.y, e.clientX, e.clientY);
-    if (moved2 > cfg.longPressMovePx * cfg.longPressMovePx) clearLongPress();
+    // while down: cancel long-press if moved too much
+    if (st.down && st.down.id === e.pointerId) {
+      const moved2 = dist2(st.down.x, st.down.y, e.clientX, e.clientY);
+      if (moved2 > cfg.longPressMovePx * cfg.longPressMovePx) clearLongPress();
+      return;
+    }
+
+    // while waiting for a possible double: if pointer leaves dbl radius, single can fire early
+    if (st.singleTimer && st.lastTap && st.pendingSingle) {
+      const pt = e.pointerType || "mouse";
+      if (pt === st.lastTap.pointerType) {
+        const d2 = dist2(st.lastTap.x, st.lastTap.y, e.clientX, e.clientY);
+        if (d2 > cfg.dblMaxDistPx * cfg.dblMaxDistPx) {
+          firePendingSingleNow();
+        }
+      }
+    }
   }
 
-	  
   function onPointerUpCapture(e) {
     if (destroyed) return;
     if (!st.down || st.down.id !== e.pointerId) return;
@@ -11690,7 +11718,7 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
     }
 
     if (isDouble) {
-      clearSingle();               // cancel pending single (the whole point)
+      clearSingle();               // cancel pending single
       st.lastTap = null;
       fire(cfg.onDouble, {
         hitEl,
@@ -11719,10 +11747,6 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
   function onContextMenuCapture(e) {
     if (destroyed) return;
     if (!cfg.suppressNativeContextMenu) return;
-
-    // If native contextmenu is about to happen anywhere over your root,
-    // route it into onContext and cancel pending single.
-    // (Useful on some browsers that still emit contextmenu after long-press.)
     if (!isEventInRoot(e)) return;
 
     clearSingle();
@@ -11740,7 +11764,6 @@ export function dzvInitClickResolver(rootEl, opts = {}) {
     });
   }
 
-  // Capture-phase so overlays or inner elements don’t break sequencing.
   document.addEventListener("pointerdown", onPointerDownCapture, true);
   document.addEventListener("pointermove", onPointerMoveCapture, true);
   document.addEventListener("pointerup", onPointerUpCapture, true);
