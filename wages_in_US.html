@@ -5214,6 +5214,7 @@ function is_visible_spec(p)
 }
 
 function applyWarping(root, t) {
+/*
   _visEpoch++;
   if (t>0 && t<1)
   {
@@ -5235,7 +5236,7 @@ function applyWarping(root, t) {
     });
 	
   }
-  else
+  else */
   {
     applyWarpingFull(root, t);
   }
@@ -9314,7 +9315,7 @@ function dzvApplyWarpingMeta(svg, t) {
   if (window.dzv.hide_tip) window.dzv.hide_tip();
   if (window.dzv.hide_highlight) window.dzv.hide_highlight();
   }
-	
+	an_end = true;
   if (!svg) throw new Error("dzvApplyWarpingMeta: missing svg");
   const geomMeta = svg.querySelector("g#dzv-geom-metadata");
   if (!geomMeta) throw new Error("dzvApplyWarpingMeta: missing g#dzv-geom-metadata");
