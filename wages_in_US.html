@@ -7547,6 +7547,7 @@ miniSvg.addEventListener("contextmenu", (e) => {
   e.preventDefault();
   // On mobile, long-press often triggers both timer and contextmenu.
   if (_mini_lp_fired) { _mini_lp_fired = false; return; }
+  _miniCancelLongPress();
   dzvCycleMiniRepresentation();
 }, { capture: true });
 
@@ -7567,6 +7568,9 @@ if (!_mini_ctx_win_bound) {
       // On mobile, long-press often triggers both timer and contextmenu.
       if (_mini_lp_fired) { _mini_lp_fired = false; return; }
 
+      
+
+      _miniCancelLongPress();
       dzvCycleMiniRepresentation();
     } catch (_) {}
   }, { capture: true });
