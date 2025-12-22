@@ -7528,6 +7528,8 @@ function dzvCycleMiniRepresentation() {
   const m = state.activeMeta || state.meta;
   if (m) updateMini(m, state.lastBand || null);
 }
+
+/*
 let _mini_lp_timer = 0;
 
 
@@ -7550,10 +7552,10 @@ function delayedUpdateMini(e) {
   
   
 }
- 
+
 
 window.dzv.updateMini = delayedUpdateMini;
-
+ */
 /*
 let _mini_lp_timer = 0;
 let _mini_lp_pid = -1;
@@ -7628,8 +7630,330 @@ miniSvg.addEventListener("pointermove", (e) => {
   const dx = e.clientX - _mini_lp_x0;
   const dy = e.clientY - _mini_lp_y0;
   if ((dx * dx + dy * dy) > (6 * 6)) _miniCancelLongPress();
-}, { capture: true });*/
+}, { capture: true });
 // -----------------------------------------------------------------------------
+*/
+
+// Desktop preserved: right-click (contextmenu) still cycles.
+// Mobile: long-tap only (pointerdown timer -> fire while still pressed; pointerup/cancel cancels).
+// Also de-dupes “mobile long-tap then delayed contextmenu”.
+
+// FIX: on mobile, the browser can emit a contextmenu BEFORE your timer fires.
+// So: if we see ANY recent touch/pen pointerdown, we BLOCK ALL contextmenu-triggered cycling
+// for a while (and preventDefault so the menu doesn’t show). Only the timer is allowed to fire.
+
+function dzvBindMiniSvgCycleP(miniSvg, dzvCycleMiniRepresentation, opts) {
+  opts = opts || {};
+  const LONG_MS   = (opts.longPressMs != null) ? opts.longPressMs : 520;
+  const MOVE_PX   = (opts.moveCancelPx != null) ? opts.moveCancelPx : 7;
+  const GATE_MS   = (opts.gateMs != null) ? opts.gateMs : 200;                 // de-dupe desktop (mini vs window)
+  const SUP_CTXMS = (opts.suppressTouchContextMs != null) ? opts.suppressTouchContextMs : 2500; // BLOCK ctxmenu after touch down
+  const WIN_FALLBACK = (opts.useWindowContextmenuFallback != null) ? !!opts.useWindowContextmenuFallback : true;
+
+  try { miniSvg.style.touchAction = "none"; } catch (_) {}
+
+  let lp_timer = 0;
+  let lp_pid   = -1;
+  let lp_down  = false;
+  let x0 = 0, y0 = 0;
+  let lp_fired = false;
+
+  let last_ctx_fire_at = 0;
+
+  // NEW: hard-block contextmenu actions after ANY touch/pen down (covers ctxmenu-before-timer cases)
+  let touch_ctx_block_until = 0;
+
+  function _now() {
+    return (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+  }
+
+  function _cancelLP() {
+    if (lp_timer) { clearTimeout(lp_timer); lp_timer = 0; }
+    lp_pid = -1;
+    lp_down = false;
+    lp_fired = false;
+  }
+
+  function _isInMiniRect(clientX, clientY) {
+    try {
+      const r = miniSvg.getBoundingClientRect();
+      if (!r || r.width <= 0 || r.height <= 0) return false;
+      return (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom);
+    } catch (_) { return false; }
+  }
+
+  function _ctxBlockedNow() {
+    return _now() < touch_ctx_block_until;
+  }
+
+  function _fireContextmenu() {
+    const t = _now();
+    if ((t - last_ctx_fire_at) < GATE_MS) return; // de-dupe mini vs window
+    last_ctx_fire_at = t;
+    dzvCycleMiniRepresentation();
+  }
+
+  function onMiniContextmenu(e) {
+    if (!miniSvg.contains(e.target)) return;
+
+    // Always prevent the browser menu over miniSvg.
+    e.preventDefault();
+
+    // Mobile/pen: NEVER allow contextmenu to trigger cycling.
+    if (_ctxBlockedNow()) { e.stopPropagation(); return; }
+
+    _fireContextmenu();
+  }
+
+  function onWinContextmenu(e) {
+    if (!WIN_FALLBACK) return;
+    if (!_isInMiniRect(e.clientX, e.clientY)) return;
+
+    // Always prevent the browser menu over miniSvg rect.
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Mobile/pen: NEVER allow contextmenu to trigger cycling.
+    if (_ctxBlockedNow()) return;
+
+    _fireContextmenu();
+  }
+
+  function onPointerDown(e) {
+    if (!miniSvg.contains(e.target)) return;
+    if (e.pointerType === "mouse") return;
+
+    if (e.cancelable) e.preventDefault();
+
+    // Block contextmenu-triggered cycling for a while starting NOW (even if timer hasn't fired yet).
+    touch_ctx_block_until = _now() + SUP_CTXMS;
+
+    // Start long-press timer
+    _cancelLP();
+    lp_pid  = e.pointerId;
+    lp_down = true;
+    lp_fired = false;
+    x0 = e.clientX;
+    y0 = e.clientY;
+
+    try { miniSvg.setPointerCapture(e.pointerId); } catch (_) {}
+
+    lp_timer = setTimeout(() => {
+      lp_timer = 0;
+      if (!lp_down || lp_pid < 0 || lp_fired) return;
+
+      // Fire ONLY from timer while still down
+      lp_fired = true;
+      lp_pid = -1;
+      lp_down = false;
+
+      dzvCycleMiniRepresentation();
+    }, LONG_MS);
+  }
+
+  function onPointerUp(e) {
+    if (e.pointerType === "mouse") return;
+    if (e.pointerId !== lp_pid) return;
+    _cancelLP(); // ONLY cancel
+  }
+
+  function onPointerCancel(e) {
+    if (e.pointerType === "mouse") return;
+    if (e.pointerId !== lp_pid) return;
+    _cancelLP(); // ONLY cancel
+  }
+
+  function onPointerMove(e) {
+    if (!lp_timer) return;
+    if (e.pointerType === "mouse") return;
+    if (e.pointerId !== lp_pid) return;
+
+    if (e.cancelable) e.preventDefault();
+
+    const dx = e.clientX - x0;
+    const dy = e.clientY - y0;
+    const r = MOVE_PX;
+    if ((dx * dx + dy * dy) > (r * r)) _cancelLP();
+  }
+
+  miniSvg.addEventListener("contextmenu", onMiniContextmenu, { capture: true });
+  if (WIN_FALLBACK) window.addEventListener("contextmenu", onWinContextmenu, { capture: true });
+
+  miniSvg.addEventListener("pointerdown", onPointerDown, { capture: true, passive: false });
+  miniSvg.addEventListener("pointermove", onPointerMove, { capture: true, passive: false });
+  miniSvg.addEventListener("pointerup", onPointerUp, { capture: true });
+  miniSvg.addEventListener("pointercancel", onPointerCancel, { capture: true });
+
+  return function dzvUnbindMiniSvgCycle() {
+    miniSvg.removeEventListener("contextmenu", onMiniContextmenu, { capture: true });
+    if (WIN_FALLBACK) window.removeEventListener("contextmenu", onWinContextmenu, { capture: true });
+
+    miniSvg.removeEventListener("pointerdown", onPointerDown, { capture: true });
+    miniSvg.removeEventListener("pointermove", onPointerMove, { capture: true });
+    miniSvg.removeEventListener("pointerup", onPointerUp, { capture: true });
+    miniSvg.removeEventListener("pointercancel", onPointerCancel, { capture: true });
+
+    _cancelLP();
+  };
+}
+
+// usage:
+// dzvBindMiniSvgCycleDesktopAndMobile(miniSvg, dzvCycleMiniRepresentation);
+
+function dzvBindMiniSvgCycle(miniSvg, dzvCycleMiniRepresentation, opts) {
+  opts = opts || {};
+  const LONG_MS = (opts.longPressMs != null) ? opts.longPressMs : 520;
+  const MOVE_PX = (opts.moveCancelPx != null) ? opts.moveCancelPx : 7;
+  const GATE_MS = (opts.gateMs != null) ? opts.gateMs : 200;
+  const WIN_FALLBACK = (opts.useWindowRightClickFallback != null) ? !!opts.useWindowRightClickFallback : true;
+
+  try { miniSvg.style.touchAction = "none"; } catch (_) {}
+  try { if (!miniSvg.style.pointerEvents) miniSvg.style.pointerEvents = "auto"; } catch (_) {}
+
+  let lp_timer = 0;
+  let lp_pid   = -1;
+  let lp_down  = false;
+  let x0 = 0, y0 = 0;
+
+  let last_fire_at = 0;
+
+  function now() {
+    return (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+  }
+
+  function gateFire() {
+    const t = now();
+    if ((t - last_fire_at) < GATE_MS) return;
+    last_fire_at = t;
+    dzvCycleMiniRepresentation();
+  }
+
+  function cancelLP() {
+    if (lp_timer) { clearTimeout(lp_timer); lp_timer = 0; }
+    lp_pid = -1;
+    lp_down = false;
+  }
+
+  function isInMiniRect(clientX, clientY) {
+    try {
+      const r = miniSvg.getBoundingClientRect();
+      if (!r || r.width <= 0 || r.height <= 0) return false;
+      return (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom);
+    } catch (_) { return false; }
+  }
+
+  // ---------- Desktop: RIGHT BUTTON (button==2) on pointerdown
+  function onMiniPointerDown(e) {
+    if (!miniSvg.contains(e.target)) return;
+
+    if (e.pointerType === "mouse") {
+      if (e.button !== 2) return;
+      if (e.cancelable) e.preventDefault();
+      gateFire();
+      return;
+    }
+
+    // ---------- Mobile/Pen: long-tap timer (fires while still DOWN)
+    if (e.cancelable) e.preventDefault();
+
+    cancelLP();
+    lp_pid = e.pointerId;
+    lp_down = true;
+    x0 = e.clientX;
+    y0 = e.clientY;
+
+    try { miniSvg.setPointerCapture(e.pointerId); } catch (_) {}
+
+    lp_timer = setTimeout(() => {
+      lp_timer = 0;
+      if (!lp_down || lp_pid < 0) return;  // MUST still be down
+      lp_pid = -1;
+      lp_down = false;
+      dzvCycleMiniRepresentation();        // fires while down (timer)
+    }, LONG_MS);
+  }
+
+  function onMiniPointerMove(e) {
+    if (!lp_timer) return;
+    if (e.pointerType === "mouse") return;
+    if (e.pointerId !== lp_pid) return;
+
+    if (e.cancelable) e.preventDefault();
+
+    const dx = e.clientX - x0;
+    const dy = e.clientY - y0;
+    const r = MOVE_PX;
+    if ((dx * dx + dy * dy) > (r * r)) cancelLP();
+  }
+
+  function onMiniPointerUp(e) {
+    if (e.pointerType === "mouse") return;
+    if (e.pointerId !== lp_pid) return;
+    cancelLP(); // ONLY cancel
+  }
+
+  function onMiniPointerCancel(e) {
+    if (e.pointerType === "mouse") return;
+    if (e.pointerId !== lp_pid) return;
+    cancelLP(); // ONLY cancel
+  }
+
+  // Prevent browser context menu, but NEVER trigger cycling from it.
+  function onMiniContextmenu(e) {
+    if (!miniSvg.contains(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  // ---------- Window fallback for desktop right-click when miniSvg can't receive events
+  function onWinPointerDown(e) {
+    // only mouse right button
+    if (e.pointerType !== "mouse") return;
+    if (e.button !== 2) return;
+    if (!isInMiniRect(e.clientX, e.clientY)) return;
+
+    if (e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    gateFire();
+  }
+
+  function onWinContextmenu(e) {
+    // only suppress menu over the mini rect; NEVER trigger cycle
+    if (!isInMiniRect(e.clientX, e.clientY)) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  // Bind
+  miniSvg.addEventListener("pointerdown", onMiniPointerDown, { capture: true, passive: false });
+  miniSvg.addEventListener("pointermove", onMiniPointerMove, { capture: true, passive: false });
+  miniSvg.addEventListener("pointerup", onMiniPointerUp, { capture: true });
+  miniSvg.addEventListener("pointercancel", onMiniPointerCancel, { capture: true });
+  miniSvg.addEventListener("contextmenu", onMiniContextmenu, { capture: true });
+
+  if (WIN_FALLBACK) {
+    window.addEventListener("pointerdown", onWinPointerDown, { capture: true, passive: false });
+    window.addEventListener("contextmenu", onWinContextmenu, { capture: true });
+  }
+
+  return function dzvUnbindMiniSvgCycle() {
+    miniSvg.removeEventListener("pointerdown", onMiniPointerDown, { capture: true });
+    miniSvg.removeEventListener("pointermove", onMiniPointerMove, { capture: true });
+    miniSvg.removeEventListener("pointerup", onMiniPointerUp, { capture: true });
+    miniSvg.removeEventListener("pointercancel", onMiniPointerCancel, { capture: true });
+    miniSvg.removeEventListener("contextmenu", onMiniContextmenu, { capture: true });
+
+    if (WIN_FALLBACK) {
+      window.removeEventListener("pointerdown", onWinPointerDown, { capture: true });
+      window.removeEventListener("contextmenu", onWinContextmenu, { capture: true });
+    }
+
+    cancelLP();
+  };
+}
+
+// usage:
+ dzvBindMiniSvgCycle(miniSvg, dzvCycleMiniRepresentation);
 
 
 rowBand.addEventListener("pointerdown", (e) => {
@@ -12738,7 +13062,7 @@ dzvInitClickResolver(window.miniSvg, {
 },
 onContext: ({ originalEvent })=>
 {
-  if (window.dzv.updateMini) window.dzv.updateMini(originalEvent);
+  //if (window.dzv.updateMini) window.dzv.updateMini(originalEvent);
 }
 
 
