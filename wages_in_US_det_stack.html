@@ -9994,9 +9994,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	         }
 			 
 			const rat1 = window.dzv.circle_kx/kx;
-			//console.log(window.dzv.circle_kx, kx);
-			
-			console.log(rat1);
+
 			
 			if (rat1 < 1.0/1.1 || rat1 > 1.1 ) 
 			 {
@@ -10522,6 +10520,8 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 
 	          if (top_label) setSvgTextSmart(top_label, crt_text);
 	          if (top_label) top_label.style.fill = crt_color;
+			  if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+			  if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
 	          window.dzv.animating = false;
 	        }, 2500);
 
