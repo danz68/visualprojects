@@ -9137,6 +9137,8 @@ window.dzv._computeOptimizedEllipseY=_computeOptimizedEllipseY;
 
 	      const _dzv = (typeof window !== "undefined") ? (window.dzv || (window.dzv = {})) : {};
 	      const _wf = (Number.isFinite(_dzv.warpingFactor) ? _dzv.warpingFactor : 0);
+		  
+		  
 		  let csss = window.getComputedStyle(svg);
 		  const ssx = csss.getPropertyValue("--sx");
 		  const ssy = csss.getPropertyValue("--sy");
@@ -9960,7 +9962,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
        
 		//introduce light rearrangmeent in case the scale is changed for circles.Items available, so rx,rx,cxmincxmax,x,y are al available.
 		
-		let kx=1, ky=1;
+		let kx=window.dzv.circle_kx, ky=window.dzv.circle_ky;
 		
 			
 		
@@ -9994,9 +9996,11 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 			const rat1 = window.dzv.circle_kx/kx;
 			//console.log(window.dzv.circle_kx, kx);
 			
+			console.log(rat1);
+			
 			if (rat1 < 1.0/1.1 || rat1 > 1.1 ) 
 			 {
-
+              
 			  window.dzv._computeOptimizedEllipseY(items, is_circle, kx, ky);
 			
 			  const _map = is_circle? _dzv._circleYOptAbsByIdC:_dzv._circleYOptAbsById;
