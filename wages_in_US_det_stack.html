@@ -7242,10 +7242,15 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	  }
      
 	 
-	 
 
-
+	
+      window.dzv.circle_kx = 1;
+	  window.dzv.circle_ky = 1;
+	  
 	  function dzvInitCircleMorphCacheOnce() {
+		
+	
+	  let cellY=1;
 	    if (!window.dzv) window.dzv = {};
 	    if (window.dzv._circleMorphReady) return;
 		if (!roty_svg)
@@ -7752,8 +7757,11 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 
 
 
-
-function _computeOptimizedEllipseY(items, is_circle = false) {
+let YEnvelopeMin, YEnvelopeMax;
+function _computeOptimizedEllipseY(items, is_circle = false, scx=1, scy=1) {
+  window.dzv.circle_kx = kx;
+  window.dzv.circle_ky = ky;
+		  
   const n = items.length;
   if (n <= 0) return;
 
@@ -7826,8 +7834,8 @@ function _computeOptimizedEllipseY(items, is_circle = false) {
 
     x[i] = c ? c.cx : 0;
 
-    const rxi = is_circle ? c.r : c.rx;
-    const ryi = is_circle ? c.r : c.ry;
+    const rxi = (is_circle ? c.r : c.rx)*scx;
+    const ryi = (is_circle ? c.r : c.ry)*scy;
 
     const ax = (Number.isFinite(rxi) && rxi > 0) ? rxi : 0;
     const by = (Number.isFinite(ryi) && ryi > 0) ? ryi : 0;
@@ -7907,6 +7915,8 @@ function _computeOptimizedEllipseY(items, is_circle = false) {
       {
         const sigmaSamples = 3 * Math.max(4, Math.min(32, Math.round(M / 160)));
         _smoothGaussianClampEdgesInPlace(ys, sigmaSamples, 2);
+		
+		
       }
 
       let Araw = 0;
@@ -7919,6 +7929,9 @@ function _computeOptimizedEllipseY(items, is_circle = false) {
         for (let i = 0; i < M; i++) ys[i] *= kArea;
         Araw = Apre;
       }
+	  
+	  
+	  
 
       const AtgtSigned = _areaFromClosedPathD(d_area, 2048);
       const Atgt = Math.abs(AtgtSigned);
@@ -7926,6 +7939,19 @@ function _computeOptimizedEllipseY(items, is_circle = false) {
 
       const sY = Atgt / Araw;
       if (!Number.isFinite(sY) || sY <= 0) return "";
+	  
+	  YEnvelopeMin =  Infinity;
+	  YEnvelopeMax = -Infinity;
+	  for (let i = 0; i < M; i++)
+	    {
+		 let crty = yCenter + ys[i] * sY;
+	     if (crty > YEnvelopeMax) YEnvelopeMax = crty;
+		 
+		 crty = yCenter - ys[i] * sY;
+		 if (ys[i]<YEnvelopeMin) YEnvelopeMin = crty;
+	    }
+
+		
 
       let dd = "";
       dd += "M " + _fmt(xs[0]) + " " + _fmt(yCenter - ys[0] * sY);
@@ -8159,7 +8185,7 @@ function _runOriginalYPlacementFromScratch() {
     }
   }
 
-  let cellY = Math.max(0.5, (ryMax > 0 ? (ryMax / 24) : (vbH / 800)));
+  cellY = Math.max(0.5, (ryMax > 0 ? (ryMax / 50) : (vbH / 1000)));
   const Ny = Math.max(200, Math.min(1200, Math.round(vbH / cellY)));
   cellY = vbH / Ny;
 
@@ -8702,14 +8728,20 @@ function _badnessFromCounts(c) {
   _buildBinsFromEnv(env);
   _runOriginalYPlacementFromScratch();
 
-  // Relax: allow X repulsion with hard cx bounds, keep items immutable
+
   const iters = 100;
+
+	
+  function refine(xdir, ydir, iters, items, x, y, rx, ry)
+  {
+
+	// Relax: allow X repulsion with hard cx bounds, keep items immutable
   const steps = [0.79, 0.19];
   const capFrac = 0.50;
   const kRef = 0;
-
-  function refine (xdir, ydir)
-  {
+	
+	
+  
     const yRef = new Float64Array(n);
     for (let i = 0; i < n; i++) yRef[i] = y[i];
 
@@ -8901,20 +8933,190 @@ function _badnessFromCounts(c) {
 
   }
   
-  if (iters && is_circle)
+  if (iters)
    {
          
     for (let times = 0;times<1;times++)	 
 	  {
-	    refine(true, true);
-		env = _buildGlobalEnvelopeBinsEllipseFromLocalX(is_circle);
-		_buildBinsFromEnv(env);
-		_runOriginalYPlacementFromScratch();
+	   if (is_circle)
+	     {
+		   //const t0 = performance.now();
+			refine(true, false, iters, items, x, y, rx, ry);
+			env = _buildGlobalEnvelopeBinsEllipseFromLocalX(is_circle);
+			_buildBinsFromEnv(env);
+			_runOriginalYPlacementFromScratch();
+		   //const ms = performance.now() - t0;
+		   //console.log(ms/1000);
+		 }
+		else
+		 {
+		   //refine(false, true);
+		 }
 	 }
    }
    
  //console.log(cnt_times,cnt_good, cnt_ideal);
 
+
+  
+
+  
+  function _dzv_extra_steps_chain_and_stretch() {
+    const half_dst = (YEnvelopeMax - YEnvelopeMin);
+    const Yc = (Number.isFinite(globalYmin) && Number.isFinite(globalYmax)) ? (0.5 * (globalYmin + globalYmax)) : (vbY + 0.5 * vbH);
+    const envTop = (Number.isFinite(half_dst) ? Yc-half_dst : vbY);
+    const envBot = (Number.isFinite(half_dst) ? Yc+half_dst : (vbY + vbH));
+
+    const dmin = Math.max(1e-9, cellY);   // adjustable later
+    const maxIters = 0;                         // adjustable later
+    const epsTouch = Math.max(1e-9, 0.01 * cellY);
+
+    // Mass proxy for sorting/ties. No DOM reads.
+    const mass = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const a = rx[i], b = ry[i];
+      mass[i] = (a > 0 && b > 0) ? (a * b) : 0;
+    }
+
+    // ---------- PHASE 1: one-shot fit to envelope (per half, no iteration) ----------
+    
+	
+	function fit_half(lst, dir) {
+	  const len = lst.length;
+	  if (len < 2) return;
+
+	  const EnvExtreme = (dir < 0 ? envTop : envBot);
+
+	  const j0 = lst[0];
+	  const y0 = y[j0];
+
+
+	  let best = dir < 0 ? Infinity : -Infinity;
+	  let jE = -1;
+	  
+	  if (dir<0)
+	  for (let i = 0; i < len; i++) {
+		const j = lst[i];
+		const side = y[j] - ry[j];
+		if (side < best)
+		  { best = side; jE = j; }
+	  }
+	  else
+	  for (let i = 0; i < len; i++) {
+		const j = lst[i];
+		const side = y[j] + ry[j];
+		if (side > best)
+		  { best = side; jE = j; }
+	  }
+	  
+	  if (jE === -1) return;
+
+	  const yE = y[jE];
+	  const rE = ry[jE];
+	  
+	  
+
+	  // target border center so SIDE touches envelope
+	  const new_side = EnvExtreme+dir*rE;
+	  const old_side = best+dir*rE;
+
+	  // distances in dir-space
+	  const oldT = y0 - old_side;
+	  const newT = y0 - new_side;
+	  
+	  if (Math.abs(oldT) < 1e-12) return;
+
+	  const scale = newT / oldT;
+
+	  for (let i = 1; i < len; i++) {
+		const j = lst[i];
+		y[j] = y0 + (y[j] - y[0]) * scale;
+	  }
+	  
+	  
+	}
+
+
+
+function repulse(lst, dir) {
+  const len = lst.length;
+  if (len < 2) { fit_half(lst, dir); return; }
+
+  let s = 0;
+
+  // materialize first
+  let jPrev = lst[0];
+  y[jPrev] = y[jPrev] + s;
+
+  for (let i = 1; i < len; i++) {
+    const j = lst[i];
+
+    const yPrev = y[jPrev];    // already materialized
+    let yCur = y[j] + s;       // current under current shift
+
+    const gap = dir * (yCur - yPrev);
+    if (gap < dmin) {
+      s += dir * (dmin - gap); // push current and all remaining
+      yCur = y[j] + s;         // refresh after shift change
+    }
+
+    y[j] = yCur;               // materialize current
+    jPrev = j;
+  }
+
+  fit_half(lst, dir);
+  return s;
+}
+
+
+	
+    // ---------- Build halves ONCE (after phase-1 fit), pick invariants ONCE ----------
+let topIdx = [];
+let botIdx = [];
+
+for (let i = 0; i < n; i++) {
+  if (y[i] <= Yc) topIdx.push(i);
+  else botIdx.push(i);
+}
+
+
+function sorter(ia,ib)
+{
+  const da = Math.abs(Yc - y[ia]);
+  const db = Math.abs(Yc - y[ib]);
+  
+  if (da < db) return -1;
+  if (da > db) return  1;
+
+  const ma = mass[ia], mb = mass[ib];
+  if (ma < mb) return  1;
+  if (ma > mb) return -1;
+
+  return ia - ib;
+
+}
+ topIdx.sort(sorter);
+ botIdx.sort(sorter);
+
+
+fit_half(topIdx, -1);
+
+for (let it = 0;it < maxIters;it++)
+    if (Math.abs( repulse(topIdx, -1)) < dmin) break;
+	  
+	  
+	  
+  
+fit_half(botIdx, 1);
+for (let it = 0;it < maxIters;it++)
+      if (Math.abs(repulse(botIdx, 1)) < dmin) break;
+
+
+	
+  };
+  
+  if (!is_circle)
+    _dzv_extra_steps_chain_and_stretch();
   // Persist maps only
   const dzv = (typeof window !== "undefined") ? (window.dzv || (window.dzv = {})) : {};
 
@@ -8928,20 +9130,32 @@ function _badnessFromCounts(c) {
   for (let i = 0; i < n; i++) map[items[i].id] = x[i];
 }
 
+
+window.dzv._computeOptimizedEllipseY=_computeOptimizedEllipseY;
+
 	      const _dzv = (typeof window !== "undefined") ? (window.dzv || (window.dzv = {})) : {};
 	      const _wf = (Number.isFinite(_dzv.warpingFactor) ? _dzv.warpingFactor : 0);
+		  let csss = window.getComputedStyle(svg);
+		  const ssx = csss.getPropertyValue("--sx");
+		  const ssy = csss.getPropertyValue("--sy");
+		  const rat = (ssy||1)/(ssx||1);
+		  const kx = Math.sqrt(rat);
+		  const ky = 1 / kx;
+		  
+		
 
 	      if (useOptCircleY && _wf === 0) {
 	        let map =  dzv._circleYOptAbsById;
-	        if (!(map && map._ready)) _computeOptimizedEllipseY(items, false);
+	        if (!(map && map._ready)) _computeOptimizedEllipseY(items, false, kx, ky);
 			map =  dzv._circleYOptAbsByIdC;
-	        if (!(map && map._ready)) _computeOptimizedEllipseY(items, true);
+	        if (!(map && map._ready)) _computeOptimizedEllipseY(items, true, kx, ky);
 	      }
 	    }
 
 
 	  }
 
+	  
 	  function _setUseHref(u, href) {
 	    if (!u) return;
 	    u.setAttribute("href", href);
@@ -8956,6 +9170,468 @@ function _badnessFromCounts(c) {
 	    u.setAttribute("href", href);
 	    u.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", href);
 	  }
+
+	// Build once, query many times.
+	// Creates an x-monotone outer "envelope" from an arbitrary polygonal chain (including spirals / many
+	// self-crossings) by computing the upper/lower envelopes of ALL segments.
+	//
+	// Output query(x) returns { ymin, ymax } where:
+	//   ymin = lower envelope at x
+	//   ymax = upper envelope at x
+	// Outside [xmin, xmax]: returns ymin=ymax=y(xmin) or y(xmax) (single value), using the common value
+	// if envelopes meet there, otherwise the midpoint.
+	//
+	// Special rule you requested for SAME x values while building the two monotone chains:
+	//   - top chain (ymax): for equal x keep MIN y
+	//   - bottom chain (ymin): for equal x keep MAX y
+	//
+	// Notes:
+	// - Precompute breakpoints at all vertex x and at all segment-segment intersection x, so the
+	//   envelope is exact piecewise-linear (no binning, no sampling).
+	// - Precompute is O(N^2) in number of segments; per query is O(log M).
+
+	function makeOuterEnvelopeYRangeAtX(polyXY, opts) {
+	  const P = polyXY;
+	  const n = (P.length >> 1) | 0;
+	  const o = opts || {};
+	  const eps = (o.eps != null ? +o.eps : 1e-12);
+	  const epsX = (o.epsX != null ? +o.epsX : eps);
+
+	  if (n < 2) return function (_) { return { ymin: NaN, ymax: NaN }; };
+
+	  // ---- build segments (closed polygon) ----
+	  const segs = [];
+	  let xMin = Infinity, xMax = -Infinity;
+
+	  for (let i = 0; i < n; i++) {
+		const i2 = i << 1;
+		const j = (i + 1) % n;
+		const j2 = j << 1;
+
+		const x0 = +P[i2], y0 = +P[i2 + 1];
+		const x1 = +P[j2], y1 = +P[j2 + 1];
+		if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) continue;
+
+		const dx = x1 - x0;
+		const dy = y1 - y0;
+		if (Math.abs(dx) < eps && Math.abs(dy) < eps) continue;
+
+		const xmin = x0 < x1 ? x0 : x1;
+		const xmax = x0 < x1 ? x1 : x0;
+		if (xmin < xMin) xMin = xmin;
+		if (xmax > xMax) xMax = xmax;
+
+		const vertical = Math.abs(dx) < eps;
+		segs.push({
+		  x0, y0, x1, y1,
+		  xmin, xmax,
+		  ymin: y0 < y1 ? y0 : y1,
+		  ymax: y0 < y1 ? y1 : y0,
+		  vertical,
+		  slope: vertical ? 0 : (dy / dx),
+		  invDx: vertical ? 0 : (1 / dx),
+		});
+	  }
+
+	  const S = segs.length;
+	  if (!(xMin <= xMax) || S === 0) return function (_) { return { ymin: NaN, ymax: NaN }; };
+
+	  // ---- helpers ----
+	  function yOnSegAtX(seg, x) {
+		// assumes non-vertical and x in [xmin,xmax]
+		return seg.y0 + seg.slope * (x - seg.x0);
+	  }
+	  function inRangeX(seg, x) {
+		return (x >= seg.xmin - epsX) && (x <= seg.xmax + epsX);
+	  }
+	  function uniqSortX(xs) {
+		xs.sort((a, b) => a - b);
+		const out = [];
+		for (let i = 0; i < xs.length; i++) {
+		  const x = xs[i];
+		  if (!Number.isFinite(x)) continue;
+		  if (out.length === 0 || Math.abs(x - out[out.length - 1]) > epsX) out.push(x);
+		}
+		return out;
+	  }
+
+	  // ---- collect exact envelope breakpoints in x ----
+	  const xBreaks = [];
+	  for (let i = 0; i < n; i++) xBreaks.push(+P[i << 1]);
+
+	  // segment-segment intersection x (including vertical cases)
+	  for (let a = 0; a < S; a++) {
+		const A = segs[a];
+		for (let b = a + 1; b < S; b++) {
+		  const B = segs[b];
+
+		  // quick reject by x-range overlap
+		  const lo = A.xmin > B.xmin ? A.xmin : B.xmin;
+		  const hi = A.xmax < B.xmax ? A.xmax : B.xmax;
+		  if (hi < lo - epsX) continue;
+
+		  if (!A.vertical && !B.vertical) {
+			// Solve A.y0 + A.slope*(x-A.x0) = B.y0 + B.slope*(x-B.x0)
+			const den = (A.slope - B.slope);
+			if (Math.abs(den) < eps) continue; // parallel (or near)
+			const x = (B.y0 - A.y0 + A.slope * A.x0 - B.slope * B.x0) / den;
+			if (x < lo - epsX || x > hi + epsX) continue;
+
+			// also ensure intersection lies within both segments in y (param t in [0,1])
+			// Use x-range already; that's enough for non-vertical segments.
+			xBreaks.push(x);
+		  } else if (A.vertical && !B.vertical) {
+			const x = A.x0;
+			if (x < lo - epsX || x > hi + epsX) continue;
+			const y = yOnSegAtX(B, x);
+			if (y >= A.ymin - eps && y <= A.ymax + eps) xBreaks.push(x);
+		  } else if (!A.vertical && B.vertical) {
+			const x = B.x0;
+			if (x < lo - epsX || x > hi + epsX) continue;
+			const y = yOnSegAtX(A, x);
+			if (y >= B.ymin - eps && y <= B.ymax + eps) xBreaks.push(x);
+		  } else {
+			// both vertical: same x -> breakpoint
+			if (Math.abs(A.x0 - B.x0) <= epsX) xBreaks.push(A.x0);
+		  }
+		}
+	  }
+
+	  const xs = uniqSortX(xBreaks);
+	  if (xs.length < 2) {
+		const x0 = xs.length ? xs[0] : xMin;
+		let yLo = Infinity, yHi = -Infinity;
+
+		for (let i = 0; i < S; i++) {
+		  const seg = segs[i];
+		  if (seg.vertical) {
+			if (Math.abs(x0 - seg.x0) <= epsX) {
+			  if (seg.ymin < yLo) yLo = seg.ymin;
+			  if (seg.ymax > yHi) yHi = seg.ymax;
+			}
+		  } else if (inRangeX(seg, x0)) {
+			const y = yOnSegAtX(seg, x0);
+			if (y < yLo) yLo = y;
+			if (y > yHi) yHi = y;
+		  }
+		}
+		if (!(yLo <= yHi)) return function (_) { return { ymin: NaN, ymax: NaN }; };
+		const yC = 0.5 * (yLo + yHi);
+		return function (x) { return { ymin: yC, ymax: yC }; };
+	  }
+
+	  // ---- compute exact upper/lower envelope values at each breakpoint x ----
+	  const topX = [];
+	  const topY = [];
+	  const botX = [];
+	  const botY = [];
+
+	  for (let ix = 0; ix < xs.length; ix++) {
+		const x = xs[ix];
+
+		let yLo = Infinity, yHi = -Infinity;
+
+		for (let i = 0; i < S; i++) {
+		  const seg = segs[i];
+		  if (seg.vertical) {
+			if (Math.abs(x - seg.x0) <= epsX) {
+			  if (seg.ymin < yLo) yLo = seg.ymin;
+			  if (seg.ymax > yHi) yHi = seg.ymax;
+			}
+		  } else if (x >= seg.xmin - epsX && x <= seg.xmax + epsX) {
+			const y = yOnSegAtX(seg, x);
+			if (y < yLo) yLo = y;
+			if (y > yHi) yHi = y;
+		  }
+		}
+
+		if (!(yLo <= yHi)) continue;
+
+		topX.push(x); topY.push(yHi);
+		botX.push(x); botY.push(yLo);
+	  }
+
+	  // ---- compress equal-x runs with your rule ----
+	  function compressEqualX_keepMinY(X, Y) {
+		const X2 = [];
+		const Y2 = [];
+		for (let i = 0; i < X.length; i++) {
+		  const x = X[i], y = Y[i];
+		  const k = X2.length - 1;
+		  if (k >= 0 && Math.abs(x - X2[k]) <= epsX) {
+			if (y < Y2[k]) Y2[k] = y;
+		  } else {
+			X2.push(x); Y2.push(y);
+		  }
+		}
+		return { X: X2, Y: Y2 };
+	  }
+	  function compressEqualX_keepMaxY(X, Y) {
+		const X2 = [];
+		const Y2 = [];
+		for (let i = 0; i < X.length; i++) {
+		  const x = X[i], y = Y[i];
+		  const k = X2.length - 1;
+		  if (k >= 0 && Math.abs(x - X2[k]) <= epsX) {
+			if (y > Y2[k]) Y2[k] = y;
+		  } else {
+			X2.push(x); Y2.push(y);
+		  }
+		}
+		return { X: X2, Y: Y2 };
+	  }
+
+	  // xs already sorted increasing; top/bot arrays match that order.
+	  // Apply your rule:
+	  //   top: equal x -> keep MIN y
+	  //   bot: equal x -> keep MAX y
+	  const topC = compressEqualX_keepMinY(topX, topY);
+	  const botC = compressEqualX_keepMaxY(botX, botY);
+
+	  const Xtop = topC.X, Ytop = topC.Y;
+	  const Xbot = botC.X, Ybot = botC.Y;
+
+	  const xminEnv = Xtop[0];
+	  const xmaxEnv = Xtop[Xtop.length - 1];
+
+	  // Boundary clamp y: single value at each end
+	  function clampYAtEnd(xEnd) {
+		// compute both envelopes at end and collapse to one value (prefer equality if they match)
+		const yt = yOnChain(Xtop, Ytop, xEnd);
+		const yb = yOnChain(Xbot, Ybot, xEnd);
+		if (Number.isFinite(yt) && Number.isFinite(yb) && Math.abs(yt - yb) <= 1e-9) return yt;
+		if (Number.isFinite(yt) && Number.isFinite(yb)) return 0.5 * (yt + yb);
+		return Number.isFinite(yt) ? yt : yb;
+	  }
+
+	  const yClampL = clampYAtEnd(xminEnv);
+	  const yClampR = clampYAtEnd(xmaxEnv);
+
+	  // ---- binary search + linear interpolation on monotone chain ----
+	  function yOnChain(X, Y, x) {
+		const m = X.length;
+		if (m === 0) return NaN;
+		if (x <= X[0] + epsX) return Y[0];
+		if (x >= X[m - 1] - epsX) return Y[m - 1];
+
+		// upper_bound: first hi with X[hi] >= x
+		let lo = 0, hi = m - 1;
+		while (lo + 1 < hi) {
+		  const mid = (lo + hi) >> 1;
+		  if (X[mid] < x) lo = mid;
+		  else hi = mid;
+		}
+
+		const x0 = X[lo], x1 = X[hi];
+		const y0 = Y[lo], y1 = Y[hi];
+		const t = (x - x0) / (x1 - x0);
+		return y0 + t * (y1 - y0);
+	  }
+
+	  return function outerEnvelopeYRangeAtX(x) {
+		x = +x;
+		if (!Number.isFinite(x)) return { ymin: NaN, ymax: NaN };
+
+		if (x < xminEnv) return { ymin: yClampL, ymax: yClampL };
+		if (x > xmaxEnv) return { ymin: yClampR, ymax: yClampR };
+
+		const yTop = yOnChain(Xtop, Ytop, x);
+		const yBot = yOnChain(Xbot, Ybot, x);
+
+		// return as ymin/ymax
+		return (yBot <= yTop)
+		  ? { ymin: yBot, ymax: yTop }
+		  : { ymin: yTop, ymax: yBot };
+	  };
+	}
+
+function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
+{
+  const n = x.length | 0;
+  if (n <= 1) return;
+
+  // Relax: allow X repulsion with hard cx bounds, keep items immutable
+  const steps = [0.79, 0.19];
+  const capFrac = 0.50;
+
+  const kRef0 = 0;
+
+  const yRef = new Float64Array(n);
+  for (let i = 0; i < n; i++) yRef[i] = y[i];
+
+  const idx = new Array(n);
+  const L = new Float64Array(n);
+  const Rr = new Float64Array(n);
+
+  const radInfl = 1.0;
+  for (let i = 0; i < n; i++) {
+    idx[i] = i;
+    const rxi = rx[i] * radInfl;
+    L[i] = x[i] - rxi;
+    Rr[i] = x[i] + rxi;
+  }
+  idx.sort((a, b) => (L[a] - L[b]) || (a - b));
+
+  const pairsI = [];
+  const pairsJ = [];
+
+  let active = [];
+  let activeR = [];
+
+  for (let t = 0; t < n; t++) {
+    const i = idx[t];
+    const Li = L[i];
+
+    if (active.length) {
+      const newA = [];
+      const newR = [];
+      for (let k = 0; k < active.length; k++) {
+        if (activeR[k] >= Li) { newA.push(active[k]); newR.push(activeR[k]); }
+      }
+      active = newA;
+      activeR = newR;
+    }
+
+    const Ri = Rr[i];
+    for (let k = 0; k < active.length; k++) {
+      const j = active[k];
+      if (L[j] <= Ri) { pairsI.push(i); pairsJ.push(j); }
+    }
+
+    active.push(i);
+    activeR.push(Rr[i]);
+  }
+
+  const m = pairsI.length;
+  const order = new Int32Array(m);
+  const key = new Float64Array(m);
+  for (let k = 0; k < m; k++) order[k] = k;
+
+  for (let it = 0; it < iters; it++) {
+    const st0 = steps[Math.floor(it / iters * steps.length)];
+
+    for (let k = 0; k < m; k++) {
+      const i = pairsI[k], j = pairsJ[k];
+
+      const ax = rx[i] + rx[j];
+      const by = ry[i] + ry[j];
+      if (!(ax > 0) || !(by > 0)) { key[k] = 0; continue; }
+
+      const dx = x[i] - x[j];
+      const dy = y[i] - y[j];
+
+      const ux = dx / ax;
+      const uy = dy / by;
+      const s2 = ux * ux + uy * uy;
+      if (s2 >= 1.0) { key[k] = 0; continue; }
+
+      key[k] = 1.0 - Math.sqrt(Math.max(0.0, s2));
+    }
+
+    const ord = Array.from(order);
+    ord.sort((a, b) => (key[b] - key[a]) || (a - b));
+
+    for (let kk = 0; kk < ord.length; kk++) {
+      const k = ord[kk];
+      if (!(key[k] > 0)) break;
+
+      const i = pairsI[k], j = pairsJ[k];
+
+      const ax = rx[i] + rx[j];
+      const by = ry[i] + ry[j];
+      if (!(ax > 0) || !(by > 0)) continue;
+
+      let dx = x[i] - x[j];
+      let dy = y[i] - y[j];
+
+      {
+        const ux = dx / ax;
+        const uy = dy / by;
+        const s2 = ux * ux + uy * uy;
+        if (s2 >= 1.0) continue;
+      }
+
+      const st = st0;
+
+      // X push
+      if (xdir) {
+        const ady = Math.abs(dy);
+        const dyRel = ady / by;
+        if (dyRel < 1.0) {
+          const tX = 1.0 - dyRel * dyRel;
+          if (tX > 0) {
+            const needX = ax * Math.sqrt(tX);
+            const adx = Math.abs(dx);
+            const oX = needX - adx;
+
+            if (oX > 0) {
+              const sgnX = (dx !== 0) ? (dx > 0 ? 1 : -1) : (i < j ? -1 : 1);
+              const cappedX = Math.min(oX, capFrac * needX);
+              const pushX = st * cappedX * 0.5 * sgnX;
+
+              x[i] += pushX;
+              x[j] -= pushX;
+
+              {
+                const mn = xmins[i], mx = xmaxs[i];
+                if (x[i] < mn) x[i] = mn;
+                else if (x[i] > mx) x[i] = mx;
+              }
+              {
+                const mn = xmins[j], mx = xmaxs[j];
+                if (x[j] < mn) x[j] = mn;
+                else if (x[j] > mx) x[j] = mx;
+              }
+
+              dx = x[i] - x[j];
+              dy = y[i] - y[j];
+            }
+          }
+        }
+      }
+
+      // Y push
+      if (ydir) {
+        const adx = Math.abs(dx);
+        if (adx < ax) {
+          const tY = 1.0 - (dx * dx) / (ax * ax);
+          if (tY > 0) {
+            const needY = by * Math.sqrt(tY);
+            const ady = Math.abs(dy);
+            const oY = needY - ady;
+
+            if (oY > 0) {
+              const sgnY = (dy !== 0) ? (dy > 0 ? 1 : -1) : (i < j ? -1 : 1);
+              const cappedY = Math.min(oY, capFrac * needY);
+              const pushY = st * cappedY * 0.5 * sgnY;
+              y[i] += pushY;
+              y[j] -= pushY;
+            }
+          }
+        }
+      }
+    }
+
+    for (let i = 0; i < n; i++) {
+      {
+        const mnx = xmins[i], mxx = xmaxs[i];
+        if (x[i] < mnx) x[i] = mnx;
+        else if (x[i] > mxx) x[i] = mxx;
+      }
+
+      const mny = ymins[i] + ry[i], mxy = ymaxs[i] - ry[i];
+
+      if (!(mny < mxy)) {
+        y[i] = 0.5 * (mny + mxy);
+      } else {
+        if (y[i] < mny) y[i] = mny;
+        else if (y[i] > mxy) y[i] = mxy;
+      }
+
+      if (kRef0 !== 0) y[i] += -kRef0 * (y[i] - yRef[i]);
+    }
+  }
+}
 
 	  function _hideMajorsExceptGlobal(hide) {
 
@@ -9075,17 +9751,7 @@ function _badnessFromCounts(c) {
 
 	    }
 		
-		function _dzvScreenScaleXY(el){
-			// Returns approximate screen-space scale factors for SVG user units along X and Y.
-			// Uses column magnitudes of the screen CTM, robust under translation and rotation.
-			let ctm = null;
-			try { ctm = el && el.getScreenCTM ? el.getScreenCTM() : null; } catch { ctm = null; }
-			if (!ctm) return { sx: 1, sy: 1 };
-			const sx = Math.hypot(ctm.a, ctm.c);
-			const sy = Math.hypot(ctm.b, ctm.d);
-			if (!Number.isFinite(sx) || !Number.isFinite(sy) || sx <= 1e-12 || sy <= 1e-12) return { sx: 1, sy: 1 };
-			return { sx, sy };
-		}
+
 
 	    const pauseMs = Math.max(0, +opts.pauseMs || 1500);
 
@@ -9154,7 +9820,7 @@ function _badnessFromCounts(c) {
 	    if (window.dzv.warpingFactor < 0.5)
 	      global_from = build_array_from_data(is_circle ? dzv.linear_stacked_path_circle:dzv.linear_stacked_path_ellipse, 512);
 	    else
-	      global_from = build_array_from_data(is_circle ? dzv.warped_stacked_path_circle:warped_stacked_path_ellipse, 512);
+	      global_from = build_array_from_data(is_circle ? dzv.warped_stacked_path_circle:dzv.warped_stacked_path_ellipse, 512);
 
 	    let global_to = build_array_from_p(gPath, 512);
 
@@ -9169,13 +9835,14 @@ function _badnessFromCounts(c) {
 
 	    const stages_labels = [
 	      "If occupations were encoded as circles centered on their median \nunless they had narrow ranges, their shapes and resulting envelopes \nwould drift too far from data-density representations;",
-	      "so we use violins for a more truthful encoding;",
-	      "reducing clutter by clustering them into major categories …",
-	      "… and reducing it even more by clipping violins to the major envelopes."
+	      "violins encode distributions more faithfully, especially over long value ranges;",
+	      "clutter can be reduced by clustering them into major categories …",
+	      "… reducing it even more by clipping violins to the major envelopes."
 	    ];
 		if (!is_circle)
-		 stages_labels[0] = "If occupations were encoded as ellipses centered on their median \ntheir shapes and resulting envelopes \nwould drift quite far from data-density representations;"
-
+		 {
+		  stages_labels[0] = "If occupations were encoded as ellipses centered on their median \ntheir shapes and resulting envelopes \nwould drift quite far from data-density representations;"
+		 }
 
 	    const crt_text = top_label ? top_label.textContent : "";
 	    const crt_color = top_label ? top_label.style.fill : "";
@@ -9289,7 +9956,74 @@ function _badnessFromCounts(c) {
 	    }
 
        
+		//introduce light rearrangmeent in case the scale is changed for circles.Items available, so rx,rx,cxmincxmax,x,y are al available.
+		
+		let kx=1, ky=1;
+		
 			
+		
+		if (is_circle && !useWarp)
+		  {
+		    const ns = "http://www.w3.org/2000/svg";
+		    const c = document.createElementNS(ns, "circle");
+		    c.setAttribute("cx", 0);
+		    c.setAttribute("cy", 0);
+		    c.setAttribute("r", 1000);
+		      
+		    // Invisible but still in the render tree (so getScreenCTM works)
+		    c.setAttribute("fill", "none");
+		    c.setAttribute("stroke", "none");
+		    c.setAttribute("opacity", "0");
+		    c.style.pointerEvents = "none";
+		      
+		    svg.appendChild(c);
+  
+		    const sc = _dzvScreenScaleXY(c);
+			c.parentNode.removeChild(c);
+			
+            const sx = sc.sx, sy = sc.sy;
+            const ratio = sy / sx;
+		
+	       if (Number.isFinite(ratio) && ratio > 1e-6 && ratio < 1e6 && Math.abs(ratio - 1) > 1e-4){
+               kx = Math.sqrt(ratio);
+               ky = 1 / kx;
+	         }
+			 
+			const rat1 = window.dzv.circle_kx/kx;
+			//console.log(window.dzv.circle_kx, kx);
+			
+			if (rat1 < 1.0/1.1 || rat1 > 1.1 ) 
+			 {
+
+			  window.dzv._computeOptimizedEllipseY(items, is_circle, kx, ky);
+			
+			  const _map = is_circle? _dzv._circleYOptAbsByIdC:_dzv._circleYOptAbsById;
+				for (let i = 0; i < items.length; i++) {
+				  const it = items[i];
+				  it._dyCircleOld = it.dySvg;
+
+				  const c = it._c || cache[it.id];
+				  const cy0 = c ? c.cy : 0;
+
+				  const yAbs = (_map && _map._ready) ? _map[it.id] : Number.NaN;
+				  if (Number.isFinite(yAbs)) {
+					it._dyCircleStart = yAbs - cy0;
+				  } else {
+					it._dyCircleStart = it.dySvg;
+				  }
+				}
+				
+			 if (window.dzv.warpingFactor < 0.5)
+			  global_from = build_array_from_data(is_circle ? dzv.linear_stacked_path_circle:dzv.linear_stacked_path_ellipse, 512);
+			 else
+			  global_from = build_array_from_data(is_circle ? dzv.warped_stacked_path_circle:dzv.warped_stacked_path_ellipse, 512);
+
+			
+			 crt_stack.setAttribute("d", window.dzv.warpingFactor < 0.5 ? dzv.linear_stacked_path_circle : dzv.warped_stacked_path_circle);
+			}
+		
+	     } 
+				
 	    for (let i = 0; i < items.length; i++) {
 	      const it = items[i];
 
@@ -9312,19 +10046,11 @@ function _badnessFromCounts(c) {
 	        fromArr = _warpArrayX(fromArr);
 	      }
 
-	      let dCircle0 = d_from_array(fromArr);
 
-	      _setUseHref(it.useEl, `#dzv-${it.id} - morph`);
-	      it.morphPath.setAttribute("d", dCircle0);
-		  
 		  if (is_circle && !useWarp)
 		  {
-		    const sc = _dzvScreenScaleXY(it.morphPath || it.useEl || svg);
-            const sx = sc.sx, sy = sc.sy;
-            const ratio = sy / sx;
-		    if (Number.isFinite(ratio) && ratio > 1e-6 && ratio < 1e6 && Math.abs(ratio - 1) > 1e-4){
-                const kx = Math.sqrt(ratio);
-                const ky = 1 / kx;
+
+		    if (Math.abs(kx - 1) > 1e-4){
 				let map = dzv._circleCxById;
 				for (let k=0;k<fromArr.length;k+=2)
 				  {
@@ -9332,11 +10058,14 @@ function _badnessFromCounts(c) {
 				   fromArr[k] = cx + (fromArr[k] - cx) * kx;
 				   fromArr[k+1] = cRec.cy + (fromArr[k+1] - cRec.cy) * ky;
 		         }
-				dCircle0 = d_from_array(fromArr);
-				it.morphPath.setAttribute("d", dCircle0);				
-				
+
 			 }
 		  }		
+		  
+		 let dCircle0 = d_from_array(fromArr);
+
+	      _setUseHref(it.useEl, `#dzv-${it.id} - morph`);
+	      it.morphPath.setAttribute("d", dCircle0); 
 			
 
 
@@ -18560,7 +19289,7 @@ function applyLayout(items) {
 				const activeMajor = getActiveFocusMajor();
 				
 	            if (!activeMajor && window.dzv.dzvGlobalCircleToViolinTransition)
-  			    window.dzv.dzvGlobalCircleToViolinTransition(true);
+  			    requestAnimationFrame(() => {requestAnimationFrame(() => { window.dzv.dzvGlobalCircleToViolinTransition(true);})});
         
 	        });
 			rowEllipse.addEventListener("click", function() {
@@ -18571,7 +19300,7 @@ function applyLayout(items) {
 				const activeMajor = getActiveFocusMajor();
 				
 	            if (!activeMajor && window.dzv.dzvGlobalCircleToViolinTransition)
-  			    window.dzv.dzvGlobalCircleToViolinTransition(false);
+				requestAnimationFrame(() => {requestAnimationFrame(() => { window.dzv.dzvGlobalCircleToViolinTransition(false);})});
         
 	        });
 			
