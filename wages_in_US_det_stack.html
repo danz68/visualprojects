@@ -7761,8 +7761,8 @@ let YEnvelopeMin, YEnvelopeMax;
 function _computeOptimizedEllipseY(items, is_circle = false, scx=1, scy=1) {
 if (is_circle)
  {
-  window.dzv.circle_kx = kx;
-  window.dzv.circle_ky = ky;
+  window.dzv.circle_kx = scx;
+  window.dzv.circle_ky = scy;
 }  
   const n = items.length;
   if (n <= 0) return;
@@ -9845,7 +9845,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	    ];
 		if (!is_circle)
 		 {
-		  stages_labels[0] = "If occupations were encoded as ellipses centered on their median \ntheir shapes and resulting envelopes \nwould drift quite far from data-density representations;"
+		  stages_labels[0] = "If occupations were encoded as ellipses centered on their median \ntheir shapes and resulting envelopes \nwould drift from data-density representations;"
 		 }
 
 	    const crt_text = top_label ? top_label.textContent : "";
