@@ -7759,9 +7759,11 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 
 let YEnvelopeMin, YEnvelopeMax;
 function _computeOptimizedEllipseY(items, is_circle = false, scx=1, scy=1) {
+if (is_circle)
+ {
   window.dzv.circle_kx = kx;
   window.dzv.circle_ky = ky;
-		  
+}  
   const n = items.length;
   if (n <= 0) return;
 
@@ -7834,8 +7836,8 @@ function _computeOptimizedEllipseY(items, is_circle = false, scx=1, scy=1) {
 
     x[i] = c ? c.cx : 0;
 
-    const rxi = (is_circle ? c.r : c.rx)*scx;
-    const ryi = (is_circle ? c.r : c.ry)*scy;
+    const rxi = (is_circle ? c.r*scx : c.rx);
+    const ryi = (is_circle ? c.r*scy : c.ry);
 
     const ax = (Number.isFinite(rxi) && rxi > 0) ? rxi : 0;
     const by = (Number.isFinite(ryi) && ryi > 0) ? ryi : 0;
