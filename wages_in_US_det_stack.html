@@ -8251,106 +8251,6 @@ function _hhAtBin(i, b) {
 
 
 
-
-function _scoreEllipseAtP(i, yc) {
-  const ax = rx[i], by = ry[i];
-  if (!(ax > 0) || !(by > 0)) {
-    return { ellipse_area: 0, usefulness: 0, misplacement: 0, inside_overlap: 0, outside_overlap: 0 };
-  }
-
-  const xc = x[i];
-
-  // X range -> bins (already clamped by _binIndexFromX)
-  const xL = xc - ax;
-  const xR = xc + ax;
-  const b0 = _binIndexFromX(xL);
-  const b1 = _binIndexFromX(xR);
-
-  // Y bbox -> GLOBAL rows (vbY..vbY+vbH)
-  const vbY0 = vbY;
-  const vbY1 = vbY + vbH;
-
-  let yLoBB = yc - by;
-  let yHiBB = yc + by;
-  if (yHiBB <= vbY0 || yLoBB >= vbY1) {
-    return { ellipse_area: 0, usefulness: 0, misplacement: 0, inside_overlap: 0, outside_overlap: 0 };
-  }
-  if (yLoBB < vbY0) yLoBB = vbY0;
-  if (yHiBB > vbY1) yHiBB = vbY1;
-
-  // Convert Y clamp to j range once (bbox-based)
-  let j0BB = Math.floor((yLoBB - vbY0) / cellY);
-  let j1BB = Math.floor((yHiBB - vbY0) / cellY);
-  if (j0BB < 0) j0BB = 0;
-  if (j1BB < 0) j1BB = 0;
-  if (j0BB >= Ny) j0BB = Ny - 1;
-  if (j1BB >= Ny) j1BB = Ny - 1;
-  if (j1BB < j0BB) { const t = j0BB; j0BB = j1BB; j1BB = t; }
-
-  let ellipse_area = 0;
-  let usefulness = 0;
-  let misplacement = 0;
-  let inside_overlap = 0;
-  let outside_overlap = 0;
-
-  const invAx2 = 1.0 / (ax * ax);
-  const invBy2 = 1.0 / (by * by);
-
-  for (let b = b0; b <= b1; b++) {
-    const xMid = xBinC[b];
-    const dx = xMid - xc;
-    const dx2 = dx * dx;
-
-    const u = 1.0 - dx2 * invAx2;
-    if (u <= 0) continue;
-
-    // Ellipse slice height at this x
-    const dyMax = by * Math.sqrt(u);
-
-    // Intersect slice y-range with bbox y-range
-    let yLo = yc - dyMax;
-    let yHi = yc + dyMax;
-    if (yLo < yLoBB) yLo = yLoBB;
-    if (yHi > yHiBB) yHi = yHiBB;
-    if (yHi <= yLo) continue;
-
-    // Convert to j range for this bin
-    let j0 = Math.floor((yLo - vbY0) / cellY);
-    let j1 = Math.floor((yHi - vbY0) / cellY);
-    if (j0 < j0BB) j0 = j0BB;
-    if (j1 > j1BB) j1 = j1BB;
-    if (j1 < j0) continue;
-
-    const yEnv0 = y0Bin[b];
-    const yEnv1 = y1Bin[b];
-    const base = b * Ny;
-
-    for (let j = j0; j <= j1; j++) {
-      const yMid = vbY0 + (j + 0.5) * cellY;
-      const dy = yMid - yc;
-
-      // point-in-ellipse at (xMid,yMid)
-      if (dx2 * invAx2 + (dy * dy) * invBy2 > 1.0) continue;
-
-      ellipse_area += 1;
-
-      const inEnvelope = (yMid >= yEnv0 && yMid <= yEnv1);
-      if (inEnvelope) {
-        const jEnv = _rowFromYEnv(b, yMid);
-        const idxEnv = base + jEnv;
-        if (occEnv[idxEnv] > 0) inside_overlap += occEnv[idxEnv];
-        else usefulness += 1;
-      } else {
-        const idxAll = base + j;
-        misplacement += 1;
-        if (occAll[idxAll] > 0) outside_overlap += occAll[idxAll];
-      }
-    }
-  }
-
-  return { ellipse_area, usefulness, misplacement, inside_overlap, outside_overlap };
-}
-
 function _scoreEllipseAt(i, yc) {
   const ax = rx[i], by = ry[i];
   if (!(ax > 0) || !(by > 0)) {
@@ -8942,22 +8842,16 @@ function _badnessFromCounts(c) {
 	  {
 	   if (is_circle)
 	     {
-		   //const t0 = performance.now();
 			refine(true, false, iters, items, x, y, rx, ry);
 			env = _buildGlobalEnvelopeBinsEllipseFromLocalX(is_circle);
 			_buildBinsFromEnv(env);
 			_runOriginalYPlacementFromScratch();
-		   //const ms = performance.now() - t0;
-		   //console.log(ms/1000);
 		 }
-		else
-		 {
-		   //refine(false, true);
-		 }
+		
 	 }
    }
    
- //console.log(cnt_times,cnt_good, cnt_ideal);
+
 
 
   
@@ -8970,7 +8864,7 @@ function _badnessFromCounts(c) {
     const envBot = (Number.isFinite(half_dst) ? Yc+half_dst : (vbY + vbH));
 
     const dmin = Math.max(1e-9, cellY);   // adjustable later
-    const maxIters = 0;                         // adjustable later
+    const maxIters = 0;                   // adjustable later
     const epsTouch = Math.max(1e-9, 0.01 * cellY);
 
     // Mass proxy for sorting/ties. No DOM reads.
@@ -9638,9 +9532,17 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 }
 
 	  function _hideMajorsExceptGlobal(hide) {
-
+        top_label = svg.querySelector('text[id$="00-0000 - label"]');
 	    if (hide)
-	      top_label = svg.querySelector('text[id$="00-0000 - label"]');
+		 {
+	      if (top_label)
+		  top_label.custom_text = true;
+		 }
+		else
+		 {
+		  if (top_label)
+		  top_label.custom_text = null;
+		 }
 
 	    const sel = ['g[id$=" - area"]', 'g[id$=" - edge"]', 'text[id$=" - label"]'].join(",");
 	    const gs = svg.querySelectorAll(sel);
@@ -9713,12 +9615,12 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 
 	    const durMorph = Math.max(1, +opts.durMorphMs || 3000);
 	    const durMove = Math.max(1, +opts.durMoveMs || 3000);
-	    const durFade = Math.max(1, +opts.durFadeMs || 8000);
+	    const durFade = Math.max(1, +opts.durFadeMs || 3000);
 
 	    // New: fade majors' edges in before finishSwap
 	    const durMajorEdgeFade = Math.max(1, +opts.durMajorEdgeFadeMs || 2500);
 
-	    const useWarp = !!(window.dzv && (+window.dzv.warpingFactor === 1));
+	    const useWarp = !!(window.dzv && (+window.dzv.warpingFactor > 0.5));
 
 	    const _m_warpFn = (window.dzv && typeof window.dzv.warp === "function") ? window.dzv.warp : null;
 
@@ -9758,11 +9660,17 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 
 
 	    const pauseMs = Math.max(0, +opts.pauseMs || 1500);
+		
+		function _pauseThen(fn, pause_time) {
+		  if (pause_time == null) pause_time = pauseMs;
 
-	    function _pauseThen(fn) {
-	      if (pauseMs > 0) setTimeout(fn, pauseMs);
-	      else fn();
-	    }
+		  if (pause_time > 0) {
+			setTimeout(fn || (()=>{}), pause_time);        // PASS the function
+			// or: setTimeout(() => { if (fn) fn(); }, pause_time);
+		  } else {
+			if (fn) fn();                                  // CALL immediately
+		  }
+		}
 
 	    function suspendAllPointer() {
 	      document.body.style.pointerEvents = "none";
@@ -9821,18 +9729,23 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	    let global_from;
 
 
+		if (!(is_circle && !useWarp))
+		{
 	    if (window.dzv.warpingFactor < 0.5)
 	      global_from = build_array_from_data(is_circle ? dzv.linear_stacked_path_circle:dzv.linear_stacked_path_ellipse, 512);
 	    else
 	      global_from = build_array_from_data(is_circle ? dzv.warped_stacked_path_circle:dzv.warped_stacked_path_ellipse, 512);
+		 }
 
 	    let global_to = build_array_from_p(gPath, 512);
 
 
 	    _hideMajorsExceptGlobal(true);
 	    const crt_stack = document.getElementById('dzv-00-0000 - crt_stack');
-	    crt_stack.setAttribute("d", (window.dzv.warpingFactor < 0.5) ? (is_circle ? dzv.linear_stacked_path_circle : dzv.linear_stacked_path_ellipse) : 
-		(is_circle ? dzv.warped_stacked_path_circle : dzv.warped_stacked_path_ellipse));
+		
+		if (!(is_circle && !useWarp))
+			crt_stack.setAttribute("d", (window.dzv.warpingFactor < 0.5) ? (is_circle ? dzv.linear_stacked_path_circle : dzv.linear_stacked_path_ellipse) : 
+			(is_circle ? dzv.warped_stacked_path_circle : dzv.warped_stacked_path_ellipse));
 
 
 	    _setUseHref(gUse, "#dzv-00-0000 - crt_stack");
@@ -10016,15 +9929,11 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 					it._dyCircleStart = it.dySvg;
 				  }
 				}
-				
-			 if (window.dzv.warpingFactor < 0.5)
-			  global_from = build_array_from_data(is_circle ? dzv.linear_stacked_path_circle:dzv.linear_stacked_path_ellipse, 512);
-			 else
-			  global_from = build_array_from_data(is_circle ? dzv.warped_stacked_path_circle:dzv.warped_stacked_path_ellipse, 512);
-
+			}	
+			 global_from = build_array_from_data(dzv.linear_stacked_path_circle, 512);
 			
-			 crt_stack.setAttribute("d", window.dzv.warpingFactor < 0.5 ? dzv.linear_stacked_path_circle : dzv.warped_stacked_path_circle);
-			}
+			 crt_stack.setAttribute("d", dzv.linear_stacked_path_circle);
+			
 		
 	     } 
 				
@@ -10087,6 +9996,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	      if (dyStart !== 0) it.useEl.setAttribute("transform", `translate(0 ${dyStart})`);
 	      else it.useEl.removeAttribute("transform");
 	    }
+		
 
 	    let tFade0 = 0;
 
@@ -10118,7 +10028,8 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	          if (r.aSo != null && r.aSo !== "") it.useEl.setAttribute("stroke-opacity", r.aSo);
 	          else it.useEl.removeAttribute("stroke-opacity");
 	        }
-	        _pauseThen(startMorph);
+			 
+	        _pauseThen(startMorph, 5000);
 	      }
 	    }
 
@@ -10511,9 +10422,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	      });
 	    }
 
-	    function sleep(ms) {
-	      return new Promise(resolve => setTimeout(resolve, ms));
-	    }
+	    
 
 	    function finishSwap() {
 
@@ -11064,6 +10973,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 
 
 	    function setTextStyle(state, t, v, fontSizeUserUnits, ss) {
+		    if (t.custom_text) return true;
 	        const dzv = state.dzv;
 	        // tiny helper: set only if different (attribute)
 	        function setAttr(el, name, val) {
@@ -11094,10 +11004,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	        setAttr(t, "font-size", fontPxStr);
 	        setAttr(t, "stroke-width", String(Math.max(1, fontPx * state.haloFrac)));
 	        setAttr(t, "font-weight", state.fontWeight);
-	        //setStyle(t, "transform-origin", "left center");
-			//setStyle(t, "transform-box", "fill-box");
-			//t.style.transformOrigin = "left center";
-			//t.style.transformBox = "fill-box";
+
 	        setAttr(t, "dominant-baseline", "middle");
 	        // --- text content (avoid touching it unless it changes) ---
 	        let ret = false;
