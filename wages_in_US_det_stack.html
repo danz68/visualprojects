@@ -10384,6 +10384,10 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	        for (let i = 0; i < majors_labels.length; i++) {
 	          majors_labels[i].g.style.display = "";
 	        }
+			
+			if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+			if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
+			  
 
 	        const t0 = performance.now();
 
