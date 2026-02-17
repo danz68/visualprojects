@@ -9705,31 +9705,36 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	      document.body.style.pointerEvents = "";
 	    }
 
-	    function setSvgTextSmartO(textEl, lines, lineDyEm = 1.5) {
-	      if (typeof lines === "string") lines = lines.split("\n");
-	      lines = (lines || []).map(s => String(s));
 
-	      // Single line: no tspans
-	      if (lines.length <= 1) {
-	        while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
-	        textEl.textContent = lines[0] ?? "";
-	        return;
-	      }
+		
 
-	      // Multi line: tspans
-	      const x0 = textEl.getAttribute("x") ?? "0";
-	      while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
+		function dzvMaxWidthForSetSvgTextSmart(textEl, refEl) {
+			  // allowed width in screen px (reference’s own scale is included here)
+			  const wPx = refEl.getBoundingClientRect().width;
 
-	      for (let i = 0; i < lines.length; i++) {
-	        const t = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
-	        t.setAttribute("x", x0);
-	        t.setAttribute("dy", i === 0 ? "0" : `${lineDyEm}em`);
-	        t.textContent = lines[i];
-	        textEl.appendChild(t);
-	      }
-	    }
-		function setSvgTextSmart(textEl, lines, lineDyEm = 1.5) {
+			  // convert px -> text local units (matches getComputedTextLength units)
+			  const m = textEl.getScreenCTM();
+			  if (!m) return wPx;
+
+			  const p0 = new DOMPoint(0, 0).matrixTransform(m);
+			  const p1 = new DOMPoint(1, 0).matrixTransform(m);
+			  const pxPerTextUnitX = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+
+			  return wPx / pxPerTextUnitX;
+			}
+
+
+       //patch2  
+	    const patch2Path =svg.querySelector('g#figure_1 > g#axes_1 > g#patch_2 path'); 
+
+		function setSvgTextSmartEsence(textEl, lines, lineDyEm = 1.5) {
+		
 		  const SVG_NS = "http://www.w3.org/2000/svg";
+		  
+		  let maxWidthPx = dzvMaxWidthForSetSvgTextSmart(textEl, patch2Path);
+		  if (maxWidthPx>500)
+		    maxWidthPx = 400;
+
 
 		  // Normalize input -> single string with \n separators
 		  let s;
@@ -9737,12 +9742,12 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 		  else s = String(lines ?? "");
 
 		  const hasBold = /<\s*b\s*>|<\s*\/\s*b\s*>/i.test(s);
-		  const parts = s.split("\n"); // keep empty lines if any
+		  const paras = s.split("\n"); // keep empty lines
 
-		  // Simple single-line, no markup: fastest path
-		  if (!hasBold && parts.length <= 1) {
+		  // Fast path: single line, no markup, no wrapping
+		  if (!hasBold && paras.length <= 1 && !(maxWidthPx > 0)) {
 			while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
-			textEl.textContent = parts[0] ?? "";
+			textEl.textContent = paras[0] ?? "";
 			return;
 		  }
 
@@ -9751,7 +9756,6 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 
 		  // Parse one line into [ {text, bold}, ... ] based on <b>...</b>
 		  function parseBoldRuns(line) {
-			// Split and keep tags
 			const tokens = line.split(/(<\s*\/\s*b\s*>|<\s*b\s*>)/i);
 			const runs = [];
 			let bold = false;
@@ -9763,38 +9767,268 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 			  if (/^<\s*b\s*>$/i.test(tok)) { bold = true; continue; }
 			  if (/^<\s*\/\s*b\s*>$/i.test(tok)) { bold = false; continue; }
 
-			  // Plain text chunk
 			  runs.push({ text: tok, bold });
 			}
 
-			// If the line contained no tags, keep it as a single run
 			if (runs.length === 0) runs.push({ text: line, bold: false });
 			return runs;
 		  }
 
-		  for (let i = 0; i < parts.length; i++) {
-			const line = parts[i] ?? "";
+		  function isSpace(ch) { return ch === " " || ch === "\t"; }
 
-			// Line container tspan (handles x + dy)
-			const tLine = document.createElementNS(SVG_NS, "tspan");
-			tLine.setAttribute("x", x0);
-			tLine.setAttribute("dy", i === 0 ? "0" : `${lineDyEm}em`);
-			textEl.appendChild(tLine);
+		  // Tokens: {text, bold, isSpace}
+		  function tokenizeRuns(runs) {
+			const out = [];
+			for (const r of runs) {
+			  const t = String(r.text ?? "");
+			  let i = 0;
+			  while (i < t.length) {
+				const c = t[i];
+				if (isSpace(c)) {
+				  let j = i + 1;
+				  while (j < t.length && isSpace(t[j])) j++;
+				  out.push({ text: t.slice(i, j), bold: r.bold, isSpace: true });
+				  i = j;
+				} else {
+				  let j = i + 1;
+				  while (j < t.length && !isSpace(t[j])) j++;
+				  out.push({ text: t.slice(i, j), bold: r.bold, isSpace: false });
+				  i = j;
+				}
+			  }
+			}
+			return out;
+		  }
 
-			// Inline bold runs
-			const runs = hasBold ? parseBoldRuns(line) : [{ text: line, bold: false }];
-			for (let k = 0; k < runs.length; k++) {
-			  const r = runs[k];
-			  if (r.text === "") continue;
+		  function runsAppend(runs, tok) {
+			if (!tok || !tok.text) return runs;
+			const last = runs.length ? runs[runs.length - 1] : null;
+			if (last && last.bold === tok.bold) last.text += tok.text;
+			else runs.push({ text: tok.text, bold: tok.bold });
+			return runs;
+		  }
 
-			  const tRun = document.createElementNS(SVG_NS, "tspan");
-			  if (r.bold) tRun.setAttribute("font-weight", "600");
-			  tRun.textContent = r.text;
-			  tLine.appendChild(tRun);
+		  function runsTrimRightSpaces(runs) {
+			if (!runs.length) return runs;
+			for (let i = runs.length - 1; i >= 0; i--) {
+			  const t = runs[i].text || "";
+			  let k = t.length;
+			  while (k > 0 && isSpace(t[k - 1])) k--;
+			  if (k === t.length) break;
+			  if (k === 0) runs.pop();
+			  else { runs[i].text = t.slice(0, k); break; }
+			}
+			return runs;
+		  }
+
+		  function skipLeadingSpaces(tokens, startIdx) {
+			let i = startIdx;
+			while (i < tokens.length && tokens[i].isSpace) i++;
+			return i;
+		  }
+
+		  // Measure in CSS pixels using canvas.
+		  // This avoids touching your SVG tree and keeps maxWidthPx truly in pixels.
+		  const meas = (function makeCanvasMeasurer() {
+			const cs = window.getComputedStyle(textEl);
+
+			const fontStyle = cs.fontStyle || "normal";
+			const fontFamily = cs.fontFamily || "sans-serif";
+			const fontSize = cs.fontSize || "16px";
+			const baseWeightStr = cs.fontWeight || "400";
+
+			// letter-spacing in px, "normal" -> 0
+			let letterSpacing = 0;
+			const ls = cs.letterSpacing;
+			if (ls && ls !== "normal") {
+			  const v = parseFloat(ls);
+			  if (Number.isFinite(v)) letterSpacing = v;
+			}
+
+			const canvas = document.createElement("canvas");
+			const ctx = canvas.getContext("2d");
+
+			function fontForWeight(weightStr) {
+			  const w = String(weightStr ?? "400");
+			  return `${fontStyle} ${w} ${fontSize} ${fontFamily}`;
+			}
+
+			const fontNormal = fontForWeight(baseWeightStr);
+			const fontBold   = fontForWeight("600");
+
+			function measureTextPx(str, bold) {
+			  if (!str) return 0;
+			  ctx.font = bold ? fontBold : fontNormal;
+			  let w = ctx.measureText(str).width;
+
+			  if (letterSpacing !== 0 && str.length > 1) {
+				w += letterSpacing * (str.length - 1);
+			  }
+			  return w;
+			}
+
+			function measureRunsPx(runs) {
+			  let acc = 0;
+			  for (const r of runs) {
+				if (!r.text) continue;
+				acc += measureTextPx(r.text, !!r.bold);
+			  }
+			  return acc;
+			}
+
+			return { measureRunsPx };
+		  })();
+
+		  // Hard-break a single long token (no spaces) to fit widthLimit (px)
+		  function breakTokenToFit(tok, widthLimit) {
+			const full = tok.text || "";
+			if (!full) return { fitText: "", restText: "" };
+
+			let lo = 1, hi = full.length, best = 1;
+			while (lo <= hi) {
+			  const mid = (lo + hi) >> 1;
+			  const prefix = full.slice(0, mid);
+			  const w = meas.measureRunsPx([{ text: prefix, bold: tok.bold }]);
+			  if (w <= widthLimit) { best = mid; lo = mid + 1; }
+			  else hi = mid - 1;
+			}
+
+			return { fitText: full.slice(0, best), restText: full.slice(best) };
+		  }
+
+		  // Wrap one paragraph into visual lines (each is runs [{text,bold},...])
+		  function wrapParagraph(lineStr) {
+			const runs0 = parseBoldRuns(lineStr);
+			if (!(maxWidthPx > 0)) return [runs0];
+
+			const tokens = tokenizeRuns(runs0);
+			const outLines = [];
+			let i = 0;
+
+			while (i < tokens.length) {
+			  i = skipLeadingSpaces(tokens, i);
+			  if (i >= tokens.length) break;
+
+			  let cur = [];
+			  let started = false;
+			  const startI = i;
+
+			  while (i < tokens.length) {
+				const tok = tokens[i];
+
+				if (!started && tok.isSpace) { i++; continue; }
+
+				const trial = cur.map(r => ({ text: r.text, bold: r.bold }));
+				runsAppend(trial, tok);
+				const w = meas.measureRunsPx(trial);
+
+				if (w <= maxWidthPx || !started) {
+				  runsAppend(cur, tok);
+				  started = true;
+				  i++;
+				  continue;
+				}
+
+				break;
+			  }
+
+			  runsTrimRightSpaces(cur);
+
+			  // Force progress if nothing was added
+			  if (!cur.length) {
+				const tok = tokens[i] || tokens[startI];
+				if (tok && tok.text) {
+				  const br = breakTokenToFit({ text: tok.text, bold: tok.bold }, maxWidthPx);
+				  outLines.push([{ text: br.fitText, bold: tok.bold }]);
+				  if (tok === tokens[i]) {
+					tokens[i] = { text: br.restText, bold: tok.bold, isSpace: false };
+					if (!tokens[i].text) i++;
+				  } else {
+					i = startI + 1;
+				  }
+				  continue;
+				}
+			  }
+
+			  // Single long word still overflows -> hard-break
+			  if (cur.length === 1 && cur[0].text) {
+				const w0 = meas.measureRunsPx([cur[0]]);
+				if (w0 > maxWidthPx) {
+				  const br = breakTokenToFit({ text: cur[0].text, bold: cur[0].bold }, maxWidthPx);
+				  cur[0].text = br.fitText;
+
+				  const backIdx = Math.max(0, i - 1);
+				  tokens[backIdx] = { text: br.restText, bold: cur[0].bold, isSpace: false };
+				  i = backIdx;
+				  if (tokens[i] && !tokens[i].text) i++;
+				}
+			  }
+
+			  runsTrimRightSpaces(cur);
+			  outLines.push(cur);
+			}
+
+			if (outLines.length === 0) outLines.push([{ text: "", bold: false }]);
+			return outLines;
+		  }
+
+		  // Build final visual lines respecting explicit \n
+		  const visualLines = [];
+		  for (let p = 0; p < paras.length; p++) {
+			const para = paras[p] ?? "";
+			if (para === "") {
+			  visualLines.push([{ text: "", bold: false }]);
+			  continue;
+			}
+			const wrapped = wrapParagraph(para);
+			for (const wl of wrapped) visualLines.push(wl);
+		  }
+
+		  // Render tspans into textEl
+		  // No copying of style or font attributes onto tspans.
+		  // Only x/dy and bold font-weight are set.
+		  let lineIndex = 0;
+		  for (const lineRuns of visualLines) {
+			const runsToDraw = (lineRuns && lineRuns.length) ? lineRuns : [{ text: "", bold: false }];
+
+			let firstRunOnLine = true;
+			for (let r = 0; r < runsToDraw.length; r++) {
+			  const run = runsToDraw[r];
+			  const t = document.createElementNS(SVG_NS, "tspan");
+
+			  if (firstRunOnLine) {
+				t.setAttribute("x", x0);
+				t.setAttribute("dy", lineIndex === 0 ? "0" : `${lineDyEm}em`);
+				firstRunOnLine = false;
+				lineIndex++;
+			  } else {
+				t.setAttribute("dy", "0");
+			  }
+
+			  if (run.bold) t.setAttribute("font-weight", "600");
+			  t.textContent = run.text ?? "";
+			  textEl.appendChild(t);
 			}
 		  }
 		}
 
+
+
+       function setSvgTextSmart(textEl, lines, lineDyEm = 1.5)
+	   {
+	    const ret = setSvgTextSmartEsence(textEl, lines, lineDyEm);
+		
+		const tspans = Array.from(textEl.querySelectorAll("tspan"));
+		
+		window.dzvTextAnisoApplyOne(textEl);
+		if (tspans)
+		for (let i=0;i<tspans.length;i++)
+		  {
+		    window.dzvTextAnisoApplyOne(tspans[i]);
+		  }
+		return ret;
+	   }
+	   
 
 	    const metaRoot = svg.querySelector('g#dzv-geom-metadata');
 	    if (!metaRoot) {
@@ -9848,15 +10082,24 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	    gUse.setAttribute("stroke-opacity", "0");
 		  
 
-	    const stages_labels = [
-	      "If occupations were encoded as <b>circles</b> centered on their median \nunless they had narrow ranges, their shapes and resulting envelopes \nwould drift too far from <b>data-density representations.</b>",
-	      "<b>Violins</b> encode distributions more faithfully, especially over long value ranges\nwhile maintaining the same degree of <b>similarity</b>: shape, color.",
-	      "Clustering into major categories improves the <b>proximity</b> principle\nwhile the entire structure relies on <b>symmetric</b> placement and a carefully crafted relevance <b>order</b>.",
-	      "Clipping the violins to their enclosed major envelopes enhances the perception of a <b>shared region</b>,\nwhile controlled opacity supports <b>closure</b> and <b>continuity</b>."
+	    const stages_labels2 = [
+	      "If occupations were encoded as <b>circles</b> centered on their median,\nthe spatial footprint of wages would be reduced to a <b>conventional geometry</b>\nrather than to a faithful representation of the underlying <b>data-density</b>.",
+	      "<b>Violins</b> encode distributions truthfully, more obviously over long ranges,\nwhile maintaining the same degree of <b>similarity</b>\nfor pre-attentive attributes like <b>shape</b> and <b>color</b>.",
+	      "<b>Clustering</b> into major categories improves the <b>proximity</b> principle\nwhile the entire structure relies on <b>symmetric</b> placement\nand a carefully crafted relevance <b>order</b>.",
+	      "<b>Clipping</b> the violins to their enclosed major envelopes\nenhances the perception of a <b>shared region</b>, while\ncontrolled violins opacity supports <b>closure</b> and <b>continuity</b>."
 	    ];
+		const stages_labels = [
+	      "If occupations were encoded as <b>circles</b> centered on their median, the spatial footprint of wages would be reduced to a <b>conventional geometry</b> rather than to a faithful representation of the underlying <b>data-density</b>.",
+	      "<b>Violins</b> encode distributions truthfully, more obviously over long ranges, while maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.",
+	      "<b>Clustering</b> into major categories improves the <b>proximity</b> principle while the entire structure relies on <b>symmetric</b> placement and a carefully crafted relevance <b>order</b>.",
+	      "<b>Clipping</b> the violins to their enclosed major envelopes enhances the perception of a <b>shared region</b>, while controlled violins opacity supports <b>closure</b> and <b>continuity</b>."
+	    ];
+		
+		
 		if (!is_circle)
 		 {
-		  stages_labels[0] = "If occupations were encoded as <b>ellipses</b> centered on their median \ntheir shapes and resulting envelopes \nwould drift from <b>data-density representations</b>."
+		   stages_labels[0] = "If occupations were encoded as <b>ellipses</b> centered on their median,\nthey wouldn’t reflect <b>data-density</b> particularities.";
+		   stages_labels[1] = "<b>Violins</b>, however, encode distributions truthfully\nwhile maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.";
 		 }
 
 	    const crt_text = top_label ? top_label.textContent : "";
@@ -10315,6 +10558,8 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	    function startMajorEdgesFadeIn() {
 		  
 	      // Select ONLY major edges, excluding global 00-0000
+		  
+		  
 	      const sel = ['g[id$="0000 - edge"]', 'text[id$="0000 - label"]'].join(",");
 	      const edgeGs = svg.querySelectorAll(sel);
 	      const majors = [];
@@ -10370,7 +10615,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	      // Make them visible in a separate frame, still at opacity 0
 	      //requestAnimationFrame
 		  _pauseThen(() => {
-		   if (top_label) setSvgTextSmart(top_label, stages_labels[3]);
+		   
 	        for (let i = 0; i < majors.length; i++) {
 	          majors[i].g.style.display = "";
 	        }
@@ -10384,10 +10629,19 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 			  
 
 	        const t0 = performance.now();
-
+            let changed_text = false;
 	        function animMajors(now) {
 	          const tt = Math.min(1, (now - t0) / durMajorEdgeFade);
 	          const e = _easeCos01(tt);
+			  
+			  //if (e>0.1)
+			    {
+				 if (!changed_text)
+				  {
+				   changed_text = true;
+				   if (top_label) setSvgTextSmart(top_label, stages_labels[3]);
+				  }
+				}
 
 	          for (let i = 0; i < majors_labels.length; i++) {
 	            const it = majors_labels[i];
@@ -11057,7 +11311,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 
 
 	    function setTextStyle(state, t, v, fontSizeUserUnits, ss) {
-		    if (t.custom_text) return true;
+		    
 	        const dzv = state.dzv;
 	        // tiny helper: set only if different (attribute)
 	        function setAttr(el, name, val) {
@@ -11097,6 +11351,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	            vlabel = t.getAttribute("label_stack");
 
 	        }
+			if (t.custom_text) return true;
 	        if (window.dzv.highlight_part && window.dzv.highlight_part !== "") {
 	            if (v.level === 1) {
 	                ret = PrefixMarker(t, vlabel, v, "*", window.dzv.highlight_part);
