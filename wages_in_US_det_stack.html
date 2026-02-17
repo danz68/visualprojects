@@ -10082,12 +10082,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	    gUse.setAttribute("stroke-opacity", "0");
 		  
 
-	    const stages_labels2 = [
-	      "If occupations were encoded as <b>circles</b> centered on their median,\nthe spatial footprint of wages would be reduced to a <b>conventional geometry</b>\nrather than to a faithful representation of the underlying <b>data-density</b>.",
-	      "<b>Violins</b> encode distributions truthfully, more obviously over long ranges,\nwhile maintaining the same degree of <b>similarity</b>\nfor pre-attentive attributes like <b>shape</b> and <b>color</b>.",
-	      "<b>Clustering</b> into major categories improves the <b>proximity</b> principle\nwhile the entire structure relies on <b>symmetric</b> placement\nand a carefully crafted relevance <b>order</b>.",
-	      "<b>Clipping</b> the violins to their enclosed major envelopes\nenhances the perception of a <b>shared region</b>, while\ncontrolled violins opacity supports <b>closure</b> and <b>continuity</b>."
-	    ];
+
 		const stages_labels = [
 	      "If occupations were encoded as <b>circles</b> centered on their median, the spatial footprint of wages would be reduced to a <b>conventional geometry</b> rather than to a faithful representation of the underlying <b>data-density</b>.",
 	      "<b>Violins</b> encode distributions truthfully, more obviously over long ranges, while maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.",
@@ -10098,8 +10093,8 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 		
 		if (!is_circle)
 		 {
-		   stages_labels[0] = "If occupations were encoded as <b>ellipses</b> centered on their median,\nthey wouldn’t reflect <b>data-density</b> particularities.";
-		   stages_labels[1] = "<b>Violins</b>, however, encode distributions truthfully\nwhile maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.";
+		   stages_labels[0] = "If occupations were encoded as <b>ellipses</b> centered on their median, they wouldn’t reflect <b>data-density</b> particularities.";
+		   stages_labels[1] = "<b>Violins</b>, however, encode distributions truthfully while maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.";
 		 }
 
 	    const crt_text = top_label ? top_label.textContent : "";
