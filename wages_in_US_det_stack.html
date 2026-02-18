@@ -107,12 +107,12 @@
 </g>
  <g id="circle" class="dzv-icon" viewBox="0 0 100 100">
 	<circle r="35" cx="50" cy="50"
-	stroke-linecap="round" stroke-linejoin="round" stroke-width="4" fill="silver" stroke="grey"/>
+	stroke-linecap="round" stroke-linejoin="round" stroke-width="5" fill="#e0e0e0" stroke="#404040"/>
 </g>
 
  <g id="ellipse" class="dzv-icon" viewBox="0 0 100 100">
 	<ellipse rx="44.5" ry="27.5" cx="50" cy="50"
-	stroke-linecap="round" stroke-linejoin="round" stroke-width="4" fill="silver" stroke="grey"/>
+	stroke-linecap="round" stroke-linejoin="round" stroke-width="5" fill="#e0e0e0" stroke="#404040"/>
 </g>
 
 <g id="guide" class="dzv-icon" viewBox="0 0 122.88 101.37">
@@ -9633,7 +9633,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	  }
 
 
-	  function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
+	  function dzvGlobalCircleToViolinTransitionO(is_circle=false, opts = {}) {
 	    dzvInitCircleMorphCacheOnce();
 	    const cache = (window.dzv && window.dzv._circleMorphCache) ? window.dzv._circleMorphCache : null;
 	    if (!cache) return;
@@ -10782,6 +10782,1202 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	      requestAnimationFrame(animFade);
 	    });
 	  }
+
+function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
+  dzvInitCircleMorphCacheOnce();
+  const cache = (window.dzv && window.dzv._circleMorphCache) ? window.dzv._circleMorphCache : null;
+  if (!cache) return;
+
+  //patch2
+  const patch2Path = svg.querySelector('g#figure_1 > g#axes_1 > g#patch_2 path');
+  // ------------------------------------------------------------
+// Pause controller singleton: freezes timebase while paused.
+// Timers are REAL setTimeouts, canceled on pause and rescheduled on resume.
+// This removes RAF-timer storms (the cause of the long resume delay).
+// ------------------------------------------------------------
+window.dzv = window.dzv || {};
+if (!window.dzv._circleToViolinPauseCtrl) {
+  window.dzv._circleToViolinPauseCtrl = {
+    paused: false,
+
+    _pausedTotal: 0,
+    _pauseRaw: 0,
+    _pauseAdj: 0,
+
+    // active timers: id -> { fn, dueAdj }
+    _timers: new Map(),
+    // pending timers while paused: { fn, msRemaining }
+    _pending: [],
+
+    // Convert a raw RAF timestamp (or performance.now()) to adjusted time.
+    now(rawNow) {
+      if (this.paused) return this._pauseAdj;
+      return rawNow - this._pausedTotal;
+    },
+
+    pause() {
+      if (this.paused) return;
+
+      const raw = performance.now();
+      const adj = raw - this._pausedTotal;
+
+      this._pauseRaw = raw;
+      this._pauseAdj = adj;
+      this.paused = true;
+
+      // Convert all live timers into remaining time and cancel them.
+      for (const [id, rec] of this._timers.entries()) {
+        clearTimeout(id);
+        const rem = Math.max(0, rec.dueAdj - adj);
+        this._pending.push({ fn: rec.fn, msRemaining: rem });
+      }
+      this._timers.clear();
+    },
+
+    resume() {
+      if (!this.paused) return;
+
+      const raw = performance.now();
+      this._pausedTotal += (raw - this._pauseRaw);
+      this.paused = false;
+
+      // Reschedule pending timers with their remaining unpaused time.
+      const pend = this._pending;
+      this._pending = [];
+      for (let i = 0; i < pend.length; i++) {
+        this.setTimeout(pend[i].fn, pend[i].msRemaining);
+      }
+    },
+
+    // Pause-aware timeout: fires after ms of UNPAUSED time.
+    setTimeout(fn, ms) {
+      ms = Math.max(0, +ms || 0);
+
+      if (this.paused) {
+        this._pending.push({ fn, msRemaining: ms });
+        return 0;
+      }
+
+      const dueAdj = this.now(performance.now()) + ms;
+
+      const id = setTimeout(() => {
+        // If we got paused before firing, defer it with remaining time.
+        this._timers.delete(id);
+
+        if (!this.paused) {
+          if (fn) fn();
+        } else {
+          const adjNow = this._pauseAdj; // frozen
+          const rem = Math.max(0, dueAdj - adjNow);
+          this._pending.push({ fn, msRemaining: rem });
+        }
+      }, ms);
+
+      this._timers.set(id, { fn, dueAdj });
+      return id;
+    },
+  };
+}
+const _pause = window.dzv._circleToViolinPauseCtrl;
+
+// One place: create/style + pin pause button to patch_2 bottom-right (screen-space)
+// Updates on window resize only.
+
+function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
+  //let b = document.getElementById("dzv_pause_btn");
+  if (!b) {
+    b = document.createElement("button");
+    b.id = "dzv_pause_btn";
+    b.type = "button";
+    document.body.appendChild(b);
+  }
+
+  // icon-only styling (no border)
+  b.style.position = "fixed";
+  b.style.border = "0";
+  b.style.outline = "0";
+  b.style.background = "transparent";
+  b.style.padding = "0";
+  b.style.margin = "0";
+  b.style.width = `${sizePx}px`;
+  b.style.height = `${sizePx}px`;
+  b.style.display = "grid";
+  b.style.placeItems = "center";
+  b.style.cursor = "pointer";
+  b.style.zIndex = "999999";
+  b.style.userSelect = "none";
+  b.style.webkitTapHighlightColor = "transparent";
+  b.style.touchAction = "manipulation";
+
+  function place() {
+    if (!patch2Path) return;
+    const r = patch2Path.getBoundingClientRect();
+    if (!(r && isFinite(r.right) && isFinite(r.bottom) && r.width > 0 && r.height > 0)) return;
+
+    const bw = b.offsetWidth || sizePx;
+    const bh = b.offsetHeight || sizePx;
+
+    b.style.left = `${Math.round(r.right - padPx - bw)}px`;
+    b.style.top  = `${Math.round(r.bottom - padPx - bh)}px`;
+  }
+
+  // resize only
+  window.addEventListener("resize", () => requestAnimationFrame(place), { passive: true });
+
+  // initial placement (plus one more frame for safety)
+  place();
+  requestAnimationFrame(place);
+
+  return { btn: b, place };
+}
+
+
+  // Pause button (single instance, always uses the singleton controller).
+  if (opts.pauseButton !== false) {
+    let b = document.getElementById("dzv_pause_btn");
+    if (!b) {
+      b = document.createElement("button");
+      b.id = "dzv_pause_btn";
+      b.type = "button";
+      b.style.position = "fixed";
+      b.style.right = "16px";
+      b.style.bottom = "16px";
+      b.style.zIndex = "999999";
+      b.style.padding = "8px 10px";
+      b.style.font = "12px sans-serif";
+      b.style.opacity = "0.85";
+      b.style.cursor = "pointer";
+      document.body.appendChild(b);
+    }
+    b.style.display = "";
+	/*
+    b.textContent = _pause.paused ? "Resume" : "Pause";
+    b.onclick = () => {
+      const ctrl = window.dzv._circleToViolinPauseCtrl;
+      if (!ctrl) return;
+      if (!ctrl.paused) { ctrl.pause(); b.textContent = "Resume"; }
+      else { ctrl.resume(); b.textContent = "Pause"; }
+    };
+	*/
+	b.style.padding = "6px";
+	b.style.lineHeight = "0";
+	b.style.display = "inline-flex";
+	b.style.alignItems = "center";
+	b.style.justifyContent = "center";
+
+	// two icons
+	const ICON_PAUSE = `
+	<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+	  <rect x="3" y="2.5" width="3.2" height="11" rx="0.8" fill="#666"></rect>
+	  <rect x="9.8" y="2.5" width="3.2" height="11" rx="0.8" fill="#666"></rect>
+	</svg>`;
+
+	const ICON_PLAY = `
+	<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+	  <path d="M5 3.2v9.6L13 8 5 3.2z" fill="#666"></path>
+	</svg>`;
+
+	// set icon
+	b.innerHTML = (_pause.paused ? ICON_PLAY : ICON_PAUSE);
+
+	// later, when toggling:
+	b.onclick = () => {
+	  const ctrl = window.dzv._circleToViolinPauseCtrl;
+	  if (!ctrl.paused) { ctrl.pause(); b.innerHTML = ICON_PLAY; }
+	  else { ctrl.resume(); b.innerHTML = ICON_PAUSE; }
+	};
+    b.style.pointerEvents = "auto";
+	dzvInitPauseBtnPinnedToPatch2(b, patch2Path);
+  }
+
+  const durMorph = Math.max(1, +opts.durMorphMs || 3000);
+  const durMove  = Math.max(1, +opts.durMoveMs  || 3000);
+  const durFade  = Math.max(1, +opts.durFadeMs  || 3000);
+
+  // New: fade majors' edges in before finishSwap
+  const durMajorEdgeFade = Math.max(1, +opts.durMajorEdgeFadeMs || 2000);
+
+  const useWarp = !!(window.dzv && (+window.dzv.warpingFactor > 0.5));
+  const _m_warpFn = (window.dzv && typeof window.dzv.warp === "function") ? window.dzv.warp : null;
+
+  const vb = window.dzv.viewBoxStr.trim().split(/\s+/).map(Number);
+  const [vbX, , vbW] = vb;
+
+  function warpX(x) {
+    const u = (x - vbX) / vbW;
+    const uw = _m_warpFn(u);
+    const uMix = u + /*warpingFactor * */ (uw - u);
+    return vbX + vbW * uMix;
+  }
+
+  function _warpArrayX(arr) {
+    if (!_m_warpFn) return arr;
+    const a = arr || new Float64Array(0);
+    const out = new Float64Array(a.length);
+    for (let i = 0; i < a.length; i++) out[i] = a[i];
+    for (let i = 0; i < out.length; i += 2) out[i] = warpX(out[i]);
+    return out;
+  }
+
+  function _ellipseArrayForItem(c) {
+    const uOfS = (window.dzv && window.dzv._halfEllipse_uOfS) ? window.dzv._halfEllipse_uOfS : null;
+    let map = window.dzv._ellipseCxById;
+    return ellipseContourPointsSym(map[c.id], c.cy, c.rx, c.ry, c.k, true, uOfS);
+  }
+  function _circleArrayForItem(c) {
+    const uOfS = (window.dzv && window.dzv._halfEllipse_uOfS) ? window.dzv._halfEllipse_uOfS : null;
+    let map = window.dzv._circleCxById;
+    return ellipseContourPointsSym(map[c.id], c.cy, c.r, c.r, c.k, true, uOfS);
+  }
+
+  const pauseMs = Math.max(0, +opts.pauseMs || 3000);
+
+  function _pauseThen(fn, pause_time) {
+    if (pause_time == null) pause_time = pauseMs;
+    pause_time = Math.max(0, +pause_time || 0);
+    if (pause_time > 0) _pause.setTimeout(fn || (()=>{}), pause_time);
+    else { if (fn) fn(); }
+  }
+
+  // ------------------------------------------------------------
+  // Pointer suspend that keeps pause button clickable, always.
+  // Uses an overlay blocker instead of body.pointerEvents.
+  // ------------------------------------------------------------
+  function _ensureAnimBlocker() {
+    let blk = document.getElementById("dzv_anim_blocker");
+    if (!blk) {
+      blk = document.createElement("div");
+      blk.id = "dzv_anim_blocker";
+      blk.style.position = "fixed";
+      blk.style.left = "0";
+      blk.style.top = "0";
+      blk.style.right = "0";
+      blk.style.bottom = "0";
+      blk.style.background = "transparent";
+      blk.style.pointerEvents = "auto";
+      blk.style.zIndex = "999998";
+      blk.style.display = "none";
+
+      const eat = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        return false;
+      };
+      blk.addEventListener("pointerdown", eat, { capture: true, passive: false });
+      blk.addEventListener("pointermove", eat, { capture: true, passive: false });
+      blk.addEventListener("pointerup",   eat, { capture: true, passive: false });
+      blk.addEventListener("click",       eat, { capture: true, passive: false });
+      blk.addEventListener("wheel",       eat, { capture: true, passive: false });
+
+      document.body.appendChild(blk);
+    }
+    return blk;
+  }
+
+  function suspendAllPointer() {
+    const blk = _ensureAnimBlocker();
+    blk.style.display = "";
+    const b = document.getElementById("dzv_pause_btn");
+    if (b) {
+      b.style.pointerEvents = "auto";
+      b.style.zIndex = "999999";
+    }
+  }
+
+  function resumeAllPointer() {
+    const blk = document.getElementById("dzv_anim_blocker");
+    if (blk) blk.style.display = "none";
+    const b = document.getElementById("dzv_pause_btn");
+    if (b) b.style.pointerEvents = "auto";
+  }
+
+  function dzvMaxWidthForSetSvgTextSmart(textEl, refEl) {
+    const wPx = refEl.getBoundingClientRect().width;
+    const m = textEl.getScreenCTM();
+    if (!m) return wPx;
+    const p0 = new DOMPoint(0, 0).matrixTransform(m);
+    const p1 = new DOMPoint(1, 0).matrixTransform(m);
+    const pxPerTextUnitX = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+    return wPx / pxPerTextUnitX;
+  }
+
+
+
+  function setSvgTextSmartEsence(textEl, lines, lineDyEm = 1.5) {
+    const SVG_NS = "http://www.w3.org/2000/svg";
+
+    let maxWidthPx = dzvMaxWidthForSetSvgTextSmart(textEl, patch2Path);
+    if (maxWidthPx > 500) maxWidthPx = 400;
+
+    let s;
+    if (Array.isArray(lines)) s = lines.map(v => String(v)).join("\n");
+    else s = String(lines ?? "");
+
+    const hasBold = /<\s*b\s*>|<\s*\/\s*b\s*>/i.test(s);
+    const paras = s.split("\n");
+
+    if (!hasBold && paras.length <= 1 && !(maxWidthPx > 0)) {
+      while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
+      textEl.textContent = paras[0] ?? "";
+      return;
+    }
+
+    const x0 = textEl.getAttribute("x") ?? "0";
+    while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
+
+    function parseBoldRuns(line) {
+      const tokens = line.split(/(<\s*\/\s*b\s*>|<\s*b\s*>)/i);
+      const runs = [];
+      let bold = false;
+      for (let i = 0; i < tokens.length; i++) {
+        const tok = tokens[i];
+        if (!tok) continue;
+        if (/^<\s*b\s*>$/i.test(tok)) { bold = true; continue; }
+        if (/^<\s*\/\s*b\s*>$/i.test(tok)) { bold = false; continue; }
+        runs.push({ text: tok, bold });
+      }
+      if (runs.length === 0) runs.push({ text: line, bold: false });
+      return runs;
+    }
+
+    function isSpace(ch) { return ch === " " || ch === "\t"; }
+
+    function tokenizeRuns(runs) {
+      const out = [];
+      for (const r of runs) {
+        const t = String(r.text ?? "");
+        let i = 0;
+        while (i < t.length) {
+          const c = t[i];
+          if (isSpace(c)) {
+            let j = i + 1;
+            while (j < t.length && isSpace(t[j])) j++;
+            out.push({ text: t.slice(i, j), bold: r.bold, isSpace: true });
+            i = j;
+          } else {
+            let j = i + 1;
+            while (j < t.length && !isSpace(t[j])) j++;
+            out.push({ text: t.slice(i, j), bold: r.bold, isSpace: false });
+            i = j;
+          }
+        }
+      }
+      return out;
+    }
+
+    function runsAppend(runs, tok) {
+      if (!tok || !tok.text) return runs;
+      const last = runs.length ? runs[runs.length - 1] : null;
+      if (last && last.bold === tok.bold) last.text += tok.text;
+      else runs.push({ text: tok.text, bold: tok.bold });
+      return runs;
+    }
+
+    function runsTrimRightSpaces(runs) {
+      if (!runs.length) return runs;
+      for (let i = runs.length - 1; i >= 0; i--) {
+        const t = runs[i].text || "";
+        let k = t.length;
+        while (k > 0 && isSpace(t[k - 1])) k--;
+        if (k === t.length) break;
+        if (k === 0) runs.pop();
+        else { runs[i].text = t.slice(0, k); break; }
+      }
+      return runs;
+    }
+
+    function skipLeadingSpaces(tokens, startIdx) {
+      let i = startIdx;
+      while (i < tokens.length && tokens[i].isSpace) i++;
+      return i;
+    }
+
+    const meas = (function makeCanvasMeasurer() {
+      const cs = window.getComputedStyle(textEl);
+      const fontStyle = cs.fontStyle || "normal";
+      const fontFamily = cs.fontFamily || "sans-serif";
+      const fontSize = cs.fontSize || "16px";
+      const baseWeightStr = cs.fontWeight || "400";
+
+      let letterSpacing = 0;
+      const ls = cs.letterSpacing;
+      if (ls && ls !== "normal") {
+        const v = parseFloat(ls);
+        if (Number.isFinite(v)) letterSpacing = v;
+      }
+
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+
+      function fontForWeight(weightStr) {
+        const w = String(weightStr ?? "400");
+        return `${fontStyle} ${w} ${fontSize} ${fontFamily}`;
+      }
+
+      const fontNormal = fontForWeight(baseWeightStr);
+      const fontBold   = fontForWeight("600");
+
+      function measureTextPx(str, bold) {
+        if (!str) return 0;
+        ctx.font = bold ? fontBold : fontNormal;
+        let w = ctx.measureText(str).width;
+        if (letterSpacing !== 0 && str.length > 1) w += letterSpacing * (str.length - 1);
+        return w;
+      }
+
+      function measureRunsPx(runs) {
+        let acc = 0;
+        for (const r of runs) {
+          if (!r.text) continue;
+          acc += measureTextPx(r.text, !!r.bold);
+        }
+        return acc;
+      }
+      return { measureRunsPx };
+    })();
+
+    function breakTokenToFit(tok, widthLimit) {
+      const full = tok.text || "";
+      if (!full) return { fitText: "", restText: "" };
+      let lo = 1, hi = full.length, best = 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const prefix = full.slice(0, mid);
+        const w = meas.measureRunsPx([{ text: prefix, bold: tok.bold }]);
+        if (w <= widthLimit) { best = mid; lo = lo + 1; lo = mid + 1; }
+        else hi = mid - 1;
+      }
+      return { fitText: full.slice(0, best), restText: full.slice(best) };
+    }
+
+    function wrapParagraph(lineStr) {
+      const runs0 = parseBoldRuns(lineStr);
+      if (!(maxWidthPx > 0)) return [runs0];
+
+      const tokens = tokenizeRuns(runs0);
+      const outLines = [];
+      let i = 0;
+
+      while (i < tokens.length) {
+        i = skipLeadingSpaces(tokens, i);
+        if (i >= tokens.length) break;
+
+        let cur = [];
+        let started = false;
+        const startI = i;
+
+        while (i < tokens.length) {
+          const tok = tokens[i];
+          if (!started && tok.isSpace) { i++; continue; }
+
+          const trial = cur.map(r => ({ text: r.text, bold: r.bold }));
+          runsAppend(trial, tok);
+          const w = meas.measureRunsPx(trial);
+
+          if (w <= maxWidthPx || !started) {
+            runsAppend(cur, tok);
+            started = true;
+            i++;
+            continue;
+          }
+          break;
+        }
+
+        runsTrimRightSpaces(cur);
+
+        if (!cur.length) {
+          const tok = tokens[i] || tokens[startI];
+          if (tok && tok.text) {
+            const br = breakTokenToFit({ text: tok.text, bold: tok.bold }, maxWidthPx);
+            outLines.push([{ text: br.fitText, bold: tok.bold }]);
+            if (tok === tokens[i]) {
+              tokens[i] = { text: br.restText, bold: tok.bold, isSpace: false };
+              if (!tokens[i].text) i++;
+            } else {
+              i = startI + 1;
+            }
+            continue;
+          }
+        }
+
+        if (cur.length === 1 && cur[0].text) {
+          const w0 = meas.measureRunsPx([cur[0]]);
+          if (w0 > maxWidthPx) {
+            const br = breakTokenToFit({ text: cur[0].text, bold: cur[0].bold }, maxWidthPx);
+            cur[0].text = br.fitText;
+
+            const backIdx = Math.max(0, i - 1);
+            tokens[backIdx] = { text: br.restText, bold: cur[0].bold, isSpace: false };
+            i = backIdx;
+            if (tokens[i] && !tokens[i].text) i++;
+          }
+        }
+
+        runsTrimRightSpaces(cur);
+        outLines.push(cur);
+      }
+
+      if (outLines.length === 0) outLines.push([{ text: "", bold: false }]);
+      return outLines;
+    }
+
+    const visualLines = [];
+    for (let p = 0; p < paras.length; p++) {
+      const para = paras[p] ?? "";
+      if (para === "") { visualLines.push([{ text: "", bold: false }]); continue; }
+      const wrapped = wrapParagraph(para);
+      for (const wl of wrapped) visualLines.push(wl);
+    }
+
+    let lineIndex = 0;
+    for (const lineRuns of visualLines) {
+      const runsToDraw = (lineRuns && lineRuns.length) ? lineRuns : [{ text: "", bold: false }];
+      let firstRunOnLine = true;
+      for (let r = 0; r < runsToDraw.length; r++) {
+        const run = runsToDraw[r];
+        const t = document.createElementNS(SVG_NS, "tspan");
+
+        if (firstRunOnLine) {
+          t.setAttribute("x", x0);
+          t.setAttribute("dy", lineIndex === 0 ? "0" : `${lineDyEm}em`);
+          firstRunOnLine = false;
+          lineIndex++;
+        } else {
+          t.setAttribute("dy", "0");
+        }
+
+        if (run.bold) t.setAttribute("font-weight", "600");
+        t.textContent = run.text ?? "";
+        textEl.appendChild(t);
+      }
+    }
+  }
+
+  function setSvgTextSmart(textEl, lines, lineDyEm = 1.5) {
+    const ret = setSvgTextSmartEsence(textEl, lines, lineDyEm);
+    const tspans = Array.from(textEl.querySelectorAll("tspan"));
+    window.dzvTextAnisoApplyOne(textEl);
+    if (tspans) for (let i=0;i<tspans.length;i++) window.dzvTextAnisoApplyOne(tspans[i]);
+    return ret;
+  }
+
+  const metaRoot = svg.querySelector('g#dzv-geom-metadata');
+  if (!metaRoot) return;
+
+  suspendAllPointer();
+  if (window.dzv.hide_tip) window.dzv.hide_tip();
+  if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+  if (typeof window.justHideMenu === "function") window.justHideMenu();
+  window.dzv.animating = true;
+
+  const global_id = '00-0000';
+
+  const gArea = svg.querySelector(`g[id="${global_id} - area"]`);
+  const gUse = gArea.querySelector("use");
+  const gPath = document.getElementById('dzv-00-0000 - full');
+
+  let global_from;
+
+  if (!(is_circle && !useWarp)) {
+    if (window.dzv.warpingFactor < 0.5)
+      global_from = build_array_from_data(is_circle ? dzv.linear_stacked_path_circle:dzv.linear_stacked_path_ellipse, 512);
+    else
+      global_from = build_array_from_data(is_circle ? dzv.warped_stacked_path_circle:dzv.warped_stacked_path_ellipse, 512);
+  }
+
+  let global_to = build_array_from_p(gPath, 512);
+
+  _hideMajorsExceptGlobal(true);
+  const crt_stack = document.getElementById('dzv-00-0000 - crt_stack');
+
+  if (!(is_circle && !useWarp))
+    crt_stack.setAttribute("d", (window.dzv.warpingFactor < 0.5) ? (is_circle ? dzv.linear_stacked_path_circle : dzv.linear_stacked_path_ellipse) :
+      (is_circle ? dzv.warped_stacked_path_circle : dzv.warped_stacked_path_ellipse));
+
+  _setUseHref(gUse, "#dzv-00-0000 - crt_stack");
+  gUse.style.display = "none";
+
+  gUse.setAttribute("opacity", "0");
+  gUse.setAttribute("fill-opacity", "0");
+  gUse.setAttribute("stroke-opacity", "0");
+
+  const stages_labels = [
+    "If occupations were encoded as <b>circles</b> centered on their median, the spatial footprint of wages would be reduced to a <b>conventional geometry</b> rather than to a faithful representation of the underlying <b>data-density</b>.",
+    "<b>Violins</b> encode distributions truthfully, more obviously over long ranges, while maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.",
+    "<b>Clustering</b> into major categories improves the <b>proximity</b> principle while the entire structure relies on <b>symmetric</b> placement and a carefully crafted relevance <b>order</b>.",
+    "<b>Clipping</b> the violins to their enclosed major envelopes enhances the perception of a <b>shared region</b>, while controlled violins opacity supports <b>closure</b> and <b>continuity</b>."
+  ];
+
+  if (!is_circle) {
+    stages_labels[0] = "If occupations were encoded as <b>ellipses</b> centered on their median, they wouldn’t reflect <b>data-density</b> particularities.";
+    stages_labels[1] = "<b>Violins</b>, however, encode distributions truthfully while maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.";
+  }
+
+  const crt_text = top_label ? top_label.textContent : "";
+  const crt_color = top_label ? top_label.style.fill : "";
+
+  if (top_label) top_label.style.fill = "#800000";
+  if (top_label) setSvgTextSmart(top_label, stages_labels[0]);
+
+  const metas = metaRoot.querySelectorAll('g[id][yc][yc-global]');
+  const items = [];
+  for (let i = 0; i < metas.length; i++) {
+    const mg = metas[i];
+    const id = mg.getAttribute("id");
+    if (!id || id === "00-0000" || id.endsWith("-0000")) continue;
+
+    const c = cache[id];
+    if (!c) continue;
+
+    const gArea = svg.querySelector(`g[id="${id} - area"]`);
+    if (!gArea) continue;
+    const u = gArea.querySelector("use");
+    if (!u) continue;
+
+    const yc0 = parseFloat(mg.getAttribute("yc"));
+    const ycG = parseFloat(mg.getAttribute("yc-global"));
+    if (!Number.isFinite(yc0) || !Number.isFinite(ycG)) continue;
+
+    const dySvg = _mplDeltaY_to_svgDeltaY(ycG - yc0);
+
+    const defs = _ensureDefs(mg);
+    const mp = defs.querySelector(`path[id="dzv-${id} - morph"]`);
+    if (!mp) continue;
+
+    items.push({
+      id,
+      mg,
+      useEl: u,
+      morphPath: mp,
+      dySvg,
+      useWarp,
+      _c: c,
+      yc0
+    });
+  }
+
+  const durOptToOld = Math.max(1, +opts.durOptToOldMs || 2500);
+  const _dzv = (typeof window !== "undefined") ? (window.dzv || (window.dzv = {})) : {};
+
+  const _map = is_circle ? _dzv._circleYOptAbsByIdC : _dzv._circleYOptAbsById;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    it._dyCircleOld = it.dySvg;
+
+    const c = it._c || cache[it.id];
+    const cy0 = c ? c.cy : 0;
+
+    const yAbs = (_map && _map._ready) ? _map[it.id] : Number.NaN;
+    if (Number.isFinite(yAbs)) it._dyCircleStart = yAbs - cy0;
+    else it._dyCircleStart = it.dySvg;
+  }
+
+  function _snapOpacityTriplet(useEl) {
+    let cs = null;
+    try { cs = getComputedStyle(useEl); } catch { cs = null; }
+
+    const aOp = useEl.getAttribute("opacity");
+    const aFo = useEl.getAttribute("fill-opacity");
+    const aSo = useEl.getAttribute("stroke-opacity");
+
+    let opT = Number.NaN, foT = Number.NaN, soT = Number.NaN;
+
+    if (aOp != null && aOp !== "") opT = parseFloat(aOp);
+    if (aFo != null && aFo !== "") foT = parseFloat(aFo);
+    if (aSo != null && aSo !== "") soT = parseFloat(aSo);
+
+    if (!Number.isFinite(opT) && cs) opT = parseFloat(cs.opacity);
+    if (!Number.isFinite(foT) && cs) foT = parseFloat(cs.fillOpacity);
+    if (!Number.isFinite(soT) && cs) soT = parseFloat(cs.strokeOpacity);
+
+    if (!Number.isFinite(opT)) opT = 1;
+    if (!Number.isFinite(foT)) foT = 1;
+    if (!Number.isFinite(soT)) soT = 1;
+
+    if (opT < 0) opT = 0; else if (opT > 1) opT = 1;
+    if (foT < 0) foT = 0; else if (foT > 1) foT = 1;
+    if (soT < 0) soT = 0; else if (soT > 1) soT = 1;
+
+    return { aOp, aFo, aSo, opT, foT, soT };
+  }
+
+  // introduce light rearrangement in case the scale is changed for circles
+  let kx = window.dzv.circle_kx, ky = window.dzv.circle_ky;
+
+  if (is_circle && !useWarp) {
+    const ns = "http://www.w3.org/2000/svg";
+    const c = document.createElementNS(ns, "circle");
+    c.setAttribute("cx", 0);
+    c.setAttribute("cy", 0);
+    c.setAttribute("r", 1000);
+    c.setAttribute("fill", "none");
+    c.setAttribute("stroke", "none");
+    c.setAttribute("opacity", "0");
+    c.style.pointerEvents = "none";
+    svg.appendChild(c);
+
+    const sc = _dzvScreenScaleXY(c);
+    c.parentNode.removeChild(c);
+
+    const sx = sc.sx, sy = sc.sy;
+    const ratio = sy / sx;
+
+    if (Number.isFinite(ratio) && ratio > 1e-6 && ratio < 1e6 && Math.abs(ratio - 1) > 1e-4) {
+      kx = Math.sqrt(ratio);
+      ky = 1 / kx;
+    }
+
+    const rat1 = window.dzv.circle_kx / kx;
+
+    if (rat1 < 1.0/1.1 || rat1 > 1.1) {
+      window.dzv._computeOptimizedEllipseY(items, is_circle, kx, ky);
+
+      const _map2 = is_circle ? _dzv._circleYOptAbsByIdC : _dzv._circleYOptAbsById;
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        it._dyCircleOld = it.dySvg;
+
+        const c0 = it._c || cache[it.id];
+        const cy0 = c0 ? c0.cy : 0;
+
+        const yAbs = (_map2 && _map2._ready) ? _map2[it.id] : Number.NaN;
+        if (Number.isFinite(yAbs)) it._dyCircleStart = yAbs - cy0;
+        else it._dyCircleStart = it.dySvg;
+      }
+    }
+
+    global_from = build_array_from_data(dzv.linear_stacked_path_circle, 512);
+    crt_stack.setAttribute("d", dzv.linear_stacked_path_circle);
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+
+    it._opRec = _snapOpacityTriplet(it.useEl);
+    it.useEl.style.display = "none";
+
+    it.useEl.setAttribute("opacity", "0");
+    it.useEl.setAttribute("fill-opacity", "0");
+    it.useEl.setAttribute("stroke-opacity", "0");
+
+    const cRec = it._c || cache[it.id];
+
+    let fromArr = is_circle ? _circleArrayForItem(cRec) : _ellipseArrayForItem(cRec);
+    if (useWarp) fromArr = _warpArrayX(fromArr);
+
+    if (is_circle && !useWarp) {
+      if (Math.abs(kx - 1) > 1e-4) {
+        let map = dzv._circleCxById;
+        for (let k=0;k<fromArr.length;k+=2) {
+          let cx = map[cRec.id];
+          fromArr[k]   = cx + (fromArr[k]   - cx) * kx;
+          fromArr[k+1] = cRec.cy + (fromArr[k+1] - cRec.cy) * ky;
+        }
+      }
+    }
+
+    let dCircle0 = d_from_array(fromArr);
+
+    _setUseHref(it.useEl, `#dzv-${it.id} - morph`);
+    it.morphPath.setAttribute("d", dCircle0);
+
+    it._m_from = fromArr;
+
+    if (useWarp) it._m_to = _warpArrayX(cRec.PathLin);
+    else it._m_to = cRec.PathLin;
+
+    it._m_tmp = new Float64Array(it._m_to);
+
+    const dyStart = (Number.isFinite(it._dyCircleStart) ? it._dyCircleStart : it.dySvg);
+    if (dyStart !== 0) it.useEl.setAttribute("transform", `translate(0 ${dyStart})`);
+    else it.useEl.removeAttribute("transform");
+  }
+
+  let tFade0 = 0;
+
+  function animFade(nowRaw) {
+    const now = _pause.now(nowRaw);
+    if (!tFade0) tFade0 = now;
+    const tt = Math.min(1, (now - tFade0) / durFade);
+    const e = _easeCos01(tt);
+
+    gUse.setAttribute("opacity", String(e));
+    gUse.setAttribute("fill-opacity", String(e));
+    gUse.setAttribute("stroke-opacity", String(e));
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const r = it._opRec;
+      if (!r) continue;
+      it.useEl.setAttribute("opacity", String(r.opT * e));
+      it.useEl.setAttribute("fill-opacity", String(r.foT * e));
+      it.useEl.setAttribute("stroke-opacity", String(r.soT * e));
+    }
+
+    if (tt < 1) requestAnimationFrame(animFade);
+    else {
+      gUse.removeAttribute("opacity");
+      gUse.removeAttribute("fill-opacity");
+      gUse.removeAttribute("stroke-opacity");
+
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const r = it._opRec;
+        if (!r) continue;
+
+        if (r.aOp != null && r.aOp !== "") it.useEl.setAttribute("opacity", r.aOp);
+        else it.useEl.removeAttribute("opacity");
+
+        if (r.aFo != null && r.aFo !== "") it.useEl.setAttribute("fill-opacity", r.aFo);
+        else it.useEl.removeAttribute("fill-opacity");
+
+        if (r.aSo != null && r.aSo !== "") it.useEl.setAttribute("stroke-opacity", r.aSo);
+        else it.useEl.removeAttribute("stroke-opacity");
+      }
+
+      _pauseThen(startMorph, 5000);
+    }
+  }
+
+  function d_from_array(arr, closed = true) {
+    const a = arr || [];
+    const n = a.length | 0;
+    if (n < 4) return "";
+
+    function fmt(x) {
+      if (!Number.isFinite(x)) return "0";
+      const v = Math.round(x * 1e4) / 1e4;
+      return (Math.abs(v) < 1e-10) ? "0" : String(v);
+    }
+
+    let d = "M " + fmt(a[0]) + " " + fmt(a[1]);
+    for (let i = 2; i + 1 < n; i += 2) d += " L " + fmt(a[i]) + " " + fmt(a[i + 1]);
+    if (closed) d += " Z";
+    return d;
+  }
+
+  const global_tmp = new Float64Array(global_from.length);
+
+  function startMorph() {
+    if (top_label) setSvgTextSmart(top_label, stages_labels[1]);
+
+    const t0 = _pause.now(performance.now());
+
+    function mi_ma_y(dat) {
+      let miy = Infinity, may = -Infinity;
+      for (let i = 1; i < dat.length; i += 2) {
+        const y = dat[i];
+        if (y < miy) miy = y;
+        if (y > may) may = y;
+      }
+      return [miy, may];
+    }
+
+    function _stripTranslate(t) {
+      return (t || "").replace(/translate\(\s*[^)]+\)/ig, "").trim();
+    }
+
+    function _setTranslateYPreserve(el, baseT, ty) {
+      const t1 = (baseT || "").trim();
+      if (ty !== 0) {
+        const t = (t1.length ? (t1 + " ") : "") + `translate(0 ${ty})`;
+        el.setAttribute("transform", t);
+      } else {
+        if (t1.length) el.setAttribute("transform", t1);
+        else el.removeAttribute("transform");
+      }
+    }
+
+    const [miy_orig, may_orig] = mi_ma_y(global_from);
+    const h_orig = may_orig - miy_orig;
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+
+      const [miy_it, may_it] = mi_ma_y(it._m_from);
+      it.y_center0 = (miy_it + may_it) * 0.5;
+
+      if (it._baseTransform == null) {
+        const t = it.useEl.getAttribute("transform") || "";
+        it._baseTransform = _stripTranslate(t);
+      }
+
+      if (!Number.isFinite(it._dyCircleStart)) it._dyCircleStart = 0;
+
+      const y0_screen = it.y_center0 + it._dyCircleStart;
+
+      let p = 0.5;
+      if (h_orig > 0) p = (y0_screen - miy_orig) / h_orig;
+      if (p < 0) p = 0; else if (p > 1) p = 1;
+      it._p0 = p;
+
+      _setTranslateYPreserve(it.useEl, it._baseTransform, it._dyCircleStart);
+    }
+
+    function animMorph(nowRaw) {
+      const now = _pause.now(nowRaw);
+      const tt = Math.min(1, (now - t0) / durMorph);
+      const e0 = _easeCos01(tt);
+      const e = (e0 <= 0) ? 1e-9 : (e0 >= 1) ? (1 - 1e-9) : e0;
+
+      const glb = morph_array2(global_from, global_to, global_tmp, e);
+      const [miy_now, may_now] = mi_ma_y(glb);
+      const h_now = may_now - miy_now;
+
+      crt_stack.setAttribute("d", d_from_array(glb));
+
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const itmp = morph_array2(it._m_from, it._m_to, it._m_tmp, e);
+
+        const y_target = miy_now + it._p0 * h_now;
+        const dy_total = y_target - it.y_center0;
+
+        it._dyMorph = dy_total;
+        _setTranslateYPreserve(it.useEl, it._baseTransform, dy_total);
+
+        if (it.morphPath) it.morphPath.setAttribute("d", d_from_array(itmp));
+      }
+
+      if (tt < 1) requestAnimationFrame(animMorph);
+      else {
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          it._dyCircleStart = it._dyMorph;
+          it._dyMorph = 0;
+          it._p0 = 0;
+
+          it._m_from = null;
+          it._m_to = null;
+          it._m_tmp = null;
+        }
+
+        _setUseHref(gUse, "#dzv-00-0000 - full");
+        _pauseThen(startMoveDown, 5000);
+      }
+    }
+
+    requestAnimationFrame(animMorph);
+  }
+
+  function startMoveDown() {
+    if (top_label) setSvgTextSmart(top_label, stages_labels[2]);
+    const t1 = _pause.now(performance.now());
+
+    function animMove(nowRaw) {
+      const now = _pause.now(nowRaw);
+      const tt = Math.min(1, (now - t1) / durMove);
+      const e = _easeCos01(tt);
+
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const dy0 = (Number.isFinite(it._dyCircleStart) ? it._dyCircleStart : it.dySvg);
+        const dy = (1 - e) * dy0;
+        if (dy !== 0) it.useEl.setAttribute("transform", `translate(0 ${dy})`);
+        else it.useEl.removeAttribute("transform");
+      }
+
+      if (tt < 1) requestAnimationFrame(animMove);
+      else _pauseThen(startMajorEdgesFadeIn, 2500);
+    }
+
+    requestAnimationFrame(animMove);
+  }
+
+  function startMajorEdgesFadeIn() {
+    const sel = ['g[id$="0000 - edge"]', 'text[id$="0000 - label"]'].join(",");
+    const edgeGs = svg.querySelectorAll(sel);
+    const majors = [];
+    const majors_labels = [];
+
+    for (let i = 0; i < edgeGs.length; i++) {
+      const g = edgeGs[i];
+      const gid = g.getAttribute("id") || "";
+      const m = gid.match(/^(\d\d-\d\d\d\d)\s/);
+      if (!m) continue;
+      const baseId = m[1];
+      if (!baseId.endsWith("-0000")) continue;
+      if (baseId === "00-0000") continue;
+
+      if (gid.endsWith("label")) {
+        g.setAttribute("opacity", "0");
+        majors_labels.push({ g });
+        continue;
+      }
+
+      const uses = g.querySelectorAll("use");
+      if (!uses || !uses.length) continue;
+
+      const recs = new Array(uses.length);
+      for (let k = 0; k < uses.length; k++) {
+        recs[k] = _snapOpacityTriplet(uses[k]);
+        uses[k].setAttribute("opacity", "0");
+        uses[k].setAttribute("fill-opacity", "0");
+        uses[k].setAttribute("stroke-opacity", "0");
+        uses[k].style.opacity = "0";
+      }
+
+      majors.push({ g, uses, recs });
+    }
+
+    if (!majors.length && !majors_labels.length) {
+      _pauseThen(finishSwap, 3500);
+      return;
+    }
+
+    _pauseThen(() => {
+      for (let i = 0; i < majors.length; i++) majors[i].g.style.display = "";
+      for (let i = 0; i < majors_labels.length; i++) majors_labels[i].g.style.display = "";
+
+      if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+      if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
+
+      const t0 = _pause.now(performance.now());
+      let changed_text = false;
+
+      function animMajors(nowRaw) {
+        const now = _pause.now(nowRaw);
+        const tt = Math.min(1, (now - t0) / durMajorEdgeFade);
+        const e = _easeCos01(tt);
+
+        if (!changed_text) {
+          changed_text = true;
+          if (top_label) setSvgTextSmart(top_label, stages_labels[3]);
+        }
+
+        for (let i = 0; i < majors_labels.length; i++) {
+          majors_labels[i].g.setAttribute("opacity", String(e));
+        }
+        for (let i = 0; i < majors.length; i++) {
+          const it = majors[i];
+          for (let k = 0; k < it.uses.length; k++) {
+            const u = it.uses[k];
+            const r = it.recs[k];
+            u.setAttribute("opacity", String(r.opT * e));
+            u.setAttribute("fill-opacity", String(r.foT * e));
+            u.setAttribute("stroke-opacity", String(r.soT * e));
+            u.style.opacity = String(r.opT * e);
+          }
+        }
+
+        if (tt < 1) requestAnimationFrame(animMajors);
+        else {
+          for (let i = 0; i < majors_labels.length; i++) {
+            majors_labels[i].g.removeAttribute("opacity");
+          }
+          for (let i = 0; i < majors.length; i++) {
+            const it = majors[i];
+            for (let k = 0; k < it.uses.length; k++) {
+              const u = it.uses[k];
+              const r = it.recs[k];
+
+              if (r.aOp != null && r.aOp !== "") u.setAttribute("opacity", r.aOp);
+              else u.removeAttribute("opacity");
+
+              if (r.aFo != null && r.aFo !== "") u.setAttribute("fill-opacity", r.aFo);
+              else u.removeAttribute("fill-opacity");
+
+              if (r.aSo != null && r.aSo !== "") u.setAttribute("stroke-opacity", r.aSo);
+              else u.removeAttribute("stroke-opacity");
+
+              u.style.opacity = "";
+            }
+          }
+
+          _pauseThen(finishSwap, 3500);
+        }
+      }
+
+      requestAnimationFrame(animMajors);
+    });
+  }
+
+  function applyCarvedOverTime(items, durationMs) {
+    items.sort((a, b) => (Math.abs(a.yc0) - Math.abs(b.yc0)) || (a.id < b.id ? -1 : (a.id > b.id ? 1 : 0)));
+
+    return new Promise((resolve) => {
+      const n = items.length;
+      const dur = Math.max(0, +durationMs || 0);
+
+      if (n <= 0) {
+        if (dur <= 0) resolve();
+        else _pause.setTimeout(resolve, dur);
+        return;
+      }
+
+      const t0 = _pause.now(performance.now());
+      const tEnd = t0 + dur;
+
+      let done = 0;
+      let raf = 0;
+      let finished = false;
+
+      function applyOne(it) {
+        it.useEl.removeAttribute("transform");
+        _setUseHref(it.useEl, `#dzv-${it.id} - carved`);
+      }
+
+      function tick(nowRaw) {
+        const now = _pause.now(nowRaw);
+        if (finished) return;
+
+        const frac = dur > 0 ? Math.min(1, Math.max(0, (now - t0) / dur)) : 1;
+        const want = Math.min(n, Math.floor(frac * n + 1e-9));
+
+        for (; done < want; done++) applyOne(items[done]);
+
+        if (done < n || now < tEnd) raf = requestAnimationFrame(tick);
+      }
+
+      function finalize() {
+        if (finished) return;
+        finished = true;
+        if (raf) cancelAnimationFrame(raf), (raf = 0);
+        for (; done < n; done++) applyOne(items[done]);
+        resolve();
+      }
+
+      raf = requestAnimationFrame(tick);
+
+      if (dur <= 0) finalize();
+      else {
+        const delay = Math.max(0, tEnd - _pause.now(performance.now()));
+        _pause.setTimeout(finalize, delay);
+      }
+    });
+  }
+
+  function finishSwap() {
+    applyCarvedOverTime(items, 2500).then(() => {
+      _pause.setTimeout(() => {
+        _hideMajorsExceptGlobal(false);
+        resumeAllPointer();
+
+        if (top_label) setSvgTextSmart(top_label, crt_text);
+        if (top_label) top_label.style.fill = crt_color;
+
+        if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+        if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
+
+        window.dzv.animating = false;
+
+        // End state: hide pause button, and ensure controller is not stuck paused.
+        const b = document.getElementById("dzv_pause_btn");
+        if (b) b.style.display = "none";
+        _pause.paused = false;
+      }, 4500);
+    });
+  }
+
+  // Make them visible in a separate frame, still at opacity 0, then fade in.
+  requestAnimationFrame(() => {
+    gUse.style.display = "";
+    for (let i = 0; i < items.length; i++) items[i].useEl.style.display = "";
+    requestAnimationFrame(animFade);
+  });
+}
+
 
 	  window.dzv = window.dzv || {};
 	  window.dzv.dzvInitCircleMorphCacheOnce = dzvInitCircleMorphCacheOnce;
