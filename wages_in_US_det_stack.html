@@ -4384,6 +4384,7 @@
 window.dzv = window.dzv || {};
 window.stack_tracking = true;
 window.dzv.animating = true;
+window.dzv.warpingFactor=0;
 
 function rotateStepImmediate(svgEl, degStep = 120) {
   // ensure pivot is valid for inline SVG in HTML
@@ -7256,6 +7257,12 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	  }
      
 	 
+	function svgX_linear_to_USD(xSvg) {
+	  const svgView = window.dzv.model.view;
+	  const u = (xSvg - svgView.x) / svgView.width;
+	  const uc = (u <= 0 ? 0 : (u >= 1 ? 1 : u));
+	  return svgView.usd_min + uc * (svgView.usd_max - svgView.usd_min);
+	}
 
 	
       window.dzv.circle_kx = 1;
@@ -7493,12 +7500,12 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 
 	      const vmin_usd = parseFloat(mg.getAttribute("vstart"));
 		  const v25_usd = parseFloat(mg.getAttribute("v25"));
-		  const v50_usd = parseFloat(mg.getAttribute("v75"));
+		  const v75_usd = parseFloat(mg.getAttribute("v75"));
   
 	      const med_usd = parseFloat(mg.getAttribute("v50"));
 	      const vmax_usd = Math.min(parseFloat(mg.getAttribute("vend")), 240000);
-	      const max_usd = Math.min(med_usd - vmin_usd, vmax_usd - med_usd);
-	      const vleft_usd = med_usd - max_usd;
+	      const max_usd_span = Math.min(med_usd - vmin_usd, vmax_usd - med_usd);
+	      const vleft_usd = med_usd - max_usd_span;
 
 
 	      let cx = USD_to_svgX_linear(med_usd);
@@ -7509,13 +7516,13 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		  const vright = USD_to_svgX_linear(vmax_usd);
 		  
 	      let rx = (cx - x0);
-		  let iqrx = USD_to_svgX_linear(v50_usd)-USD_to_svgX_linear(v25_usd);
+		  let iqrx = USD_to_svgX_linear(v75_usd)-USD_to_svgX_linear(v25_usd);
 		  
 		  let min_cx = cx - 0.1*iqrx;
-		  if (min_cx < vleft) min_cx = vleft;
+		  //if (min_cx < vleft) min_cx = vleft;
 		  
 		  let max_cx = cx + 0.1*iqrx;
-		  if (max_cx > vright) max_cx = vright;
+		  //if (max_cx > vright) max_cx = vright;
 		  
 
 
@@ -7535,6 +7542,9 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	      }
 		  
 		  let r = Math.sqrt(Math.abs(areaTarget) / Math.PI);
+		  
+		  
+		  
 		  if (min_cx < vleft+r) min_cx = vleft+r;
 		  if (max_cx > vright-r) max_cx = vright-r;
 
@@ -9558,15 +9568,20 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 
 	  function _hideMajorsExceptGlobal(hide) {
         top_label = svg.querySelector('text[id$="00-0000 - label"]');
+		const top_btn = document.querySelector("#dzv_menu_dots_btn");
 	    if (hide)
 		 {
 	      if (top_label)
 		  top_label.custom_text = true;
+		  if (top_btn)
+		    top_btn.style.display="none";
 		 }
 		else
 		 {
 		  if (top_label)
 		  top_label.custom_text = null;
+		  if (top_btn)
+		    top_btn.style.display="";
 		 }
 
 	    const sel = ['g[id$=" - area"]', 'g[id$=" - edge"]', 'text[id$=" - label"]'].join(",");
@@ -9633,1368 +9648,16 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	  }
 
 
-	  function dzvGlobalCircleToViolinTransitionO(is_circle=false, opts = {}) {
-	    dzvInitCircleMorphCacheOnce();
-	    const cache = (window.dzv && window.dzv._circleMorphCache) ? window.dzv._circleMorphCache : null;
-	    if (!cache) return;
-
-	    const durMorph = Math.max(1, +opts.durMorphMs || 3000);
-	    const durMove = Math.max(1, +opts.durMoveMs || 3000);
-	    const durFade = Math.max(1, +opts.durFadeMs || 3000);
-
-	    // New: fade majors' edges in before finishSwap
-	    const durMajorEdgeFade = Math.max(1, +opts.durMajorEdgeFadeMs || 2000);
-
-	    const useWarp = !!(window.dzv && (+window.dzv.warpingFactor > 0.5));
-
-	    const _m_warpFn = (window.dzv && typeof window.dzv.warp === "function") ? window.dzv.warp : null;
-
-	    const vb = window.dzv.viewBoxStr.trim().split(/\s+/).map(Number);
-	    const [vbX, , vbW] = vb;
-
-	    function warpX(x) {
-	      const u = (x - vbX) / vbW;
-	      const uw = _m_warpFn(u);
-	      const uMix = u + /*warpingFactor * */ (uw - u);
-	      return vbX + vbW * uMix;
-	    }
-
-	    function _warpArrayX(arr) {
-	      if (!_m_warpFn) return arr;
-	      const a = arr || new Float64Array(0);
-	      const out = new Float64Array(a.length);
-	      for (let i = 0; i < a.length; i++) out[i] = a[i];
-	      for (let i = 0; i < out.length; i += 2) out[i] = warpX(out[i]);
-	      return out;
-	    }
-
-	    function _ellipseArrayForItem(c) {
-	      const uOfS = (window.dzv && window.dzv._halfEllipse_uOfS) ? window.dzv._halfEllipse_uOfS : null;
-		  let map = window.dzv._ellipseCxById;
-		  
-	      return ellipseContourPointsSym(map[c.id], c.cy, c.rx, c.ry, c.k, true, uOfS);
-
-	    }
-		function _circleArrayForItem(c) {
-	      const uOfS = (window.dzv && window.dzv._halfEllipse_uOfS) ? window.dzv._halfEllipse_uOfS : null;
-		  let map = window.dzv._circleCxById;
-	      return ellipseContourPointsSym(map[c.id], c.cy, c.r, c.r, c.k, true, uOfS);
-
-	    }
-		
-
-
-	    const pauseMs = Math.max(0, +opts.pauseMs || 3000);
-		
-		function _pauseThen(fn, pause_time) {
-		  if (pause_time == null) pause_time = pauseMs;
-
-		  if (pause_time > 0) {
-			setTimeout(fn || (()=>{}), pause_time);        // PASS the function
-			// or: setTimeout(() => { if (fn) fn(); }, pause_time);
-		  } else {
-			if (fn) fn();                                  // CALL immediately
-		  }
-		}
-
-	    function suspendAllPointer() {
-	      document.body.style.pointerEvents = "none";
-	    }
-
-	    function resumeAllPointer() {
-	      document.body.style.pointerEvents = "";
-	    }
-
-
-		
-
-		function dzvMaxWidthForSetSvgTextSmart(textEl, refEl) {
-			  // allowed width in screen px (reference’s own scale is included here)
-			  const wPx = refEl.getBoundingClientRect().width;
-
-			  // convert px -> text local units (matches getComputedTextLength units)
-			  const m = textEl.getScreenCTM();
-			  if (!m) return wPx;
-
-			  const p0 = new DOMPoint(0, 0).matrixTransform(m);
-			  const p1 = new DOMPoint(1, 0).matrixTransform(m);
-			  const pxPerTextUnitX = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
-
-			  return wPx / pxPerTextUnitX;
-			}
-
-
-       //patch2  
-	    const patch2Path =svg.querySelector('g#figure_1 > g#axes_1 > g#patch_2 path'); 
-
-		function setSvgTextSmartEsence(textEl, lines, lineDyEm = 1.5) {
-		
-		  const SVG_NS = "http://www.w3.org/2000/svg";
-		  
-		  let maxWidthPx = dzvMaxWidthForSetSvgTextSmart(textEl, patch2Path);
-		  if (maxWidthPx>500)
-		    maxWidthPx = 400;
-
-
-		  // Normalize input -> single string with \n separators
-		  let s;
-		  if (Array.isArray(lines)) s = lines.map(v => String(v)).join("\n");
-		  else s = String(lines ?? "");
-
-		  const hasBold = /<\s*b\s*>|<\s*\/\s*b\s*>/i.test(s);
-		  const paras = s.split("\n"); // keep empty lines
-
-		  // Fast path: single line, no markup, no wrapping
-		  if (!hasBold && paras.length <= 1 && !(maxWidthPx > 0)) {
-			while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
-			textEl.textContent = paras[0] ?? "";
-			return;
-		  }
-
-		  const x0 = textEl.getAttribute("x") ?? "0";
-		  while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
-
-		  // Parse one line into [ {text, bold}, ... ] based on <b>...</b>
-		  function parseBoldRuns(line) {
-			const tokens = line.split(/(<\s*\/\s*b\s*>|<\s*b\s*>)/i);
-			const runs = [];
-			let bold = false;
-
-			for (let i = 0; i < tokens.length; i++) {
-			  const tok = tokens[i];
-			  if (!tok) continue;
-
-			  if (/^<\s*b\s*>$/i.test(tok)) { bold = true; continue; }
-			  if (/^<\s*\/\s*b\s*>$/i.test(tok)) { bold = false; continue; }
-
-			  runs.push({ text: tok, bold });
-			}
-
-			if (runs.length === 0) runs.push({ text: line, bold: false });
-			return runs;
-		  }
-
-		  function isSpace(ch) { return ch === " " || ch === "\t"; }
-
-		  // Tokens: {text, bold, isSpace}
-		  function tokenizeRuns(runs) {
-			const out = [];
-			for (const r of runs) {
-			  const t = String(r.text ?? "");
-			  let i = 0;
-			  while (i < t.length) {
-				const c = t[i];
-				if (isSpace(c)) {
-				  let j = i + 1;
-				  while (j < t.length && isSpace(t[j])) j++;
-				  out.push({ text: t.slice(i, j), bold: r.bold, isSpace: true });
-				  i = j;
-				} else {
-				  let j = i + 1;
-				  while (j < t.length && !isSpace(t[j])) j++;
-				  out.push({ text: t.slice(i, j), bold: r.bold, isSpace: false });
-				  i = j;
-				}
-			  }
-			}
-			return out;
-		  }
-
-		  function runsAppend(runs, tok) {
-			if (!tok || !tok.text) return runs;
-			const last = runs.length ? runs[runs.length - 1] : null;
-			if (last && last.bold === tok.bold) last.text += tok.text;
-			else runs.push({ text: tok.text, bold: tok.bold });
-			return runs;
-		  }
-
-		  function runsTrimRightSpaces(runs) {
-			if (!runs.length) return runs;
-			for (let i = runs.length - 1; i >= 0; i--) {
-			  const t = runs[i].text || "";
-			  let k = t.length;
-			  while (k > 0 && isSpace(t[k - 1])) k--;
-			  if (k === t.length) break;
-			  if (k === 0) runs.pop();
-			  else { runs[i].text = t.slice(0, k); break; }
-			}
-			return runs;
-		  }
-
-		  function skipLeadingSpaces(tokens, startIdx) {
-			let i = startIdx;
-			while (i < tokens.length && tokens[i].isSpace) i++;
-			return i;
-		  }
-
-		  // Measure in CSS pixels using canvas.
-		  // This avoids touching your SVG tree and keeps maxWidthPx truly in pixels.
-		  const meas = (function makeCanvasMeasurer() {
-			const cs = window.getComputedStyle(textEl);
-
-			const fontStyle = cs.fontStyle || "normal";
-			const fontFamily = cs.fontFamily || "sans-serif";
-			const fontSize = cs.fontSize || "16px";
-			const baseWeightStr = cs.fontWeight || "400";
-
-			// letter-spacing in px, "normal" -> 0
-			let letterSpacing = 0;
-			const ls = cs.letterSpacing;
-			if (ls && ls !== "normal") {
-			  const v = parseFloat(ls);
-			  if (Number.isFinite(v)) letterSpacing = v;
-			}
-
-			const canvas = document.createElement("canvas");
-			const ctx = canvas.getContext("2d");
-
-			function fontForWeight(weightStr) {
-			  const w = String(weightStr ?? "400");
-			  return `${fontStyle} ${w} ${fontSize} ${fontFamily}`;
-			}
-
-			const fontNormal = fontForWeight(baseWeightStr);
-			const fontBold   = fontForWeight("600");
-
-			function measureTextPx(str, bold) {
-			  if (!str) return 0;
-			  ctx.font = bold ? fontBold : fontNormal;
-			  let w = ctx.measureText(str).width;
-
-			  if (letterSpacing !== 0 && str.length > 1) {
-				w += letterSpacing * (str.length - 1);
-			  }
-			  return w;
-			}
-
-			function measureRunsPx(runs) {
-			  let acc = 0;
-			  for (const r of runs) {
-				if (!r.text) continue;
-				acc += measureTextPx(r.text, !!r.bold);
-			  }
-			  return acc;
-			}
-
-			return { measureRunsPx };
-		  })();
-
-		  // Hard-break a single long token (no spaces) to fit widthLimit (px)
-		  function breakTokenToFit(tok, widthLimit) {
-			const full = tok.text || "";
-			if (!full) return { fitText: "", restText: "" };
-
-			let lo = 1, hi = full.length, best = 1;
-			while (lo <= hi) {
-			  const mid = (lo + hi) >> 1;
-			  const prefix = full.slice(0, mid);
-			  const w = meas.measureRunsPx([{ text: prefix, bold: tok.bold }]);
-			  if (w <= widthLimit) { best = mid; lo = mid + 1; }
-			  else hi = mid - 1;
-			}
-
-			return { fitText: full.slice(0, best), restText: full.slice(best) };
-		  }
-
-		  // Wrap one paragraph into visual lines (each is runs [{text,bold},...])
-		  function wrapParagraph(lineStr) {
-			const runs0 = parseBoldRuns(lineStr);
-			if (!(maxWidthPx > 0)) return [runs0];
-
-			const tokens = tokenizeRuns(runs0);
-			const outLines = [];
-			let i = 0;
-
-			while (i < tokens.length) {
-			  i = skipLeadingSpaces(tokens, i);
-			  if (i >= tokens.length) break;
-
-			  let cur = [];
-			  let started = false;
-			  const startI = i;
-
-			  while (i < tokens.length) {
-				const tok = tokens[i];
-
-				if (!started && tok.isSpace) { i++; continue; }
-
-				const trial = cur.map(r => ({ text: r.text, bold: r.bold }));
-				runsAppend(trial, tok);
-				const w = meas.measureRunsPx(trial);
-
-				if (w <= maxWidthPx || !started) {
-				  runsAppend(cur, tok);
-				  started = true;
-				  i++;
-				  continue;
-				}
-
-				break;
-			  }
-
-			  runsTrimRightSpaces(cur);
-
-			  // Force progress if nothing was added
-			  if (!cur.length) {
-				const tok = tokens[i] || tokens[startI];
-				if (tok && tok.text) {
-				  const br = breakTokenToFit({ text: tok.text, bold: tok.bold }, maxWidthPx);
-				  outLines.push([{ text: br.fitText, bold: tok.bold }]);
-				  if (tok === tokens[i]) {
-					tokens[i] = { text: br.restText, bold: tok.bold, isSpace: false };
-					if (!tokens[i].text) i++;
-				  } else {
-					i = startI + 1;
-				  }
-				  continue;
-				}
-			  }
-
-			  // Single long word still overflows -> hard-break
-			  if (cur.length === 1 && cur[0].text) {
-				const w0 = meas.measureRunsPx([cur[0]]);
-				if (w0 > maxWidthPx) {
-				  const br = breakTokenToFit({ text: cur[0].text, bold: cur[0].bold }, maxWidthPx);
-				  cur[0].text = br.fitText;
-
-				  const backIdx = Math.max(0, i - 1);
-				  tokens[backIdx] = { text: br.restText, bold: cur[0].bold, isSpace: false };
-				  i = backIdx;
-				  if (tokens[i] && !tokens[i].text) i++;
-				}
-			  }
-
-			  runsTrimRightSpaces(cur);
-			  outLines.push(cur);
-			}
-
-			if (outLines.length === 0) outLines.push([{ text: "", bold: false }]);
-			return outLines;
-		  }
-
-		  // Build final visual lines respecting explicit \n
-		  const visualLines = [];
-		  for (let p = 0; p < paras.length; p++) {
-			const para = paras[p] ?? "";
-			if (para === "") {
-			  visualLines.push([{ text: "", bold: false }]);
-			  continue;
-			}
-			const wrapped = wrapParagraph(para);
-			for (const wl of wrapped) visualLines.push(wl);
-		  }
-
-		  // Render tspans into textEl
-		  // No copying of style or font attributes onto tspans.
-		  // Only x/dy and bold font-weight are set.
-		  let lineIndex = 0;
-		  for (const lineRuns of visualLines) {
-			const runsToDraw = (lineRuns && lineRuns.length) ? lineRuns : [{ text: "", bold: false }];
-
-			let firstRunOnLine = true;
-			for (let r = 0; r < runsToDraw.length; r++) {
-			  const run = runsToDraw[r];
-			  const t = document.createElementNS(SVG_NS, "tspan");
-
-			  if (firstRunOnLine) {
-				t.setAttribute("x", x0);
-				t.setAttribute("dy", lineIndex === 0 ? "0" : `${lineDyEm}em`);
-				firstRunOnLine = false;
-				lineIndex++;
-			  } else {
-				t.setAttribute("dy", "0");
-			  }
-
-			  if (run.bold) t.setAttribute("font-weight", "600");
-			  t.textContent = run.text ?? "";
-			  textEl.appendChild(t);
-			}
-		  }
-		}
-
-
-
-       function setSvgTextSmart(textEl, lines, lineDyEm = 1.5)
-	   {
-	    const ret = setSvgTextSmartEsence(textEl, lines, lineDyEm);
-		
-		const tspans = Array.from(textEl.querySelectorAll("tspan"));
-		
-		window.dzvTextAnisoApplyOne(textEl);
-		if (tspans)
-		for (let i=0;i<tspans.length;i++)
-		  {
-		    window.dzvTextAnisoApplyOne(tspans[i]);
-		  }
-		return ret;
-	   }
-	   
-
-	    const metaRoot = svg.querySelector('g#dzv-geom-metadata');
-	    if (!metaRoot) {
-	      return;
-	    }
-
-
-	    suspendAllPointer();
-	    if (window.dzv.hide_tip) window.dzv.hide_tip();
-	    if (window.dzv.hide_highlight) window.dzv.hide_highlight();
-	    if (typeof window.justHideMenu === "function") window.justHideMenu();
-	    window.dzv.animating = true;
-
-
-
-
-	    const global_id = '00-0000';
-
-	    const gArea = svg.querySelector(`g[id="${global_id} - area"]`);
-	    const gUse = gArea.querySelector("use");
-
-	    const gPath = document.getElementById('dzv-00-0000 - full');
-
-	    let global_from;
-
-
-		if (!(is_circle && !useWarp))
-		{
-	    if (window.dzv.warpingFactor < 0.5)
-	      global_from = build_array_from_data(is_circle ? dzv.linear_stacked_path_circle:dzv.linear_stacked_path_ellipse, 512);
-	    else
-	      global_from = build_array_from_data(is_circle ? dzv.warped_stacked_path_circle:dzv.warped_stacked_path_ellipse, 512);
-		 }
-
-	    let global_to = build_array_from_p(gPath, 512);
-
-
-	    _hideMajorsExceptGlobal(true);
-	    const crt_stack = document.getElementById('dzv-00-0000 - crt_stack');
-		
-		if (!(is_circle && !useWarp))
-			crt_stack.setAttribute("d", (window.dzv.warpingFactor < 0.5) ? (is_circle ? dzv.linear_stacked_path_circle : dzv.linear_stacked_path_ellipse) : 
-			(is_circle ? dzv.warped_stacked_path_circle : dzv.warped_stacked_path_ellipse));
-
-
-	    _setUseHref(gUse, "#dzv-00-0000 - crt_stack");
-		gUse.style.display = "none";
-
-	    gUse.setAttribute("opacity", "0");
-	    gUse.setAttribute("fill-opacity", "0");
-	    gUse.setAttribute("stroke-opacity", "0");
-		  
-
-
-		const stages_labels = [
-	      "If occupations were encoded as <b>circles</b> centered on their median, the spatial footprint of wages would be reduced to a <b>conventional geometry</b> rather than to a faithful representation of the underlying <b>data-density</b>.",
-	      "<b>Violins</b> encode distributions truthfully, more obviously over long ranges, while maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.",
-	      "<b>Clustering</b> into major categories improves the <b>proximity</b> principle while the entire structure relies on <b>symmetric</b> placement and a carefully crafted relevance <b>order</b>.",
-	      "<b>Clipping</b> the violins to their enclosed major envelopes enhances the perception of a <b>shared region</b>, while controlled violins opacity supports <b>closure</b> and <b>continuity</b>."
-	    ];
-		
-		
-		if (!is_circle)
-		 {
-		   stages_labels[0] = "If occupations were encoded as <b>ellipses</b> centered on their median, they wouldn’t reflect <b>data-density</b> particularities.";
-		   stages_labels[1] = "<b>Violins</b>, however, encode distributions truthfully while maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.";
-		 }
-
-	    const crt_text = top_label ? top_label.textContent : "";
-	    const crt_color = top_label ? top_label.style.fill : "";
-
-	    if (top_label) top_label.style.fill = "#800000";
-	    if (top_label) setSvgTextSmart(top_label, stages_labels[0]);
-
-
-	    const metas = metaRoot.querySelectorAll('g[id][yc][yc-global]');
-	    const items = [];
-	    for (let i = 0; i < metas.length; i++) {
-	      const mg = metas[i];
-	      const id = mg.getAttribute("id");
-	      if (!id || id === "00-0000" || id.endsWith("-0000")) continue;
-
-	      const c = cache[id];
-	      if (!c) continue;
-
-	      const gArea = svg.querySelector(`g[id="${id} - area"]`);
-	      if (!gArea) continue;
-	      const u = gArea.querySelector("use");
-	      if (!u) continue;
-
-	      const yc0 = parseFloat(mg.getAttribute("yc"));
-	      const ycG = parseFloat(mg.getAttribute("yc-global"));
-	      if (!Number.isFinite(yc0) || !Number.isFinite(ycG)) continue;
-
-	      const dySvg = _mplDeltaY_to_svgDeltaY(ycG - yc0);
-
-	      const defs = _ensureDefs(mg);
-	      const mp = defs.querySelector(`path[id="dzv-${id} - morph"]`);
-	      if (!mp) continue;
-
-	      items.push({
-	        id,
-	        mg,
-	        useEl: u,
-	        morphPath: mp,
-	        dySvg,
-	        useWarp,
-	        _c: c,
-	        yc0
-	      });
-	    }
-
-
-	    const durOptToOld = Math.max(1, +opts.durOptToOldMs || 2500);
-
-	    const _dzv = (typeof window !== "undefined") ? (window.dzv || (window.dzv = {})) : {};
-
-
-	    const _map = is_circle? _dzv._circleYOptAbsByIdC:_dzv._circleYOptAbsById;
-	    for (let i = 0; i < items.length; i++) {
-	      const it = items[i];
-	      it._dyCircleOld = it.dySvg;
-
-	      const c = it._c || cache[it.id];
-	      const cy0 = c ? c.cy : 0;
-
-	      const yAbs = (_map && _map._ready) ? _map[it.id] : Number.NaN;
-	      if (Number.isFinite(yAbs)) {
-	        it._dyCircleStart = yAbs - cy0;
-	      } else {
-	        it._dyCircleStart = it.dySvg;
-	      }
-	    }
-
-	    function _snapOpacityTriplet(useEl) {
-	      let cs = null;
-	      try {
-	        cs = getComputedStyle(useEl);
-	      } catch {
-	        cs = null;
-	      }
-
-	      const aOp = useEl.getAttribute("opacity");
-	      const aFo = useEl.getAttribute("fill-opacity");
-	      const aSo = useEl.getAttribute("stroke-opacity");
-
-	      let opT = Number.NaN,
-	        foT = Number.NaN,
-	        soT = Number.NaN;
-
-	      if (aOp != null && aOp !== "") opT = parseFloat(aOp);
-	      if (aFo != null && aFo !== "") foT = parseFloat(aFo);
-	      if (aSo != null && aSo !== "") soT = parseFloat(aSo);
-
-	      if (!Number.isFinite(opT) && cs) opT = parseFloat(cs.opacity);
-	      if (!Number.isFinite(foT) && cs) foT = parseFloat(cs.fillOpacity);
-	      if (!Number.isFinite(soT) && cs) soT = parseFloat(cs.strokeOpacity);
-
-	      if (!Number.isFinite(opT)) opT = 1;
-	      if (!Number.isFinite(foT)) foT = 1;
-	      if (!Number.isFinite(soT)) soT = 1;
-
-	      if (opT < 0) opT = 0;
-	      else if (opT > 1) opT = 1;
-	      if (foT < 0) foT = 0;
-	      else if (foT > 1) foT = 1;
-	      if (soT < 0) soT = 0;
-	      else if (soT > 1) soT = 1;
-
-	      return {
-	        aOp,
-	        aFo,
-	        aSo,
-	        opT,
-	        foT,
-	        soT
-	      };
-	    }
-
-       
-		//introduce light rearrangmeent in case the scale is changed for circles.Items available, so rx,rx,cxmincxmax,x,y are al available.
-		
-		let kx=window.dzv.circle_kx, ky=window.dzv.circle_ky;
-		
-			
-		
-		if (is_circle && !useWarp)
-		  {
-		    const ns = "http://www.w3.org/2000/svg";
-		    const c = document.createElementNS(ns, "circle");
-		    c.setAttribute("cx", 0);
-		    c.setAttribute("cy", 0);
-		    c.setAttribute("r", 1000);
-		      
-		    // Invisible but still in the render tree (so getScreenCTM works)
-		    c.setAttribute("fill", "none");
-		    c.setAttribute("stroke", "none");
-		    c.setAttribute("opacity", "0");
-		    c.style.pointerEvents = "none";
-		      
-		    svg.appendChild(c);
-  
-		    const sc = _dzvScreenScaleXY(c);
-			c.parentNode.removeChild(c);
-			
-            const sx = sc.sx, sy = sc.sy;
-            const ratio = sy / sx;
-		
-	       if (Number.isFinite(ratio) && ratio > 1e-6 && ratio < 1e6 && Math.abs(ratio - 1) > 1e-4){
-               kx = Math.sqrt(ratio);
-               ky = 1 / kx;
-	         }
-			 
-			const rat1 = window.dzv.circle_kx/kx;
-
-			
-			if (rat1 < 1.0/1.1 || rat1 > 1.1 ) 
-			 {
-              
-			  window.dzv._computeOptimizedEllipseY(items, is_circle, kx, ky);
-			
-			  const _map = is_circle? _dzv._circleYOptAbsByIdC:_dzv._circleYOptAbsById;
-				for (let i = 0; i < items.length; i++) {
-				  const it = items[i];
-				  it._dyCircleOld = it.dySvg;
-
-				  const c = it._c || cache[it.id];
-				  const cy0 = c ? c.cy : 0;
-
-				  const yAbs = (_map && _map._ready) ? _map[it.id] : Number.NaN;
-				  if (Number.isFinite(yAbs)) {
-					it._dyCircleStart = yAbs - cy0;
-				  } else {
-					it._dyCircleStart = it.dySvg;
-				  }
-				}
-			}	
-			 global_from = build_array_from_data(dzv.linear_stacked_path_circle, 512);
-			
-			 crt_stack.setAttribute("d", dzv.linear_stacked_path_circle);
-			
-		
-	     } 
-				
-	    for (let i = 0; i < items.length; i++) {
-	      const it = items[i];
-
-	      it._opRec = _snapOpacityTriplet(it.useEl);
-
-	      // Hide first to avoid first-frame flashes on some browsers; we show it next frame at opacity 0.
-	      it.useEl.style.display = "none";
-
-	      it.useEl.setAttribute("opacity", "0");
-	      it.useEl.setAttribute("fill-opacity", "0");
-	      it.useEl.setAttribute("stroke-opacity", "0");
-
-	      // Switch to morph path and set circle as step 0.
-	      const cRec = it._c || cache[it.id];
-
-	      let fromArr = is_circle ? _circleArrayForItem(cRec):_ellipseArrayForItem(cRec);
-		  
-		    
-	      if (useWarp) {
-	        fromArr = _warpArrayX(fromArr);
-	      }
-
-
-		  if (is_circle && !useWarp)
-		  {
-
-		    if (Math.abs(kx - 1) > 1e-4){
-				let map = dzv._circleCxById;
-				for (let k=0;k<fromArr.length;k+=2)
-				  {
-				   let cx = map[cRec.id];
-				   fromArr[k] = cx + (fromArr[k] - cx) * kx;
-				   fromArr[k+1] = cRec.cy + (fromArr[k+1] - cRec.cy) * ky;
-		         }
-
-			 }
-		  }		
-		  
-		 let dCircle0 = d_from_array(fromArr);
-
-	      _setUseHref(it.useEl, `#dzv-${it.id} - morph`);
-	      it.morphPath.setAttribute("d", dCircle0); 
-			
-
-
-	      it._m_from = fromArr;
-
-
-	      if (useWarp)
-	        it._m_to = _warpArrayX(cRec.PathLin);
-	      else
-	        it._m_to = cRec.PathLin;
-
-	      it._m_tmp = new Float64Array(it._m_to);
-
-	      const dyStart = (Number.isFinite(it._dyCircleStart) ? it._dyCircleStart : it.dySvg);
-	      if (dyStart !== 0) it.useEl.setAttribute("transform", `translate(0 ${dyStart})`);
-	      else it.useEl.removeAttribute("transform");
-	    }
-		
-
-	    let tFade0 = 0;
-
-	    function animFade(now) {
-	      if (!tFade0) tFade0 = now;
-	      const tt = Math.min(1, (now - tFade0) / durFade);
-	      const e = _easeCos01(tt);
-		  
-		  
-
-		  gUse.setAttribute("opacity", String(e));
-		  gUse.setAttribute("fill-opacity", String(e));
-		  gUse.setAttribute("stroke-opacity", String(e));
-		
-	      for (let i = 0; i < items.length; i++) {
-	        const it = items[i];
-	        const r = it._opRec;
-	        if (!r) continue;
-	        it.useEl.setAttribute("opacity", String(r.opT * e));
-	        it.useEl.setAttribute("fill-opacity", String(r.foT * e));
-	        it.useEl.setAttribute("stroke-opacity", String(r.soT * e));
-	      }
-	      if (tt < 1) requestAnimationFrame(animFade);
-	      else {
-		    gUse.removeAttribute("opacity");
-			gUse.removeAttribute("fill-opacity");
-			gUse.removeAttribute("stroke-opacity");
-	        for (let i = 0; i < items.length; i++) {
-	          const it = items[i];
-	          const r = it._opRec;
-	          if (!r) continue;
-
-	          if (r.aOp != null && r.aOp !== "") it.useEl.setAttribute("opacity", r.aOp);
-	          else it.useEl.removeAttribute("opacity");
-
-	          if (r.aFo != null && r.aFo !== "") it.useEl.setAttribute("fill-opacity", r.aFo);
-	          else it.useEl.removeAttribute("fill-opacity");
-
-	          if (r.aSo != null && r.aSo !== "") it.useEl.setAttribute("stroke-opacity", r.aSo);
-	          else it.useEl.removeAttribute("stroke-opacity");
-	        }
-			 
-	        _pauseThen(startMorph, 5000);
-	      }
-	    }
-
-
-
-	    function d_from_array(arr, closed = true) {
-	      // arr: [x0,y0,x1,y1,...]
-	      // closed: true -> append Z
-	      const a = arr || [];
-	      const n = a.length | 0;
-	      if (n < 4) return "";
-
-	      function fmt(x) {
-	        if (!Number.isFinite(x)) return "0";
-	        const v = Math.round(x * 1e4) / 1e4;
-	        return (Math.abs(v) < 1e-10) ? "0" : String(v);
-	      }
-
-	      let d = "M " + fmt(a[0]) + " " + fmt(a[1]);
-	      for (let i = 2; i + 1 < n; i += 2) {
-	        d += " L " + fmt(a[i]) + " " + fmt(a[i + 1]);
-	      }
-	      if (closed) d += " Z";
-	      return d;
-	    }
-	    const global_tmp = new Float64Array(global_from.length);
-
-
-
-
-	function startMorph() {
-	  if (top_label) setSvgTextSmart(top_label, stages_labels[1]);
-	  //let cntr = 0;
-
-	  const t0 = performance.now();
-
-	  function mi_ma_y(dat) {
-		let miy = Infinity, may = -Infinity;
-		for (let i = 1; i < dat.length; i += 2) {
-		  const y = dat[i];
-		  if (y < miy) miy = y;
-		  if (y > may) may = y;
-		}
-		return [miy, may];
-	  }
-
-	  function _stripTranslate(t) {
-		return (t || "").replace(/translate\(\s*[^)]+\)/ig, "").trim();
-	  }
-
-	  function _setTranslateYPreserve(el, baseT, ty) {
-		const t1 = (baseT || "").trim();
-		if (ty !== 0) {
-		  const t = (t1.length ? (t1 + " ") : "") + `translate(0 ${ty})`;
-		  el.setAttribute("transform", t);
-		} else {
-		  if (t1.length) el.setAttribute("transform", t1);
-		  else el.removeAttribute("transform");
-		}
-	  }
-
-	  // Global envelope baseline (same coordinate space as arrays)
-	  const [miy_orig, may_orig] = mi_ma_y(global_from);
-	  const h_orig = may_orig - miy_orig;
-
-	  // Per-item baseline: center in FROM coords + normalized screen-position within the envelope
-	  for (let i = 0; i < items.length; i++) {
-		const it = items[i];
-
-		const [miy_it, may_it] = mi_ma_y(it._m_from);
-		it.y_center0 = (miy_it + may_it) * 0.5;
-
-		if (it._baseTransform == null) {
-		  const t = it.useEl.getAttribute("transform") || "";
-		  it._baseTransform = _stripTranslate(t);
-		}
-
-		if (!Number.isFinite(it._dyCircleStart)) it._dyCircleStart = 0;
-
-		// screen-start center (this is what you actually see before morph)
-		const y0_screen = it.y_center0 + it._dyCircleStart;
-
-		// normalized position within original envelope using the visible position
-		let p = 0.5;
-		if (h_orig > 0) p = (y0_screen - miy_orig) / h_orig;
-		if (p < 0) p = 0; else if (p > 1) p = 1;
-		it._p0 = p;
-
-		// apply baseline at start
-		_setTranslateYPreserve(it.useEl, it._baseTransform, it._dyCircleStart);
-	  }
-
-	  function animMorph(now) { 
-	  
-	    //cntr +=1;
-
-		const tt = Math.min(1, (now - t0) / durMorph);
-		const e0 = _easeCos01(tt);
-
-		// avoid exact 0/1 so morph_array2 never returns a/b by reference
-		const e = (e0 <= 0) ? 1e-9 : (e0 >= 1) ? (1 - 1e-9) : e0;
-
-		const glb = morph_array2(global_from, global_to, global_tmp, e);
-		const [miy_now, may_now] = mi_ma_y(glb);
-		const h_now = may_now - miy_now;
-
-		crt_stack.setAttribute("d", d_from_array(glb));
-
-		for (let i = 0; i < items.length; i++) {
-		  const it = items[i];
-
-		  const itmp = morph_array2(it._m_from, it._m_to, it._m_tmp, e);
-
-		  // map the original visible position fraction to current envelope
-		  const y_target = miy_now + it._p0 * h_now;
-
-		  // total translate needed so that on-screen center becomes y_target
-		  const dy_total = y_target - it.y_center0;
-
-		  it._dyMorph = dy_total;
-		  _setTranslateYPreserve(it.useEl, it._baseTransform, dy_total);
-
-		  if (it.morphPath) it.morphPath.setAttribute("d", d_from_array(itmp));
-		}
-
-		if (tt < 1) {
-		  requestAnimationFrame(animMorph);
-		} else {
-		  //console.log(cntr);
-		  for (let i = 0; i < items.length; i++) {
-			const it = items[i];
-			it._dyCircleStart = it._dyMorph;
-			it._dyMorph = 0;
-			it._p0 = 0;
-
-			it._m_from = null;
-			it._m_to = null;
-			it._m_tmp = null;
-		  }
-
-		  _setUseHref(gUse, "#dzv-00-0000 - full");
-		  _pauseThen(startMoveDown, 5000);
-		}
-	  }
-
-	  requestAnimationFrame(animMorph);
-	}
-
-
-	    function startMoveDown() {
-	      if (top_label) setSvgTextSmart(top_label, stages_labels[2]);
-	      const t1 = performance.now();
-
-	      function animMove(now) {
-	        const tt = Math.min(1, (now - t1) / durMove);
-	        const e = _easeCos01(tt);
-	        for (let i = 0; i < items.length; i++) {
-	          const it = items[i];
-	          const dy0 = (Number.isFinite(it._dyCircleStart) ? it._dyCircleStart : it.dySvg);
-	          const dy = (1 - e) * dy0;
-	          if (dy !== 0) it.useEl.setAttribute("transform", `translate(0 ${dy})`);
-	          else it.useEl.removeAttribute("transform");
-	        }
-	        if (tt < 1) requestAnimationFrame(animMove);
-	        else _pauseThen(startMajorEdgesFadeIn, 2500); // NEW step inserted here
-	      }
-	      requestAnimationFrame(animMove);
-	    }
-
-	    // NEW: fade in major edges (nn-0000) before finishSwap()
-
-
-
-
-	    function startMajorEdgesFadeIn() {
-		  
-	      // Select ONLY major edges, excluding global 00-0000
-		  
-		  
-	      const sel = ['g[id$="0000 - edge"]', 'text[id$="0000 - label"]'].join(",");
-	      const edgeGs = svg.querySelectorAll(sel);
-	      const majors = [];
-	      const majors_labels = [];
-
-	      for (let i = 0; i < edgeGs.length; i++) {
-	        const g = edgeGs[i];
-	        const gid = g.getAttribute("id") || "";
-	        const m = gid.match(/^(\d\d-\d\d\d\d)\s/);
-	        if (!m) continue;
-	        const baseId = m[1];
-	        if (!baseId.endsWith("-0000")) continue;
-	        if (baseId === "00-0000") continue;
-
-	        if (gid.endsWith("label")) {
-	          g.setAttribute("opacity", "0");
-	          majors_labels.push({
-	            g
-	          });
-	          continue;
-	        }
-
-	        // Important: collect ALL visible primitives in the edge group
-	        const uses = g.querySelectorAll("use");
-	        if (!uses || !uses.length) continue;
-
-	        // Snapshot targets per element (computed targets), but do NOT make it visible yet
-	        const recs = new Array(uses.length);
-	        for (let k = 0; k < uses.length; k++) {
-	          recs[k] = _snapOpacityTriplet(uses[k]);
-	          // Force 0 while still hidden (prevents the “first painted frame at 1”)
-	          uses[k].setAttribute("opacity", "0");
-	          uses[k].setAttribute("fill-opacity", "0");
-	          uses[k].setAttribute("stroke-opacity", "0");
-
-	          // Also force style opacity for safety against presentation attribute quirks
-	          uses[k].style.opacity = "0";
-	        }
-
-	        // Keep hidden for this tick, then show with opacity already at 0
-	        majors.push({
-	          g,
-	          uses,
-	          recs
-	        });
-	      }
-
-	      if (!majors.length && !majors_labels.length) {
-	        _pauseThen(finishSwap, 3500);
-	        return;
-	      }
-
-	      // Make them visible in a separate frame, still at opacity 0
-	      //requestAnimationFrame
-		  _pauseThen(() => {
-		   
-	        for (let i = 0; i < majors.length; i++) {
-	          majors[i].g.style.display = "";
-	        }
-
-	        for (let i = 0; i < majors_labels.length; i++) {
-	          majors_labels[i].g.style.display = "";
-	        }
-			
-			if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
-			if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
-			  
-
-	        const t0 = performance.now();
-            let changed_text = false;
-	        function animMajors(now) {
-	          const tt = Math.min(1, (now - t0) / durMajorEdgeFade);
-	          const e = _easeCos01(tt);
-			  
-			  //if (e>0.1)
-			    {
-				 if (!changed_text)
-				  {
-				   changed_text = true;
-				   if (top_label) setSvgTextSmart(top_label, stages_labels[3]);
-				  }
-				}
-
-	          for (let i = 0; i < majors_labels.length; i++) {
-	            const it = majors_labels[i];
-	            it.g.setAttribute("opacity", String(e));
-	          }
-	          for (let i = 0; i < majors.length; i++) {
-	            const it = majors[i];
-	            for (let k = 0; k < it.uses.length; k++) {
-	              const u = it.uses[k];
-	              const r = it.recs[k];
-	              u.setAttribute("opacity", String(r.opT * e));
-	              u.setAttribute("fill-opacity", String(r.foT * e));
-	              u.setAttribute("stroke-opacity", String(r.soT * e));
-	              u.style.opacity = String(r.opT * e);
-	            }
-	          }
-
-	          if (tt < 1) requestAnimationFrame(animMajors);
-	          else {
-	            // Restore exact attribute state so CSS governs normally
-	            for (let i = 0; i < majors_labels.length; i++) {
-	              const it = majors_labels[i];
-	              it.g.removeAttribute("opacity");
-	            }
-
-	            for (let i = 0; i < majors.length; i++) {
-	              const it = majors[i];
-	              for (let k = 0; k < it.uses.length; k++) {
-	                const u = it.uses[k];
-	                const r = it.recs[k];
-
-	                if (r.aOp != null && r.aOp !== "") u.setAttribute("opacity", r.aOp);
-	                else u.removeAttribute("opacity");
-
-	                if (r.aFo != null && r.aFo !== "") u.setAttribute("fill-opacity", r.aFo);
-	                else u.removeAttribute("fill-opacity");
-
-	                if (r.aSo != null && r.aSo !== "") u.setAttribute("stroke-opacity", r.aSo);
-	                else u.removeAttribute("stroke-opacity");
-
-	                u.style.opacity = "";
-	              }
-	            }
-
-	            _pauseThen(finishSwap, 3500);
-	          }
-	        }
-	        requestAnimationFrame(animMajors);
-	      });
-	    }
-
-	    function applyCarvedOverTime(items, durationMs) {
-	      
-	      items.sort((a, b) => (Math.abs(a.yc0) - Math.abs(b.yc0)) || (a.id < b.id ? -1 : (a.id > b.id ? 1 : 0)));
-
-
-	      return new Promise((resolve) => {
-	        const n = items.length;
-	        const dur = Math.max(0, +durationMs || 0);
-
-	        if (n <= 0) {
-	          if (dur <= 0) resolve();
-	          else setTimeout(resolve, dur);
-	          return;
-	        }
-
-	        const t0 = performance.now();
-	        const tEnd = t0 + dur;
-	        let done = 0;
-	        let raf = 0;
-	        let finished = false;
-
-	        function applyOne(it) {
-	          it.useEl.removeAttribute("transform");
-	          _setUseHref(it.useEl, `#dzv-${it.id} - carved`);
-	          //it.useEl.removeAttribute("opacity");
-	        }
-
-	        function tick(now) {
-	          if (finished) return;
-
-	          const frac = dur > 0 ? Math.min(1, Math.max(0, (now - t0) / dur)) : 1;
-	          const want = Math.min(n, Math.floor(frac * n + 1e-9)); // stable floor
-
-	          for (; done < want; done++) {
-	            applyOne(items[done]);
-	          }
-
-	          if (done < n || now < tEnd) {
-	            raf = requestAnimationFrame(tick);
-	          }
-	        }
-
-	        function finalize() {
-	          if (finished) return;
-	          finished = true;
-	          if (raf) cancelAnimationFrame(raf), (raf = 0);
-
-	          for (; done < n; done++) {
-	            applyOne(items[done]);
-	          }
-	          resolve();
-	        }
-
-	        // Start gradual application.
-	        raf = requestAnimationFrame(tick);
-
-	        // Guarantee: do not resolve before durationMs.
-	        if (dur <= 0) {
-	          finalize();
-	        } else {
-	          const delay = Math.max(0, tEnd - performance.now());
-	          setTimeout(finalize, delay);
-	        }
-	      });
-	    }
-
-	    
-
-	    function finishSwap() {
-
-	      applyCarvedOverTime(items, 2500).then(() => {
-	        setTimeout(() => {
-	          _hideMajorsExceptGlobal(false);
-	          resumeAllPointer();
-
-	          if (top_label) setSvgTextSmart(top_label, crt_text);
-	          if (top_label) top_label.style.fill = crt_color;
-			  if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
-			  if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
-	          window.dzv.animating = false;
-	        }, 4500);
-
-	      });
-	    }
-	    // Make them visible in a separate frame, still at opacity 0, then fade in.
-	    requestAnimationFrame(() => {
-		  gUse.style.display = "";
-	      for (let i = 0; i < items.length; i++) {
-	        items[i].useEl.style.display = "";
-	      }
-
-	      requestAnimationFrame(animFade);
-	    });
-	  }
-
 function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
   dzvInitCircleMorphCacheOnce();
   const cache = (window.dzv && window.dzv._circleMorphCache) ? window.dzv._circleMorphCache : null;
   if (!cache) return;
 
-  //patch2
-  const patch2Path = svg.querySelector('g#figure_1 > g#axes_1 > g#patch_2 path');
-  // ------------------------------------------------------------
-// Pause controller singleton: freezes timebase while paused.
-// Timers are REAL setTimeouts, canceled on pause and rescheduled on resume.
-// This removes RAF-timer storms (the cause of the long resume delay).
-// ------------------------------------------------------------
-window.dzv = window.dzv || {};
-if (!window.dzv._circleToViolinPauseCtrl) {
-  window.dzv._circleToViolinPauseCtrl = {
-    paused: false,
-
-    _pausedTotal: 0,
-    _pauseRaw: 0,
-    _pauseAdj: 0,
-
-    // active timers: id -> { fn, dueAdj }
-    _timers: new Map(),
-    // pending timers while paused: { fn, msRemaining }
-    _pending: [],
-
-    // Convert a raw RAF timestamp (or performance.now()) to adjusted time.
-    now(rawNow) {
-      if (this.paused) return this._pauseAdj;
-      return rawNow - this._pausedTotal;
-    },
-
-    pause() {
-      if (this.paused) return;
-
-      const raw = performance.now();
-      const adj = raw - this._pausedTotal;
-
-      this._pauseRaw = raw;
-      this._pauseAdj = adj;
-      this.paused = true;
-
-      // Convert all live timers into remaining time and cancel them.
-      for (const [id, rec] of this._timers.entries()) {
-        clearTimeout(id);
-        const rem = Math.max(0, rec.dueAdj - adj);
-        this._pending.push({ fn: rec.fn, msRemaining: rem });
-      }
-      this._timers.clear();
-    },
-
-    resume() {
-      if (!this.paused) return;
-
-      const raw = performance.now();
-      this._pausedTotal += (raw - this._pauseRaw);
-      this.paused = false;
-
-      // Reschedule pending timers with their remaining unpaused time.
-      const pend = this._pending;
-      this._pending = [];
-      for (let i = 0; i < pend.length; i++) {
-        this.setTimeout(pend[i].fn, pend[i].msRemaining);
-      }
-    },
-
-    // Pause-aware timeout: fires after ms of UNPAUSED time.
-    setTimeout(fn, ms) {
-      ms = Math.max(0, +ms || 0);
-
-      if (this.paused) {
-        this._pending.push({ fn, msRemaining: ms });
-        return 0;
-      }
-
-      const dueAdj = this.now(performance.now()) + ms;
-
-      const id = setTimeout(() => {
-        // If we got paused before firing, defer it with remaining time.
-        this._timers.delete(id);
-
-        if (!this.paused) {
-          if (fn) fn();
-        } else {
-          const adjNow = this._pauseAdj; // frozen
-          const rem = Math.max(0, dueAdj - adjNow);
-          this._pending.push({ fn, msRemaining: rem });
-        }
-      }, ms);
-
-      this._timers.set(id, { fn, dueAdj });
-      return id;
-    },
-  };
-}
-const _pause = window.dzv._circleToViolinPauseCtrl;
-
-// One place: create/style + pin pause button to patch_2 bottom-right (screen-space)
-// Updates on window resize only.
-
-function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
-  //let b = document.getElementById("dzv_pause_btn");
-  if (!b) {
-    b = document.createElement("button");
-    b.id = "dzv_pause_btn";
-    b.type = "button";
-    document.body.appendChild(b);
-  }
-
-  // icon-only styling (no border)
-  b.style.position = "fixed";
-  b.style.border = "0";
-  b.style.outline = "0";
-  b.style.background = "transparent";
-  b.style.padding = "0";
-  b.style.margin = "0";
-  b.style.width = `${sizePx}px`;
-  b.style.height = `${sizePx}px`;
-  b.style.display = "grid";
-  b.style.placeItems = "center";
-  b.style.cursor = "pointer";
-  b.style.zIndex = "999999";
-  b.style.userSelect = "none";
-  b.style.webkitTapHighlightColor = "transparent";
-  b.style.touchAction = "manipulation";
-
-  function place() {
-    if (!patch2Path) return;
-    const r = patch2Path.getBoundingClientRect();
-    if (!(r && isFinite(r.right) && isFinite(r.bottom) && r.width > 0 && r.height > 0)) return;
-
-    const bw = b.offsetWidth || sizePx;
-    const bh = b.offsetHeight || sizePx;
-
-    b.style.left = `${Math.round(r.right - padPx - bw)}px`;
-    b.style.top  = `${Math.round(r.bottom - padPx - bh)}px`;
-  }
-
-  // resize only
-  window.addEventListener("resize", () => requestAnimationFrame(place), { passive: true });
-
-  // initial placement (plus one more frame for safety)
-  place();
-  requestAnimationFrame(place);
-
-  return { btn: b, place };
-}
-
-
-  // Pause button (single instance, always uses the singleton controller).
-  if (opts.pauseButton !== false) {
-    let b = document.getElementById("dzv_pause_btn");
-    if (!b) {
-      b = document.createElement("button");
-      b.id = "dzv_pause_btn";
-      b.type = "button";
-      b.style.position = "fixed";
-      b.style.right = "16px";
-      b.style.bottom = "16px";
-      b.style.zIndex = "999999";
-      b.style.padding = "8px 10px";
-      b.style.font = "12px sans-serif";
-      b.style.opacity = "0.85";
-      b.style.cursor = "pointer";
-      document.body.appendChild(b);
-    }
-    b.style.display = "";
-	/*
-    b.textContent = _pause.paused ? "Resume" : "Pause";
-    b.onclick = () => {
-      const ctrl = window.dzv._circleToViolinPauseCtrl;
-      if (!ctrl) return;
-      if (!ctrl.paused) { ctrl.pause(); b.textContent = "Resume"; }
-      else { ctrl.resume(); b.textContent = "Pause"; }
-    };
-	*/
-	b.style.padding = "6px";
-	b.style.lineHeight = "0";
-	b.style.display = "inline-flex";
-	b.style.alignItems = "center";
-	b.style.justifyContent = "center";
-
-	// two icons
-	const ICON_PAUSE = `
-	<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-	  <rect x="3" y="2.5" width="3.2" height="11" rx="0.8" fill="#666"></rect>
-	  <rect x="9.8" y="2.5" width="3.2" height="11" rx="0.8" fill="#666"></rect>
-	</svg>`;
-
-	const ICON_PLAY = `
-	<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-	  <path d="M5 3.2v9.6L13 8 5 3.2z" fill="#666"></path>
-	</svg>`;
-
-	// set icon
-	b.innerHTML = (_pause.paused ? ICON_PLAY : ICON_PAUSE);
-
-	// later, when toggling:
-	b.onclick = () => {
-	  const ctrl = window.dzv._circleToViolinPauseCtrl;
-	  if (!ctrl.paused) { ctrl.pause(); b.innerHTML = ICON_PLAY; }
-	  else { ctrl.resume(); b.innerHTML = ICON_PAUSE; }
-	};
-    b.style.pointerEvents = "auto";
-	dzvInitPauseBtnPinnedToPatch2(b, patch2Path);
-  }
-
   const durMorph = Math.max(1, +opts.durMorphMs || 3000);
   const durMove  = Math.max(1, +opts.durMoveMs  || 3000);
   const durFade  = Math.max(1, +opts.durFadeMs  || 3000);
 
-  // New: fade majors' edges in before finishSwap
+  // fade majors' edges in before finishSwap
   const durMajorEdgeFade = Math.max(1, +opts.durMajorEdgeFadeMs || 2000);
 
   const useWarp = !!(window.dzv && (+window.dzv.warpingFactor > 0.5));
@@ -11004,9 +9667,9 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
   const [vbX, , vbW] = vb;
 
   function warpX(x) {
-    const u = (x - vbX) / vbW;
+    const u  = (x - vbX) / vbW;
     const uw = _m_warpFn(u);
-    const uMix = u + /*warpingFactor * */ (uw - u);
+    const uMix = u + (uw - u);
     return vbX + vbW * uMix;
   }
 
@@ -11021,27 +9684,178 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
 
   function _ellipseArrayForItem(c) {
     const uOfS = (window.dzv && window.dzv._halfEllipse_uOfS) ? window.dzv._halfEllipse_uOfS : null;
-    let map = window.dzv._ellipseCxById;
+    const map = window.dzv._ellipseCxById;
     return ellipseContourPointsSym(map[c.id], c.cy, c.rx, c.ry, c.k, true, uOfS);
   }
+
   function _circleArrayForItem(c) {
     const uOfS = (window.dzv && window.dzv._halfEllipse_uOfS) ? window.dzv._halfEllipse_uOfS : null;
-    let map = window.dzv._circleCxById;
+    const map = window.dzv._circleCxById;
     return ellipseContourPointsSym(map[c.id], c.cy, c.r, c.r, c.k, true, uOfS);
   }
 
-  const pauseMs = Math.max(0, +opts.pauseMs || 3000);
+  // ------------------------------------------------------------
+  // Pause controller singleton: freeze timebase (for a single master loop).
+  // No timers needed in this rewrite.
+  // ------------------------------------------------------------
+  window.dzv = window.dzv || {};
+  if (!window.dzv._circleToViolinPauseCtrl) {
+    window.dzv._circleToViolinPauseCtrl = {
+      paused: false,
+      _pausedTotal: 0,
+      _pauseRaw: 0,
+      _pauseAdj: 0,
+      _resumeKick: null,
+      now(rawNow) {
+        if (this.paused) return this._pauseAdj;
+        return rawNow - this._pausedTotal;
+      },
+      pause() {
+	    window.dzv.morphing = true;
+		const blk = document.getElementById("dzv_anim_blocker");
+		if (blk) blk.style.display = "none";
 
-  function _pauseThen(fn, pause_time) {
-    if (pause_time == null) pause_time = pauseMs;
-    pause_time = Math.max(0, +pause_time || 0);
-    if (pause_time > 0) _pause.setTimeout(fn || (()=>{}), pause_time);
-    else { if (fn) fn(); }
+        if (this.paused) return;
+        const raw = performance.now();
+        this._pauseAdj = raw - this._pausedTotal;
+        this._pauseRaw = raw;
+        this.paused = true;
+      },
+      resume() {
+	  const blk = document.getElementById("dzv_anim_blocker");
+		if (blk) blk.style.display = "";
+	     window.dzv.morphing = false;
+        if (!this.paused) return;
+        const raw = performance.now();
+        this._pausedTotal += (raw - this._pauseRaw);
+        this.paused = false;
+              const k = this._resumeKick;
+        if (typeof k === "function") k();
+      },
+    };
   }
+  const _pause = window.dzv._circleToViolinPauseCtrl;
 
   // ------------------------------------------------------------
-  // Pointer suspend that keeps pause button clickable, always.
-  // Uses an overlay blocker instead of body.pointerEvents.
+  // Pause button: icon-only, pinned to patch2 bottom-right (resize only)
+  // ------------------------------------------------------------
+  const SVG_PAUSE = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+  <rect x="6" y="4" width="4" height="16" rx="1" fill="#666"></rect>
+  <rect x="14" y="4" width="4" height="16" rx="1" fill="#666"></rect>
+</svg>`;
+  const SVG_PLAY = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+  <path d="M8.75 5.7v12.6c0 .95 1.03 1.55 1.86 1.05l9.95-6.3c.78-.5.78-1.6 0-2.1L10.61 4.65c-.83-.5-1.86.1-1.86 1.05z" fill="#666"/>
+</svg>`;
+
+
+
+
+  const patch2Path = svg.querySelector('g#figure_1 > g#axes_1 > g#patch_2 path');
+
+  function _ensurePauseBtnPinned(sizePx = 20, padPx = 8) {
+    let b = document.getElementById("dzv_pause_btn");
+    if (!b) {
+      b = document.createElement("button");
+      b.id = "dzv_pause_btn";
+      b.type = "button";
+      document.body.appendChild(b);
+    }
+
+    // icon-only
+    b.style.position = "fixed";
+    b.style.border = "0";
+    b.style.outline = "0";
+    b.style.background = "transparent";
+    b.style.padding = "0";
+    b.style.margin = "0";
+    b.style.width = `${sizePx}px`;
+    b.style.height = `${sizePx}px`;
+    b.style.display = "grid";
+    b.style.placeItems = "center";
+    b.style.cursor = "pointer";
+    b.style.zIndex = "999999";
+    b.style.userSelect = "none";
+    b.style.webkitTapHighlightColor = "transparent";
+    b.style.touchAction = "manipulation";
+
+    function setIcon(paused) {
+      b.innerHTML = paused ? SVG_PLAY : SVG_PAUSE;
+    }
+
+    function place() {
+      if (!patch2Path) return;
+      const r = patch2Path.getBoundingClientRect();
+      if (!(r && isFinite(r.right) && isFinite(r.bottom) && r.width > 0 && r.height > 0)) return;
+      const bw = b.offsetWidth || sizePx;
+      const bh = b.offsetHeight || sizePx;
+      b.style.left = `${Math.round(r.right - padPx - bw)}px`;
+      //b.style.top  = `${Math.round(r.bottom - padPx - bh)}px`;
+	  b.style.top  = `${Math.round(r.top + padPx)}px`;
+    }
+
+    b.onclick = () => {
+      if (!_pause.paused) _pause.pause();
+      else _pause.resume();
+      setIcon(_pause.paused);
+    };
+
+    setIcon(_pause.paused);
+    b.style.display = "";
+
+    const onResize = () => requestAnimationFrame(place);
+    window.addEventListener("resize", onResize, { passive: true });
+	window.addEventListener("orientationchange", onResize, { passive: true });
+	window.addEventListener("fullscreenchange", onResize, { passive: true });
+	window.addEventListener("scroll", onResize, { passive: true });
+
+    place();
+    requestAnimationFrame(place);
+
+    return { btn: b, place, setIcon };
+  }
+
+  const _pauseBtn = (opts.pauseButton === false) ? null : _ensurePauseBtnPinned(16, 6);
+
+  
+  // ------------------------------------------------------------
+  // Visibility safety: if tab/window is hidden/unfocused while animating,
+  // auto-pause to prevent time jumping to the end on resume. Do NOT auto-resume.
+  // ------------------------------------------------------------
+  const _dzvVisPause = {
+    _onVis: null,
+    _onBlur: null,
+    install() {
+      if (this._onVis || this._onBlur) return;
+
+      this._onVis = () => {
+        if (!window.dzv || !window.dzv.animating) return;
+        if (!document.hidden) return;
+        if (!_pause.paused) _pause.pause();
+        if (_pauseBtn && typeof _pauseBtn.setIcon === "function") _pauseBtn.setIcon(true);
+      };
+
+      this._onBlur = () => {
+        if (!window.dzv || !window.dzv.animating) return;
+        if (!_pause.paused) _pause.pause();
+        if (_pauseBtn && typeof _pauseBtn.setIcon === "function") _pauseBtn.setIcon(true);
+      };
+
+      document.addEventListener("visibilitychange", this._onVis, { passive: true });
+      window.addEventListener("blur", this._onBlur, { passive: true });
+    },
+    remove() {
+      if (this._onVis) document.removeEventListener("visibilitychange", this._onVis);
+      if (this._onBlur) window.removeEventListener("blur", this._onBlur);
+      this._onVis = null;
+      this._onBlur = null;
+    }
+  };
+  _dzvVisPause.install();
+
+// ------------------------------------------------------------
+  // Pointer suspend keeping pause btn clickable
   // ------------------------------------------------------------
   function _ensureAnimBlocker() {
     let blk = document.getElementById("dzv_anim_blocker");
@@ -11078,20 +9892,21 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
   function suspendAllPointer() {
     const blk = _ensureAnimBlocker();
     blk.style.display = "";
-    const b = document.getElementById("dzv_pause_btn");
-    if (b) {
-      b.style.pointerEvents = "auto";
-      b.style.zIndex = "999999";
+    if (_pauseBtn && _pauseBtn.btn) {
+      _pauseBtn.btn.style.pointerEvents = "auto";
+      _pauseBtn.btn.style.zIndex = "999999";
     }
   }
 
   function resumeAllPointer() {
     const blk = document.getElementById("dzv_anim_blocker");
     if (blk) blk.style.display = "none";
-    const b = document.getElementById("dzv_pause_btn");
-    if (b) b.style.pointerEvents = "auto";
+    if (_pauseBtn && _pauseBtn.btn) _pauseBtn.btn.style.pointerEvents = "auto";
   }
 
+  // ------------------------------------------------------------
+  // Text wrapping helper (kept identical to your current logic)
+  // ------------------------------------------------------------
   function dzvMaxWidthForSetSvgTextSmart(textEl, refEl) {
     const wPx = refEl.getBoundingClientRect().width;
     const m = textEl.getScreenCTM();
@@ -11101,8 +9916,6 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
     const pxPerTextUnitX = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
     return wPx / pxPerTextUnitX;
   }
-
-
 
   function setSvgTextSmartEsence(textEl, lines, lineDyEm = 1.5) {
     const SVG_NS = "http://www.w3.org/2000/svg";
@@ -11234,20 +10047,23 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
         }
         return acc;
       }
+
       return { measureRunsPx };
     })();
 
     function breakTokenToFit(tok, widthLimit) {
       const full = tok.text || "";
       if (!full) return { fitText: "", restText: "" };
+
       let lo = 1, hi = full.length, best = 1;
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;
         const prefix = full.slice(0, mid);
         const w = meas.measureRunsPx([{ text: prefix, bold: tok.bold }]);
-        if (w <= widthLimit) { best = mid; lo = lo + 1; lo = mid + 1; }
+        if (w <= widthLimit) { best = mid; lo = mid + 1; }
         else hi = mid - 1;
       }
+
       return { fitText: full.slice(0, best), restText: full.slice(best) };
     }
 
@@ -11306,7 +10122,6 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
           if (w0 > maxWidthPx) {
             const br = breakTokenToFit({ text: cur[0].text, bold: cur[0].bold }, maxWidthPx);
             cur[0].text = br.fitText;
-
             const backIdx = Math.max(0, i - 1);
             tokens[backIdx] = { text: br.restText, bold: cur[0].bold, isSpace: false };
             i = backIdx;
@@ -11334,6 +10149,7 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
     for (const lineRuns of visualLines) {
       const runsToDraw = (lineRuns && lineRuns.length) ? lineRuns : [{ text: "", bold: false }];
       let firstRunOnLine = true;
+
       for (let r = 0; r < runsToDraw.length; r++) {
         const run = runsToDraw[r];
         const t = document.createElementNS(SVG_NS, "tspan");
@@ -11358,10 +10174,13 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
     const ret = setSvgTextSmartEsence(textEl, lines, lineDyEm);
     const tspans = Array.from(textEl.querySelectorAll("tspan"));
     window.dzvTextAnisoApplyOne(textEl);
-    if (tspans) for (let i=0;i<tspans.length;i++) window.dzvTextAnisoApplyOne(tspans[i]);
+    if (tspans) for (let i = 0; i < tspans.length; i++) window.dzvTextAnisoApplyOne(tspans[i]);
     return ret;
   }
 
+  // ------------------------------------------------------------
+  // Core setup (mostly unchanged)
+  // ------------------------------------------------------------
   const metaRoot = svg.querySelector('g#dzv-geom-metadata');
   if (!metaRoot) return;
 
@@ -11370,20 +10189,72 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
   if (window.dzv.hide_highlight) window.dzv.hide_highlight();
   if (typeof window.justHideMenu === "function") window.justHideMenu();
   window.dzv.animating = true;
+  window.dzv.morphing = false;
 
   const global_id = '00-0000';
 
-  const gArea = svg.querySelector(`g[id="${global_id} - area"]`);
-  const gUse = gArea.querySelector("use");
+  const gArea0 = svg.querySelector(`g[id="${global_id} - area"]`);
+  const gUse = gArea0.querySelector("use");
   const gPath = document.getElementById('dzv-00-0000 - full');
 
-  let global_from;
+  function _setUseHref(useEl, href) {
+    try { useEl.setAttribute("href", href); } catch (e) {}
+    try { useEl.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", href); } catch (e) {}
+  }
 
+  function d_from_array(arr, closed = true) {
+    const a = arr || [];
+    const n = a.length | 0;
+    if (n < 4) return "";
+
+    function fmt(x) {
+      if (!Number.isFinite(x)) return "0";
+      const v = Math.round(x * 1e4) / 1e4;
+      return (Math.abs(v) < 1e-10) ? "0" : String(v);
+    }
+
+    let d = "M " + fmt(a[0]) + " " + fmt(a[1]);
+    for (let i = 2; i + 1 < n; i += 2) d += " L " + fmt(a[i]) + " " + fmt(a[i + 1]);
+    if (closed) d += " Z";
+    return d;
+  }
+
+  function _easeCos01(t) {
+    t = Math.max(0, Math.min(1, t));
+    return 0.5 - 0.5 * Math.cos(t * Math.PI);
+  }
+
+  function mi_ma_y(dat) {
+    let miy = Infinity, may = -Infinity;
+    for (let i = 1; i < dat.length; i += 2) {
+      const y = dat[i];
+      if (y < miy) miy = y;
+      if (y > may) may = y;
+    }
+    return [miy, may];
+  }
+
+  function _stripTranslate(t) {
+    return (t || "").replace(/translate\(\s*[^)]+\)/ig, "").trim();
+  }
+
+  function _setTranslateYPreserve(el, baseT, ty) {
+    const t1 = (baseT || "").trim();
+    if (ty !== 0) {
+      const t = (t1.length ? (t1 + " ") : "") + `translate(0 ${ty})`;
+      el.setAttribute("transform", t);
+    } else {
+      if (t1.length) el.setAttribute("transform", t1);
+      else el.removeAttribute("transform");
+    }
+  }
+
+  let global_from;
   if (!(is_circle && !useWarp)) {
     if (window.dzv.warpingFactor < 0.5)
-      global_from = build_array_from_data(is_circle ? dzv.linear_stacked_path_circle:dzv.linear_stacked_path_ellipse, 512);
+      global_from = build_array_from_data(is_circle ? dzv.linear_stacked_path_circle : dzv.linear_stacked_path_ellipse, 512);
     else
-      global_from = build_array_from_data(is_circle ? dzv.warped_stacked_path_circle:dzv.warped_stacked_path_ellipse, 512);
+      global_from = build_array_from_data(is_circle ? dzv.warped_stacked_path_circle : dzv.warped_stacked_path_ellipse, 512);
   }
 
   let global_to = build_array_from_p(gPath, 512);
@@ -11391,13 +10262,16 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
   _hideMajorsExceptGlobal(true);
   const crt_stack = document.getElementById('dzv-00-0000 - crt_stack');
 
-  if (!(is_circle && !useWarp))
-    crt_stack.setAttribute("d", (window.dzv.warpingFactor < 0.5) ? (is_circle ? dzv.linear_stacked_path_circle : dzv.linear_stacked_path_ellipse) :
-      (is_circle ? dzv.warped_stacked_path_circle : dzv.warped_stacked_path_ellipse));
+  if (!(is_circle && !useWarp)) {
+    crt_stack.setAttribute("d",
+      (window.dzv.warpingFactor < 0.5)
+        ? (is_circle ? dzv.linear_stacked_path_circle : dzv.linear_stacked_path_ellipse)
+        : (is_circle ? dzv.warped_stacked_path_circle : dzv.warped_stacked_path_ellipse)
+    );
+  }
 
   _setUseHref(gUse, "#dzv-00-0000 - crt_stack");
   gUse.style.display = "none";
-
   gUse.setAttribute("opacity", "0");
   gUse.setAttribute("fill-opacity", "0");
   gUse.setAttribute("stroke-opacity", "0");
@@ -11414,64 +10288,11 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
     stages_labels[1] = "<b>Violins</b>, however, encode distributions truthfully while maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.";
   }
 
-  const crt_text = top_label ? top_label.textContent : "";
+  const crt_text  = top_label ? top_label.textContent : "";
   const crt_color = top_label ? top_label.style.fill : "";
 
   if (top_label) top_label.style.fill = "#800000";
   if (top_label) setSvgTextSmart(top_label, stages_labels[0]);
-
-  const metas = metaRoot.querySelectorAll('g[id][yc][yc-global]');
-  const items = [];
-  for (let i = 0; i < metas.length; i++) {
-    const mg = metas[i];
-    const id = mg.getAttribute("id");
-    if (!id || id === "00-0000" || id.endsWith("-0000")) continue;
-
-    const c = cache[id];
-    if (!c) continue;
-
-    const gArea = svg.querySelector(`g[id="${id} - area"]`);
-    if (!gArea) continue;
-    const u = gArea.querySelector("use");
-    if (!u) continue;
-
-    const yc0 = parseFloat(mg.getAttribute("yc"));
-    const ycG = parseFloat(mg.getAttribute("yc-global"));
-    if (!Number.isFinite(yc0) || !Number.isFinite(ycG)) continue;
-
-    const dySvg = _mplDeltaY_to_svgDeltaY(ycG - yc0);
-
-    const defs = _ensureDefs(mg);
-    const mp = defs.querySelector(`path[id="dzv-${id} - morph"]`);
-    if (!mp) continue;
-
-    items.push({
-      id,
-      mg,
-      useEl: u,
-      morphPath: mp,
-      dySvg,
-      useWarp,
-      _c: c,
-      yc0
-    });
-  }
-
-  const durOptToOld = Math.max(1, +opts.durOptToOldMs || 2500);
-  const _dzv = (typeof window !== "undefined") ? (window.dzv || (window.dzv = {})) : {};
-
-  const _map = is_circle ? _dzv._circleYOptAbsByIdC : _dzv._circleYOptAbsById;
-  for (let i = 0; i < items.length; i++) {
-    const it = items[i];
-    it._dyCircleOld = it.dySvg;
-
-    const c = it._c || cache[it.id];
-    const cy0 = c ? c.cy : 0;
-
-    const yAbs = (_map && _map._ready) ? _map[it.id] : Number.NaN;
-    if (Number.isFinite(yAbs)) it._dyCircleStart = yAbs - cy0;
-    else it._dyCircleStart = it.dySvg;
-  }
 
   function _snapOpacityTriplet(useEl) {
     let cs = null;
@@ -11502,7 +10323,51 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
     return { aOp, aFo, aSo, opT, foT, soT };
   }
 
-  // introduce light rearrangement in case the scale is changed for circles
+  const metas = metaRoot.querySelectorAll('g[id][yc][yc-global]');
+  const items = [];
+  for (let i = 0; i < metas.length; i++) {
+    const mg = metas[i];
+    const id = mg.getAttribute("id");
+    if (!id || id === "00-0000" || id.endsWith("-0000")) continue;
+
+    const c = cache[id];
+    if (!c) continue;
+
+    const gArea = svg.querySelector(`g[id="${id} - area"]`);
+    if (!gArea) continue;
+    const u = gArea.querySelector("use");
+    if (!u) continue;
+
+    const yc0 = parseFloat(mg.getAttribute("yc"));
+    const ycG = parseFloat(mg.getAttribute("yc-global"));
+    if (!Number.isFinite(yc0) || !Number.isFinite(ycG)) continue;
+
+    const dySvg = _mplDeltaY_to_svgDeltaY(ycG - yc0);
+
+    const defs = _ensureDefs(mg);
+    const mp = defs.querySelector(`path[id="dzv-${id} - morph"]`);
+    if (!mp) continue;
+
+    items.push({ id, mg, useEl: u, morphPath: mp, dySvg, useWarp, _c: c, yc0 });
+  }
+
+  // optimized initial circle translations (kept)
+  const _dzv = (typeof window !== "undefined") ? (window.dzv || (window.dzv = {})) : {};
+  const _map = is_circle ? _dzv._circleYOptAbsByIdC : _dzv._circleYOptAbsById;
+
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    it._dyCircleOld = it.dySvg;
+
+    const c = it._c || cache[it.id];
+    const cy0 = c ? c.cy : 0;
+
+    const yAbs = (_map && _map._ready) ? _map[it.id] : Number.NaN;
+    if (Number.isFinite(yAbs)) it._dyCircleStart = yAbs - cy0;
+    else it._dyCircleStart = it.dySvg;
+  }
+
+  // Introduce light rearrangement for circles without warp (kept)
   let kx = window.dzv.circle_kx, ky = window.dzv.circle_ky;
 
   if (is_circle && !useWarp) {
@@ -11529,7 +10394,6 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
     }
 
     const rat1 = window.dzv.circle_kx / kx;
-
     if (rat1 < 1.0/1.1 || rat1 > 1.1) {
       window.dzv._computeOptimizedEllipseY(items, is_circle, kx, ky);
 
@@ -11551,12 +10415,13 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
     crt_stack.setAttribute("d", dzv.linear_stacked_path_circle);
   }
 
+  // Prepare morph paths + remember base transforms, opacities
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
 
     it._opRec = _snapOpacityTriplet(it.useEl);
-    it.useEl.style.display = "none";
 
+    it.useEl.style.display = "none";
     it.useEl.setAttribute("opacity", "0");
     it.useEl.setAttribute("fill-opacity", "0");
     it.useEl.setAttribute("stroke-opacity", "0");
@@ -11568,39 +10433,139 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
 
     if (is_circle && !useWarp) {
       if (Math.abs(kx - 1) > 1e-4) {
-        let map = dzv._circleCxById;
-        for (let k=0;k<fromArr.length;k+=2) {
-          let cx = map[cRec.id];
+        const map = dzv._circleCxById;
+        for (let k = 0; k < fromArr.length; k += 2) {
+          const cx = map[cRec.id];
           fromArr[k]   = cx + (fromArr[k]   - cx) * kx;
           fromArr[k+1] = cRec.cy + (fromArr[k+1] - cRec.cy) * ky;
         }
       }
     }
 
-    let dCircle0 = d_from_array(fromArr);
+    const d0 = d_from_array(fromArr);
 
     _setUseHref(it.useEl, `#dzv-${it.id} - morph`);
-    it.morphPath.setAttribute("d", dCircle0);
+    it.morphPath.setAttribute("d", d0);
 
     it._m_from = fromArr;
-
-    if (useWarp) it._m_to = _warpArrayX(cRec.PathLin);
-    else it._m_to = cRec.PathLin;
-
+    it._m_to = useWarp ? _warpArrayX(cRec.PathLin) : cRec.PathLin;
     it._m_tmp = new Float64Array(it._m_to);
 
+    // base transform without translate (preserved)
+    const t = it.useEl.getAttribute("transform") || "";
+    it._baseTransform = _stripTranslate(t);
+
+    // initial translate for circles/ellipses in global space
     const dyStart = (Number.isFinite(it._dyCircleStart) ? it._dyCircleStart : it.dySvg);
+    it._dyCircleStart = dyStart;
     if (dyStart !== 0) it.useEl.setAttribute("transform", `translate(0 ${dyStart})`);
     else it.useEl.removeAttribute("transform");
+
+    // center & p0 for morph mapping (computed once, used in renderMorph)
+    const [miy_it, may_it] = mi_ma_y(it._m_from);
+    it.y_center0 = 0.5 * (miy_it + may_it);
   }
 
-  let tFade0 = 0;
+  // Global morph temp
+  const global_tmp = new Float64Array(global_from.length);
 
-  function animFade(nowRaw) {
-    const now = _pause.now(nowRaw);
-    if (!tFade0) tFade0 = now;
-    const tt = Math.min(1, (now - tFade0) / durFade);
-    const e = _easeCos01(tt);
+  // Precompute fraction p0 for each item relative to global_from envelope
+  const [miy_orig, may_orig] = mi_ma_y(global_from);
+  const h_orig = may_orig - miy_orig;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const y0_screen = it.y_center0 + it._dyCircleStart;
+    let p = 0.5;
+    if (h_orig > 0) p = (y0_screen - miy_orig) / h_orig;
+    if (p < 0) p = 0; else if (p > 1) p = 1;
+    it._p0 = p;
+  }
+
+  // Prepare majors edge groups (kept, but rendered by timeline)
+  const selMaj = ['g[id$="0000 - edge"]', 'text[id$="0000 - label"]'].join(",");
+  const edgeGs = svg.querySelectorAll(selMaj);
+  const majors = [];
+  const majors_labels = [];
+
+  for (let i = 0; i < edgeGs.length; i++) {
+    const g = edgeGs[i];
+    const gid = g.getAttribute("id") || "";
+    const m = gid.match(/^(\d\d-\d\d\d\d)\s/);
+    if (!m) continue;
+    const baseId = m[1];
+    if (!baseId.endsWith("-0000")) continue;
+    if (baseId === "00-0000") continue;
+
+    if (gid.endsWith("label")) {
+      g.setAttribute("opacity", "0");
+      g.style.display = "";
+      majors_labels.push({ g });
+      continue;
+    }
+
+    const uses = g.querySelectorAll("use");
+    if (!uses || !uses.length) continue;
+
+    const recs = new Array(uses.length);
+    for (let k = 0; k < uses.length; k++) {
+      recs[k] = _snapOpacityTriplet(uses[k]);
+      uses[k].setAttribute("opacity", "0");
+      uses[k].setAttribute("fill-opacity", "0");
+      uses[k].setAttribute("stroke-opacity", "0");
+      uses[k].style.opacity = "0";
+    }
+
+    g.style.display = "";
+    majors.push({ g, uses, recs });
+  }
+
+  // Carve order (deterministic)
+  const carveItems = items.slice();
+  carveItems.sort((a, b) => (Math.abs(a.yc0) - Math.abs(b.yc0)) || (a.id < b.id ? -1 : (a.id > b.id ? 1 : 0)));
+
+  // ------------------------------------------------------------
+  // Timeline definition (single master loop)
+  // ------------------------------------------------------------
+  const HOLD1 = 5000;
+  const HOLD2 = 5000;
+  const HOLD3 = 2500;
+  const HOLD4 = 3500;
+  const DUR_CARVE = 2500;
+  const HOLD5 = 4500;
+
+  const T0 = 0;
+  const T1 = T0 + durFade;
+  const T2 = T1 + HOLD1;
+  const T3 = T2 + durMorph;
+  const T4 = T3 + HOLD2;
+  const T5 = T4 + durMove;
+  const T6 = T5 + HOLD3;
+  const T7 = T6 + durMajorEdgeFade;
+  const T8 = T7 + HOLD4;
+  const T9 = T8 + DUR_CARVE;
+  const T10 = T9 + HOLD5;
+
+  function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
+
+  function stageIndexAt(t) {
+    if (t < T2) return 0;        // label 0 during fade + hold1
+    if (t < T4) return 1;        // label 1 during morph + hold2
+    if (t < T6) return 2;        // label 2 during move + hold3
+    return 3;                    // label 3 during majors + carve + final
+  }
+
+  let _stageIdxShown = -1;
+  function ensureStageLabel(t) {
+    const idx = stageIndexAt(t);
+    if (idx === _stageIdxShown) return;
+    _stageIdxShown = idx;
+    if (top_label) setSvgTextSmart(top_label, stages_labels[idx]);
+  }
+
+  // deterministic render helpers
+  function renderFade(t) {
+    const p = clamp01((t - T0) / durFade);
+    const e = _easeCos01(p);
 
     gUse.setAttribute("opacity", String(e));
     gUse.setAttribute("fill-opacity", String(e));
@@ -11615,8 +10580,7 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
       it.useEl.setAttribute("stroke-opacity", String(r.soT * e));
     }
 
-    if (tt < 1) requestAnimationFrame(animFade);
-    else {
+    if (p >= 1) {
       gUse.removeAttribute("opacity");
       gUse.removeAttribute("fill-opacity");
       gUse.removeAttribute("stroke-opacity");
@@ -11635,349 +10599,225 @@ function dzvInitPauseBtnPinnedToPatch2(b, patch2Path, sizePx = 16, padPx = 8) {
         if (r.aSo != null && r.aSo !== "") it.useEl.setAttribute("stroke-opacity", r.aSo);
         else it.useEl.removeAttribute("stroke-opacity");
       }
-
-      _pauseThen(startMorph, 5000);
     }
   }
 
-  function d_from_array(arr, closed = true) {
-    const a = arr || [];
-    const n = a.length | 0;
-    if (n < 4) return "";
+  function renderMorph(t) {
+    const p = clamp01((t - T2) / durMorph);
+    const e0 = _easeCos01(p);
+    const e = (e0 <= 0) ? 1e-9 : (e0 >= 1 ? (1 - 1e-9) : e0);
 
-    function fmt(x) {
-      if (!Number.isFinite(x)) return "0";
-      const v = Math.round(x * 1e4) / 1e4;
-      return (Math.abs(v) < 1e-10) ? "0" : String(v);
-    }
+    // global
+    const glb = morph_array2(global_from, global_to, global_tmp, e);
+    const [miy_now, may_now] = mi_ma_y(glb);
+    const h_now = may_now - miy_now;
 
-    let d = "M " + fmt(a[0]) + " " + fmt(a[1]);
-    for (let i = 2; i + 1 < n; i += 2) d += " L " + fmt(a[i]) + " " + fmt(a[i + 1]);
-    if (closed) d += " Z";
-    return d;
-  }
-
-  const global_tmp = new Float64Array(global_from.length);
-
-  function startMorph() {
-    if (top_label) setSvgTextSmart(top_label, stages_labels[1]);
-
-    const t0 = _pause.now(performance.now());
-
-    function mi_ma_y(dat) {
-      let miy = Infinity, may = -Infinity;
-      for (let i = 1; i < dat.length; i += 2) {
-        const y = dat[i];
-        if (y < miy) miy = y;
-        if (y > may) may = y;
-      }
-      return [miy, may];
-    }
-
-    function _stripTranslate(t) {
-      return (t || "").replace(/translate\(\s*[^)]+\)/ig, "").trim();
-    }
-
-    function _setTranslateYPreserve(el, baseT, ty) {
-      const t1 = (baseT || "").trim();
-      if (ty !== 0) {
-        const t = (t1.length ? (t1 + " ") : "") + `translate(0 ${ty})`;
-        el.setAttribute("transform", t);
-      } else {
-        if (t1.length) el.setAttribute("transform", t1);
-        else el.removeAttribute("transform");
-      }
-    }
-
-    const [miy_orig, may_orig] = mi_ma_y(global_from);
-    const h_orig = may_orig - miy_orig;
+    crt_stack.setAttribute("d", d_from_array(glb));
 
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
 
-      const [miy_it, may_it] = mi_ma_y(it._m_from);
-      it.y_center0 = (miy_it + may_it) * 0.5;
+      const itmp = morph_array2(it._m_from, it._m_to, it._m_tmp, e);
 
-      if (it._baseTransform == null) {
-        const t = it.useEl.getAttribute("transform") || "";
-        it._baseTransform = _stripTranslate(t);
-      }
+      const y_target = miy_now + it._p0 * h_now;
+      const dy_total = y_target - it.y_center0;
 
-      if (!Number.isFinite(it._dyCircleStart)) it._dyCircleStart = 0;
+      _setTranslateYPreserve(it.useEl, it._baseTransform, dy_total);
+      it._dyMorph = dy_total;
 
-      const y0_screen = it.y_center0 + it._dyCircleStart;
-
-      let p = 0.5;
-      if (h_orig > 0) p = (y0_screen - miy_orig) / h_orig;
-      if (p < 0) p = 0; else if (p > 1) p = 1;
-      it._p0 = p;
-
-      _setTranslateYPreserve(it.useEl, it._baseTransform, it._dyCircleStart);
+      if (it.morphPath) it.morphPath.setAttribute("d", d_from_array(itmp));
     }
 
-    function animMorph(nowRaw) {
-      const now = _pause.now(nowRaw);
-      const tt = Math.min(1, (now - t0) / durMorph);
-      const e0 = _easeCos01(tt);
-      const e = (e0 <= 0) ? 1e-9 : (e0 >= 1) ? (1 - 1e-9) : e0;
+    if (p >= 1) {
+      // after morph, global use points to full
+      _setUseHref(gUse, "#dzv-00-0000 - full");
 
-      const glb = morph_array2(global_from, global_to, global_tmp, e);
-      const [miy_now, may_now] = mi_ma_y(glb);
-      const h_now = may_now - miy_now;
-
-      crt_stack.setAttribute("d", d_from_array(glb));
-
+      // freeze morph end state for subsequent stages
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
-        const itmp = morph_array2(it._m_from, it._m_to, it._m_tmp, e);
-
-        const y_target = miy_now + it._p0 * h_now;
-        const dy_total = y_target - it.y_center0;
-
-        it._dyMorph = dy_total;
-        _setTranslateYPreserve(it.useEl, it._baseTransform, dy_total);
-
-        if (it.morphPath) it.morphPath.setAttribute("d", d_from_array(itmp));
-      }
-
-      if (tt < 1) requestAnimationFrame(animMorph);
-      else {
-        for (let i = 0; i < items.length; i++) {
-          const it = items[i];
-          it._dyCircleStart = it._dyMorph;
-          it._dyMorph = 0;
-          it._p0 = 0;
-
-          it._m_from = null;
-          it._m_to = null;
-          it._m_tmp = null;
-        }
-
-        _setUseHref(gUse, "#dzv-00-0000 - full");
-        _pauseThen(startMoveDown, 5000);
+        it._dyCircleStart = it._dyMorph;
       }
     }
-
-    requestAnimationFrame(animMorph);
   }
 
-  function startMoveDown() {
-    if (top_label) setSvgTextSmart(top_label, stages_labels[2]);
-    const t1 = _pause.now(performance.now());
+  function renderMove(t) {
+    const p = clamp01((t - T4) / durMove);
+    const e = _easeCos01(p);
 
-    function animMove(nowRaw) {
-      const now = _pause.now(nowRaw);
-      const tt = Math.min(1, (now - t1) / durMove);
-      const e = _easeCos01(tt);
-
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        const dy0 = (Number.isFinite(it._dyCircleStart) ? it._dyCircleStart : it.dySvg);
-        const dy = (1 - e) * dy0;
-        if (dy !== 0) it.useEl.setAttribute("transform", `translate(0 ${dy})`);
-        else it.useEl.removeAttribute("transform");
-      }
-
-      if (tt < 1) requestAnimationFrame(animMove);
-      else _pauseThen(startMajorEdgesFadeIn, 2500);
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const dy0 = (Number.isFinite(it._dyCircleStart) ? it._dyCircleStart : it.dySvg);
+      const dy = (1 - e) * dy0;
+      if (dy !== 0) it.useEl.setAttribute("transform", `translate(0 ${dy})`);
+      else it.useEl.removeAttribute("transform");
     }
 
-    requestAnimationFrame(animMove);
+    if (p >= 1) {
+      for (let i = 0; i < items.length; i++) items[i].useEl.removeAttribute("transform");
+    }
   }
 
-  function startMajorEdgesFadeIn() {
-    const sel = ['g[id$="0000 - edge"]', 'text[id$="0000 - label"]'].join(",");
-    const edgeGs = svg.querySelectorAll(sel);
-    const majors = [];
-    const majors_labels = [];
+  function renderMajors(t) {
+    const p = clamp01((t - T6) / durMajorEdgeFade);
+    const e = _easeCos01(p);
 
-    for (let i = 0; i < edgeGs.length; i++) {
-      const g = edgeGs[i];
-      const gid = g.getAttribute("id") || "";
-      const m = gid.match(/^(\d\d-\d\d\d\d)\s/);
-      if (!m) continue;
-      const baseId = m[1];
-      if (!baseId.endsWith("-0000")) continue;
-      if (baseId === "00-0000") continue;
-
-      if (gid.endsWith("label")) {
-        g.setAttribute("opacity", "0");
-        majors_labels.push({ g });
-        continue;
-      }
-
-      const uses = g.querySelectorAll("use");
-      if (!uses || !uses.length) continue;
-
-      const recs = new Array(uses.length);
-      for (let k = 0; k < uses.length; k++) {
-        recs[k] = _snapOpacityTriplet(uses[k]);
-        uses[k].setAttribute("opacity", "0");
-        uses[k].setAttribute("fill-opacity", "0");
-        uses[k].setAttribute("stroke-opacity", "0");
-        uses[k].style.opacity = "0";
-      }
-
-      majors.push({ g, uses, recs });
+    for (let i = 0; i < majors_labels.length; i++) {
+      majors_labels[i].g.setAttribute("opacity", String(e));
     }
 
-    if (!majors.length && !majors_labels.length) {
-      _pauseThen(finishSwap, 3500);
-      return;
+    for (let i = 0; i < majors.length; i++) {
+      const it = majors[i];
+      for (let k = 0; k < it.uses.length; k++) {
+        const u = it.uses[k];
+        const r = it.recs[k];
+        u.setAttribute("opacity", String(r.opT * e));
+        u.setAttribute("fill-opacity", String(r.foT * e));
+        u.setAttribute("stroke-opacity", String(r.soT * e));
+        u.style.opacity = String(r.opT * e);
+      }
     }
 
-    _pauseThen(() => {
-      for (let i = 0; i < majors.length; i++) majors[i].g.style.display = "";
-      for (let i = 0; i < majors_labels.length; i++) majors_labels[i].g.style.display = "";
+    if (p >= 1) {
+      for (let i = 0; i < majors_labels.length; i++) majors_labels[i].g.removeAttribute("opacity");
 
-      if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
-      if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
+      for (let i = 0; i < majors.length; i++) {
+        const it = majors[i];
+        for (let k = 0; k < it.uses.length; k++) {
+          const u = it.uses[k];
+          const r = it.recs[k];
 
-      const t0 = _pause.now(performance.now());
-      let changed_text = false;
+          if (r.aOp != null && r.aOp !== "") u.setAttribute("opacity", r.aOp);
+          else u.removeAttribute("opacity");
 
-      function animMajors(nowRaw) {
-        const now = _pause.now(nowRaw);
-        const tt = Math.min(1, (now - t0) / durMajorEdgeFade);
-        const e = _easeCos01(tt);
+          if (r.aFo != null && r.aFo !== "") u.setAttribute("fill-opacity", r.aFo);
+          else u.removeAttribute("fill-opacity");
 
-        if (!changed_text) {
-          changed_text = true;
-          if (top_label) setSvgTextSmart(top_label, stages_labels[3]);
-        }
+          if (r.aSo != null && r.aSo !== "") u.setAttribute("stroke-opacity", r.aSo);
+          else u.removeAttribute("stroke-opacity");
 
-        for (let i = 0; i < majors_labels.length; i++) {
-          majors_labels[i].g.setAttribute("opacity", String(e));
-        }
-        for (let i = 0; i < majors.length; i++) {
-          const it = majors[i];
-          for (let k = 0; k < it.uses.length; k++) {
-            const u = it.uses[k];
-            const r = it.recs[k];
-            u.setAttribute("opacity", String(r.opT * e));
-            u.setAttribute("fill-opacity", String(r.foT * e));
-            u.setAttribute("stroke-opacity", String(r.soT * e));
-            u.style.opacity = String(r.opT * e);
-          }
-        }
-
-        if (tt < 1) requestAnimationFrame(animMajors);
-        else {
-          for (let i = 0; i < majors_labels.length; i++) {
-            majors_labels[i].g.removeAttribute("opacity");
-          }
-          for (let i = 0; i < majors.length; i++) {
-            const it = majors[i];
-            for (let k = 0; k < it.uses.length; k++) {
-              const u = it.uses[k];
-              const r = it.recs[k];
-
-              if (r.aOp != null && r.aOp !== "") u.setAttribute("opacity", r.aOp);
-              else u.removeAttribute("opacity");
-
-              if (r.aFo != null && r.aFo !== "") u.setAttribute("fill-opacity", r.aFo);
-              else u.removeAttribute("fill-opacity");
-
-              if (r.aSo != null && r.aSo !== "") u.setAttribute("stroke-opacity", r.aSo);
-              else u.removeAttribute("stroke-opacity");
-
-              u.style.opacity = "";
-            }
-          }
-
-          _pauseThen(finishSwap, 3500);
+          u.style.opacity = "";
         }
       }
-
-      requestAnimationFrame(animMajors);
-    });
+    }
   }
 
-  function applyCarvedOverTime(items, durationMs) {
-    items.sort((a, b) => (Math.abs(a.yc0) - Math.abs(b.yc0)) || (a.id < b.id ? -1 : (a.id > b.id ? 1 : 0)));
+  function renderCarve(t) {
+    // ensure transforms are cleared before carving
+    for (let i = 0; i < items.length; i++) items[i].useEl.removeAttribute("transform");
 
-    return new Promise((resolve) => {
-      const n = items.length;
-      const dur = Math.max(0, +durationMs || 0);
+    const p = clamp01((t - T8) / DUR_CARVE);
+    const n = carveItems.length;
+    const k = Math.min(n, Math.max(0, Math.floor(p * n + 1e-9)));
 
-      if (n <= 0) {
-        if (dur <= 0) resolve();
-        else _pause.setTimeout(resolve, dur);
-        return;
+    // Deterministic: first k carved, rest morph
+    for (let i = 0; i < n; i++) {
+      const it = carveItems[i];
+      if (i < k) {
+        _setUseHref(it.useEl, `#dzv-${it.id} - carved`);
+      } else {
+        _setUseHref(it.useEl, `#dzv-${it.id} - morph`);
       }
+    }
 
-      const t0 = _pause.now(performance.now());
-      const tEnd = t0 + dur;
-
-      let done = 0;
-      let raf = 0;
-      let finished = false;
-
-      function applyOne(it) {
-        it.useEl.removeAttribute("transform");
+    if (p >= 1) {
+      for (let i = 0; i < n; i++) {
+        const it = carveItems[i];
         _setUseHref(it.useEl, `#dzv-${it.id} - carved`);
       }
-
-      function tick(nowRaw) {
-        const now = _pause.now(nowRaw);
-        if (finished) return;
-
-        const frac = dur > 0 ? Math.min(1, Math.max(0, (now - t0) / dur)) : 1;
-        const want = Math.min(n, Math.floor(frac * n + 1e-9));
-
-        for (; done < want; done++) applyOne(items[done]);
-
-        if (done < n || now < tEnd) raf = requestAnimationFrame(tick);
-      }
-
-      function finalize() {
-        if (finished) return;
-        finished = true;
-        if (raf) cancelAnimationFrame(raf), (raf = 0);
-        for (; done < n; done++) applyOne(items[done]);
-        resolve();
-      }
-
-      raf = requestAnimationFrame(tick);
-
-      if (dur <= 0) finalize();
-      else {
-        const delay = Math.max(0, tEnd - _pause.now(performance.now()));
-        _pause.setTimeout(finalize, delay);
-      }
-    });
+    }
   }
 
-  function finishSwap() {
-    applyCarvedOverTime(items, 2500).then(() => {
-      _pause.setTimeout(() => {
-        _hideMajorsExceptGlobal(false);
-        resumeAllPointer();
+  function finishAndRestore() {
+    _dzvVisPause.remove();
+    _hideMajorsExceptGlobal(false);
+    resumeAllPointer();
 
-        if (top_label) setSvgTextSmart(top_label, crt_text);
-        if (top_label) top_label.style.fill = crt_color;
+    if (top_label) setSvgTextSmart(top_label, crt_text);
+    if (top_label) top_label.style.fill = crt_color;
 
-        if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
-        if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
+    if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+    if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
 
-        window.dzv.animating = false;
+    window.dzv.animating = false;
 
-        // End state: hide pause button, and ensure controller is not stuck paused.
-        const b = document.getElementById("dzv_pause_btn");
-        if (b) b.style.display = "none";
-        _pause.paused = false;
-      }, 4500);
-    });
+    if (_pauseBtn && _pauseBtn.btn) _pauseBtn.btn.style.display = "none";
+    _pause.paused = false;
   }
 
-  // Make them visible in a separate frame, still at opacity 0, then fade in.
+  // ------------------------------------------------------------
+  // Visibility: make them visible one frame later (same as your old code)
+  // ------------------------------------------------------------
   requestAnimationFrame(() => {
     gUse.style.display = "";
     for (let i = 0; i < items.length; i++) items[i].useEl.style.display = "";
-    requestAnimationFrame(animFade);
+
+    // Ensure majors edges are initially hidden by opacity as prepped
+    // (display already set to "" above for majors groups)
+
+    let started = false;
+    let tStartAdj = 0;
+    let _masterRunning = false;
+
+    function master(nowRaw) {
+      const nowAdj = _pause.now(nowRaw);
+      if (!started) { started = true; tStartAdj = nowAdj; }
+      const t = nowAdj - tStartAdj;
+
+      ensureStageLabel(t);
+
+      // global use href: crt_stack until morph ends
+      if (t < T3) _setUseHref(gUse, "#dzv-00-0000 - crt_stack");
+      else _setUseHref(gUse, "#dzv-00-0000 - full");
+
+      if (t < T1) {
+        renderFade(t);
+      } else if (t < T2) {
+        // hold1: keep end of fade (renderFade at p=1)
+        renderFade(T1);
+      } else if (t < T3) {
+        renderMorph(t);
+      } else if (t < T4) {
+        // hold2: keep end of morph
+        renderMorph(T3);
+      } else if (t < T5) {
+        renderMove(t);
+      } else if (t < T6) {
+        // hold3: keep end of move
+        renderMove(T5);
+      } else if (t < T7) {
+        renderMajors(t);
+      } else if (t < T8) {
+        // hold4: keep end of majors
+        renderMajors(T7);
+      } else if (t < T9) {
+        renderCarve(t);
+      } else if (t < T10) {
+        // hold5: keep end of carve
+        renderCarve(T9);
+      } else {
+        // final
+        renderCarve(T9);
+        finishAndRestore();
+        return;
+      }
+
+      if (_pause.paused) {
+        _masterRunning = false;
+        _pause._resumeKick = () => {
+          if (_masterRunning) return;
+          _masterRunning = true;
+          requestAnimationFrame(master);
+        };
+        return;
+      }
+
+      requestAnimationFrame(master);
+    }
+
+    _masterRunning = true;
+    requestAnimationFrame(master);
   });
 }
-
 
 	  window.dzv = window.dzv || {};
 	  window.dzv.dzvInitCircleMorphCacheOnce = dzvInitCircleMorphCacheOnce;
@@ -16097,7 +14937,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    }
 
 	    function showTip() {
-	        if (window.dzv.focusing || window.dzv.animating) return;
+	        if (window.dzv.focusing || (window.dzv.animating && !window.dzv.morphing)) return;
 	        const cs = getComputedStyle(svg);
 	        const cons = getConstraintRect();
 	        if (cons.width < cfg.tipWidth)
@@ -16194,9 +15034,13 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    function onSvgPointerDown(ev, target) {
 	        const isPrimaryClick = (ev.pointerType === "mouse") ? (ev.button === 0) : true;
 	        if (!isPrimaryClick) return;
+			/*
 	        if (!target) target = ev.target;
 	        if (!(target instanceof Element)) return;
-	        const hit = target.closest(cfg.hitSelector);
+	        const hit = target.closest(window.dzv.morphing? 'g.s_e[id$=" - area"]':cfg.hitSelector);
+			*/
+			const hit = window.dzv.hit_element(ev);
+			
 	        if (!hit) {
 	            unlock();
 	            return;
@@ -16326,9 +15170,12 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    function onSvgPointerMove_HoverDelay(ev) {
 	        if (state.locked) return;
 	        if (window.is_menu && window.is_menu()) return;
+			/*
 	        const target = ev.target;
 	        if (!(target instanceof Element)) return;
-	        const hit = target.closest(cfg.hitSelector);
+	        const hit = target.closest(window.dzv.morphing? 'g.s_e[id$=" - area"]':cfg.hitSelector);
+			*/
+			const hit = window.dzv.hit_element(ev);
 	        if (!hit) {
 	            _clearHoverTimer();
 	            _hideHoverIfNotLocked();
@@ -16575,7 +15422,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (!v || !v.meta_full_path) return "";
 	        // IMPORTANT: use registered geometry (lin/warp already cached on meta_full_path)
 	        // For hover highlight we want the CURRENT geometry state, so read live "d".
-	        return v.meta_full_path.getAttribute("d") || "";
+	        //return v.meta_full_path.getAttribute("d") || "";
+			return v.meta_full_path.getAttribute( window.dzv.warpingFactor<0.5 ? "lin-d":"warp-d");
 	    }
 	    // DOM-FREE styling: use cached violin style primitives, no getComputedStyle, no svg.querySelector.
 	    function _applyStyleFromModel(baseId, outPath) {
@@ -16681,154 +15529,88 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    const _hPathYCcache = new Map(); // baseId -> { d0: string, yc: number }
 
 	    // ---- Path Y-scaler (geometry rewrite) ----
-	    function _scalePathD_Y_about(d, yc, sy) {
-	        if (!d || !(sy > 0) || sy === 1) return d;
 
-	        const tokens = [];
-	        const re = /([MmLlHhVvCcSsQqTtAaZz])|([-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?)/g;
-	        let m;
-	        while ((m = re.exec(d)) !== null) {
-	            if (m[1]) tokens.push({
-	                t: "cmd",
-	                v: m[1]
-	            });
-	            else tokens.push({
-	                t: "num",
-	                v: m[2]
-	            });
-	        }
+		function _scalePathD_Y_about(d, yc, sy) {
+		  if (!d || !(sy > 0) || sy === 1) return d;
 
-	        function scaleAbsY(y) {
-	            return yc + (y - yc) * sy;
-	        }
+		  // Bail out if arcs are present (avoid incorrect scaling artifacts)
+		  if (/[Aa]/.test(d)) return d;
 
-	        function scaleRelY(dy) {
-	            return dy * sy;
-	        }
+		  const tokens = [];
+		  const re = /([MmLlHhVvCcSsQqTtZz])|([-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?)/g;
+		  let m;
+		  while ((m = re.exec(d)) !== null) {
+			if (m[1]) tokens.push({ t: "cmd", v: m[1] });
+			else tokens.push({ t: "num", v: m[2] });
+		  }
 
-	        const arity = {
-	            M: 2,
-	            m: 2,
-	            L: 2,
-	            l: 2,
-	            H: 1,
-	            h: 1,
-	            V: 1,
-	            v: 1,
-	            C: 6,
-	            c: 6,
-	            S: 4,
-	            s: 4,
-	            Q: 4,
-	            q: 4,
-	            T: 2,
-	            t: 2,
-	            A: 7,
-	            a: 7,
-	            Z: 0,
-	            z: 0
-	        };
+		  function scaleAbsY(y) { return yc + (y - yc) * sy; }
+		  function scaleRelY(dy) { return dy * sy; }
 
-	        let out = "";
-	        let i = 0;
+		  const arity = {
+			M:2,m:2,L:2,l:2,H:1,h:1,V:1,v:1,
+			C:6,c:6,S:4,s:4,Q:4,q:4,T:2,t:2,
+			Z:0,z:0
+		  };
 
-	        function append(s) {
-	            out += s;
-	        }
+		  let out = "";
+		  let i = 0;
 
-	        function appendCmd(c) {
-	            append(c);
-	        }
+		  function append(s){ out += s; }
+		  function appendNum(x){
+			const n = Number(x);
+			append(Number.isFinite(n) ? String(+n.toPrecision(12)) : String(x));
+		  }
 
-	        function appendNum(x) {
-	            const n = Number(x);
-	            if (!Number.isFinite(n)) {
-	                append(String(x));
-	                return;
-	            }
-	            append(String(+n.toPrecision(12)));
-	        }
+		  while (i < tokens.length) {
+			const tk = tokens[i];
+			if (tk.t !== "cmd") { i++; continue; }
 
-	        function sep() {
-	            append(" ");
-	        }
+			const cmd = tk.v;
+			append(cmd);
+			i++;
 
-	        while (i < tokens.length) {
-	            const tk = tokens[i];
-	            if (tk.t !== "cmd") {
-	                i++;
-	                continue;
-	            }
+			const nper = arity[cmd];
+			if (!nper) continue;
 
-	            const cmd = tk.v;
-	            appendCmd(cmd);
-	            i++;
+			while (true) {
+			  if (i >= tokens.length) break;
+			  if (tokens[i].t === "cmd") break;
 
-	            const nper = arity[cmd];
-	            if (nper === 0) continue;
+			  const seg = [];
+			  for (let k = 0; k < nper; k++) {
+				if (i + k >= tokens.length) break;
+				if (tokens[i + k].t !== "num") break;
+				seg.push(tokens[i + k].v);
+			  }
+			  if (seg.length < nper) break;
 
-	            while (true) {
-	                if (i >= tokens.length) break;
-	                if (tokens[i].t === "cmd") break;
+			  if (cmd === "M" || cmd === "L" || cmd === "T") seg[1] = String(scaleAbsY(+seg[1]));
+			  else if (cmd === "m" || cmd === "l" || cmd === "t") seg[1] = String(scaleRelY(+seg[1]));
+			  else if (cmd === "V") seg[0] = String(scaleAbsY(+seg[0]));
+			  else if (cmd === "v") seg[0] = String(scaleRelY(+seg[0]));
+			  else if (cmd === "C") { seg[1]=String(scaleAbsY(+seg[1])); seg[3]=String(scaleAbsY(+seg[3])); seg[5]=String(scaleAbsY(+seg[5])); }
+			  else if (cmd === "c") { seg[1]=String(scaleRelY(+seg[1])); seg[3]=String(scaleRelY(+seg[3])); seg[5]=String(scaleRelY(+seg[5])); }
+			  else if (cmd === "S") { seg[1]=String(scaleAbsY(+seg[1])); seg[3]=String(scaleAbsY(+seg[3])); }
+			  else if (cmd === "s") { seg[1]=String(scaleRelY(+seg[1])); seg[3]=String(scaleRelY(+seg[3])); }
+			  else if (cmd === "Q") { seg[1]=String(scaleAbsY(+seg[1])); seg[3]=String(scaleAbsY(+seg[3])); }
+			  else if (cmd === "q") { seg[1]=String(scaleRelY(+seg[1])); seg[3]=String(scaleRelY(+seg[3])); }
 
-	                const seg = [];
-	                for (let k = 0; k < nper; k++) {
-	                    if (i + k >= tokens.length) break;
-	                    if (tokens[i + k].t !== "num") break;
-	                    seg.push(tokens[i + k].v);
-	                }
-	                if (seg.length < nper) break;
+			  append(" ");
+			  for (let k = 0; k < seg.length; k++) {
+				if (k) append(" ");
+				appendNum(seg[k]);
+			  }
 
-	                if (cmd === "M" || cmd === "L" || cmd === "T") {
-	                    seg[1] = String(scaleAbsY(+seg[1]));
-	                } else if (cmd === "m" || cmd === "l" || cmd === "t") {
-	                    seg[1] = String(scaleRelY(+seg[1]));
-	                } else if (cmd === "V") {
-	                    seg[0] = String(scaleAbsY(+seg[0]));
-	                } else if (cmd === "v") {
-	                    seg[0] = String(scaleRelY(+seg[0]));
-	                } else if (cmd === "C") {
-	                    seg[1] = String(scaleAbsY(+seg[1]));
-	                    seg[3] = String(scaleAbsY(+seg[3]));
-	                    seg[5] = String(scaleAbsY(+seg[5]));
-	                } else if (cmd === "c") {
-	                    seg[1] = String(scaleRelY(+seg[1]));
-	                    seg[3] = String(scaleRelY(+seg[3]));
-	                    seg[5] = String(scaleRelY(+seg[5]));
-	                } else if (cmd === "S") {
-	                    seg[1] = String(scaleAbsY(+seg[1]));
-	                    seg[3] = String(scaleAbsY(+seg[3]));
-	                } else if (cmd === "s") {
-	                    seg[1] = String(scaleRelY(+seg[1]));
-	                    seg[3] = String(scaleRelY(+seg[3]));
-	                } else if (cmd === "Q") {
-	                    seg[1] = String(scaleAbsY(+seg[1]));
-	                    seg[3] = String(scaleAbsY(+seg[3]));
-	                } else if (cmd === "q") {
-	                    seg[1] = String(scaleRelY(+seg[1]));
-	                    seg[3] = String(scaleRelY(+seg[3]));
-	                } else if (cmd === "A") {
-	                    seg[1] = String((+seg[1]) * sy); // ry
-	                    seg[6] = String(scaleAbsY(+seg[6])); // y
-	                } else if (cmd === "a") {
-	                    seg[1] = String((+seg[1]) * sy); // ry
-	                    seg[6] = String(scaleRelY(+seg[6])); // dy
-	                }
+			  i += nper;
+			}
+		  }
 
-	                sep();
-	                for (let k = 0; k < seg.length; k++) {
-	                    if (k) sep();
-	                    appendNum(seg[k]);
-	                }
+		  return out.trim();
+		}
 
-	                i += nper;
-	            }
-	        }
-
-	        return out.trim();
-	    }
-
-	    // ---- Highlight show ----
+		
+		// ---- Highlight show ----
 
 	    let raf = 0;
 	    window.dzv.pending_hit = null;
@@ -16844,7 +15626,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 
 
 	    function showForHit(hit) {
-	        if (window.dzv.focusing  || window.dzv.animating) return hide_force();
+		    if (window.dzv.morphing) return showForHitInPlace(hit);
+	        if (window.dzv.focusing  || (window.dzv.animating && !window.dzv.morphing)) return hide_force();
 	        const baseId = _getBaseIdFromHit(hit);
 	        if (!baseId) return hide();
 
@@ -16909,60 +15692,161 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        const cur = bbPx.height;
 
 	        // No scaling needed, but still apply stack translation if present.
-	        if (cur >= need) {
-	            if (dyStackSvg !== 0) hPath.setAttribute("transform", `translate(0 ${dyStackSvg})`);
-	            else hPath.removeAttribute("transform");
-	            return;
-	        }
+			
+			if (cur >= need) {
+			  if (dyStackSvg !== 0) hPath.setAttribute("transform", `translate(0 ${dyStackSvg})`);
+			  else hPath.removeAttribute("transform");
+			  return;
+			}
 
-	        const sy = need / cur;
+			const sy = need / cur;
 
-	        // yc in SVG units, cached per baseId as long as d0 is identical.
-	        let yc;
-	        const ycRec = _hPathYCcache.get(baseId);
-	        if (ycRec && ycRec.d0 === d0 && Number.isFinite(ycRec.yc)) {
-	            yc = ycRec.yc;
-	        } else {
-	            let bbSvg;
-	            try {
-	                //bbSvg = hPath.getBBox();
-					bbSvg = DZV.getPlotBox(hPath);
-	            } catch {
-	                bbSvg = null;
-	            }
-	            if (!bbSvg || !(bbSvg.height > 0)) {
-	                if (dyStackSvg !== 0) hPath.setAttribute("transform", `translate(0 ${dyStackSvg})`);
-	                return;
-	            }
-	            yc = bbSvg.y + 0.5 * bbSvg.height;
-	            _hPathYCcache.set(baseId, {
-	                d0,
-	                yc
-	            });
-	        }
+			// yc cached by d0 (not by baseId)
+			let yc = _hPathYCcache.get(d0);
+			if (!Number.isFinite(yc)) {
+			  let bbSvg;
+			  try { bbSvg = DZV.getPlotBox(hPath); } catch { bbSvg = null; }
 
-	        // Rounded key to keep cache compact even if sy jitters slightly.
-	        const syKey = Math.round(sy * 4096) / 4096; // about 0.00024 steps
-	        const ycKey = Math.round(yc * 1024) / 1024; // about 0.001 steps in SVG units
-	        const key = baseId + "|" + syKey + "|" + ycKey;
+			  if (!bbSvg || !(bbSvg.height > 0)) {
+				if (dyStackSvg !== 0) hPath.setAttribute("transform", `translate(0 ${dyStackSvg})`);
+				return; // this is the same failure-return you already had
+			  }
 
-	        const cached = _hPathScaleCache.get(key);
-	        if (cached) {
-	            hPath.setAttribute("d", cached);
-	        } else {
-	            const d1 = _scalePathD_Y_about(d0, yc, sy);
-	            _hPathScaleCache.set(key, d1);
-	            hPath.setAttribute("d", d1);
-	        }
+			  yc = bbSvg.y + 0.5 * bbSvg.height;
+			  _hPathYCcache.set(d0, yc);
+			}
 
-	        // Apply stack translation after scaling.
-	        if (dyStackSvg !== 0) hPath.setAttribute("transform", `translate(0 ${dyStackSvg})`);
-	        else hPath.removeAttribute("transform");
+			const syKey = Math.round(sy * 4096) / 4096;
+
+			// scaled path cached by (d0, syKey)
+			const key = d0 + "|" + syKey;
+
+			const cached = _hPathScaleCache.get(key);
+			if (cached) {
+			  hPath.setAttribute("d", cached);
+			} else {
+			  const d1 = _scalePathD_Y_about(d0, yc, sy);
+			  _hPathScaleCache.set(key, d1);
+			  hPath.setAttribute("d", d1);
+			}
+
+			// Apply stack translation after scaling (as before)
+			if (dyStackSvg !== 0) hPath.setAttribute("transform", `translate(0 ${dyStackSvg})`);
+			else hPath.removeAttribute("transform");
+
 
 	    }
 
+		function showForHitInPlace(hit) {
+		  if (window.dzv.focusing) return hide_force();
+
+		  const baseId = _getBaseIdFromHit(hit);
+		  if (!baseId) return hide();
+
+		  const d0 = _getFullD(baseId);
+		  if (!d0) return hide();
+
+		  // Always use the actual displayed <use> that is being translated during morph.
+		  let targetUse = null;
+		  try {
+			const gArea = svg.querySelector(`g[id="${baseId} - area"]`);
+			targetUse = gArea ? gArea.querySelector("use") : null;
+		  } catch {
+			targetUse = null;
+		  }
+		  if (!targetUse) return hide();
+
+		  // Screen-space center Y of the CURRENT displayed entity (includes live transforms).
+		  const rT = targetUse.getBoundingClientRect();
+		  if (!(rT && rT.height > 0)) return hide();
+		  const targetCenterYPx = rT.top + 0.5 * rT.height;
+
+		  window.dzv.current_highlight = hit;
+
+		  // Reset highlight to base geometry and style.
+		  hPath.setAttribute("d", d0);
+		  _applyStyleFromModel(baseId, hPath);
+		  lastBaseId = baseId;
+
+		  hPath.style.display = "block";
+		  hPath.removeAttribute("transform");
+
+		  // Measure highlight current screen height (includes any transform on hPath - none yet).
+		  let rH = hPath.getBoundingClientRect();
+		  if (!(rH && rH.height > 0)) return;
+
+		  const need = cfg.minHeightPx;
+		  const cur = rH.height;
+
+		  // Optional upscale to minimum height (same as your original showForHit, minus stack logic).
+		
+			
+			if (cur < need) {
+			  const sy = need / cur;
+
+			  // yc cached by d0 only
+			  let yc = _hPathYCcache.get(d0);
+			  if (!Number.isFinite(yc)) {
+				let bbSvg;
+				try { bbSvg = DZV.getPlotBox(hPath); } catch { bbSvg = null; }
+				if (!bbSvg || !(bbSvg.height > 0)) return;
+				yc = bbSvg.y + 0.5 * bbSvg.height;
+				_hPathYCcache.set(d0, yc);
+			  }
+
+			  const syKey = Math.round(sy * 4096) / 4096;
+
+			  // scaled path cached by (d0, syKey) only
+			  const key = d0 + "|" + syKey;
+
+			  const cached = _hPathScaleCache.get(key);
+			  if (cached) hPath.setAttribute("d", cached);
+			  else {
+				const d1 = _scalePathD_Y_about(d0, yc, sy);
+				_hPathScaleCache.set(key, d1);
+				hPath.setAttribute("d", d1);
+			  }
 
 
+
+			// Re-measure after scaling (screen space).
+			rH = hPath.getBoundingClientRect();
+			if (!(rH && rH.height > 0)) return;
+		  }
+
+		  // Translate highlight so its screen-space center matches the target's screen-space center.
+		  const curCenterYPx = rH.top + 0.5 * rH.height;
+		  const dyPx = targetCenterYPx - curCenterYPx;
+
+		  const dySvg = _dySvgFromDyPx(hPath, dyPx);
+		  if (dySvg !== 0) hPath.setAttribute("transform", `translate(0 ${dySvg})`);
+		  else hPath.removeAttribute("transform");
+		}
+
+		// Convert a screen-px deltaY into SVG deltaY units for translate(0, dySvg)
+		function _dySvgFromDyPx(svgEl, dyPx) {
+		  if (!Number.isFinite(dyPx) || dyPx === 0) return 0;
+
+		  let ctm = null;
+		  try { ctm = svgEl.getScreenCTM(); } catch { ctm = null; }
+		  if (!ctm) return 0;
+
+		  let p0, p1;
+		  try {
+			p0 = new DOMPoint(0, 0).matrixTransform(ctm);
+			p1 = new DOMPoint(0, 1).matrixTransform(ctm);
+		  } catch {
+			return 0;
+		  }
+
+		  const pxPerSvgY = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+		  if (!(pxPerSvgY > 1e-12)) return 0;
+
+		  return dyPx / pxPerSvgY;
+		}
+
+
+/*
 
 	    function _tick() {
 	        raf = 0;
@@ -16978,31 +15862,35 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    }
 
 	    function onPointerMove(ev) {
+		   
 	        const t = ev.target;
 	        if (!(t instanceof Element)) return;
 	        if (cfg.isPinned()) return;
-	        window.dzv.pending_hit = t.closest(cfg.hitSelector);
+			const new_pending_hit = t.closest(window.dzv.morphing? 'g.s_e[id$=" - area"]':cfg.hitSelector);
+			if (window.dzv.morphing && (new_pending_hit === window.dzv.current_highlight || new_pending_hit === window.dzv.pending_hit)) return;
+	        window.dzv.pending_hit = new_pending_hit;
 	        if (raf) cancelAnimationFrame(raf);
 	        //if (!raf)
 	        raf = requestAnimationFrame(_tick);
 	        //_tick();
 	    }
 
-	    function onPointerLeave() {
+	    function onPointerLeave(ev) {
 	        if (cfg.isPinned()) return;
+
 	        window.dzv.pending_hit = null;
 	        if (raf) cancelAnimationFrame(raf);
 	        //if (!raf)
 	        raf = requestAnimationFrame(_tick);
 	        //_tick();
 	    }
-
+*/
 	    function onPointerDown(ev) {
 	        const t = ev.target;
 	        if (!(t instanceof Element)) return;
 	        const isPrimaryClick = (ev.pointerType === "mouse") ? (ev.button === 0) : true;
 	        if (!isPrimaryClick) return;
-	        let pH = t.closest(cfg.hitSelector);
+	        let pH = t.closest(window.dzv.morphing? 'g.s_e[id$=" - area"]':cfg.hitSelector);
 	        if (pH) {
 	            if (window.dzv.pending_hit !== pH) {
 	                window.dzv.pending_hit = pH;
@@ -17013,6 +15901,76 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            hide();
 	        }
 	    }
+		
+	
+	
+		function _tick() {
+		  raf = 0;
+		  if (cfg.isPinned()) return;
+
+		  const hit = window.dzv.pending_hit;
+		  window.dzv.pending_hit = null;
+		  if (!hit) hide();
+		  else showForHit(hit);
+		}
+		function _isInHighlight(el) {
+		  if (!el || !(el instanceof Element)) return false;
+		  if (el === hPath) return true;
+		  //if (hPath && hPath.contains && hPath.contains(el)) return true;
+		  //const hg = (typeof hPath !== "undefined" && hPath) ? hPath.closest("g") : null;
+		  //if (hg && hg.contains(el)) return true;
+		  return false;
+		}
+
+		function _hitFromPoint(ev) {
+		  
+		  const sel = window.dzv.morphing ? 'g.s_e[id$=" - area"]' : cfg.hitSelector;
+		  {
+			const t = ev.target;
+			
+			if (t instanceof Element)
+			  {
+			   const hit = t.closest(sel);
+			   if (hit && !_isInHighlight(hit)) return hit;
+			  }
+		  }
+
+		  const lst = document.elementsFromPoint(ev.clientX, ev.clientY);
+		  for (let i = 0; i < lst.length; i++) {
+			const el = lst[i];
+			if (!(el instanceof Element)) continue;
+			if (_isInHighlight(el)) continue;
+
+			const hit = el.closest(sel);
+			if (hit && !_isInHighlight(hit)) return hit;
+		  }
+		  return null;
+		}
+
+		window.dzv = window.dzv || {};
+		window.dzv.hit_element = _hitFromPoint;
+
+		function onPointerMove(ev) {
+		  if (cfg.isPinned()) return;
+
+		  const new_pending_hit = _hitFromPoint(ev);
+
+		  if (window.dzv.morphing && (new_pending_hit === window.dzv.current_highlight || new_pending_hit === window.dzv.pending_hit)) return;
+
+		  window.dzv.pending_hit = new_pending_hit;
+		  if (raf) cancelAnimationFrame(raf);
+		  raf = requestAnimationFrame(_tick);
+		}
+
+		function onPointerLeave(ev) {
+		  if (cfg.isPinned()) return;
+		  window.dzv.pending_hit = null;
+		  if (raf) cancelAnimationFrame(raf);
+		  raf = requestAnimationFrame(_tick);
+		}
+
+	
+	
 	    svg.addEventListener("pointermove", onPointerMove, {
 	        passive: true
 	    });
@@ -20961,6 +19919,15 @@ function applyLayout(items) {
 					  `display:flex;align-items:center;justify-content:center;` +
 					  `cursor:pointer;user-select:none;pointer-events:auto;`;
 					  //visibility:hidden;
+					  
+					btn.style.cssText =
+					  `position:absolute;top:${hperc}%;right:${wperc}%;width:36px;height:26px;` +
+					  `display:flex;align-items:center;justify-content:center;` +
+					  `padding:0;margin:0;border:0;background:transparent;` +
+					  `line-height:0;font-size:0;` +      // remove inline baseline effects
+					  `cursor:pointer;user-select:none;pointer-events:auto;`;
+
+
 				
 	               
 						
@@ -20977,7 +19944,7 @@ function applyLayout(items) {
 btn.innerHTML = '<img src="data:image/gif;base64,'
   
 +'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"'+
-'width="16" height="16" style="display:block; pointer-events:none;"/>';
+'width="16" height="16" style="display:block; pointer-events:none;margin:auto"/>';
 					else
 					 btn.innerHTML =
 	                    '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" style="width:18px;height:18px;display:block;margin:0px auto;fill: rgba(120,120,120,0.95);">' +
@@ -20985,6 +19952,15 @@ btn.innerHTML = '<img src="data:image/gif;base64,'
 	                    '<circle cx="12" cy="12" r="1.8"></circle>' +
 	                    '<circle cx="12" cy="19" r="1.8"></circle>' +
 	                    '</svg>';
+						
+						
+					const svg_or_img = btn.querySelector("svg, img");
+					if (svg_or_img) {
+					  svg_or_img.style.display = "block";
+					  svg_or_img.style.justifySelf = "center";
+					  svg_or_img.style.alignSelf = "center";
+					}
+
 					
 	                function stop(ev) {
 	                    ev.preventDefault();
