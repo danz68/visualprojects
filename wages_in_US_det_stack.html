@@ -9926,7 +9926,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
   function setSvgTextSmartEsence(textEl, lines, lineDyEm = 1.5) {
     const SVG_NS = "http://www.w3.org/2000/svg";
 
-    let maxWidthPx = dzvMaxWidthForSetSvgTextSmart(textEl, patch2Path);
+    let maxWidthPx = dzvMaxWidthForSetSvgTextSmart(textEl, patch2Path)-36;
     if (maxWidthPx > 500) maxWidthPx = 400;
 
     let s;
@@ -9942,7 +9942,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
       return;
     }
 
-    const x0 = textEl.getAttribute("x") ?? "0";
+    const x0 = String(parseFloat(textEl.getAttribute("x") || "0")+4);
     while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
 
     function parseBoldRuns(line) {
