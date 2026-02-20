@@ -9649,12 +9649,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
   const cache = (window.dzv && window.dzv._circleMorphCache) ? window.dzv._circleMorphCache : null;
   if (!cache) return;
 
-  const durMorph = Math.max(1, +opts.durMorphMs || 3000);
-  const durMove  = Math.max(1, +opts.durMoveMs  || 3000);
-  const durFade  = Math.max(1, +opts.durFadeMs  || 3000);
 
-  // fade majors' edges in before finishSwap
-  const durMajorEdgeFade = Math.max(1, +opts.durMajorEdgeFadeMs || 2000);
 
   const useWarp = !!(window.dzv && (+window.dzv.warpingFactor > 0.5));
   const _m_warpFn = (window.dzv && typeof window.dzv.warp === "function") ? window.dzv.warp : null;
@@ -9840,7 +9835,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
 	  if (btn_type === 1)
 	   {
 	    if (!_pause.paused) _pause.pause();
-		_pauseBtn.setIcon(false)
+		if (_pauseBtn) _pauseBtn.setIcon(false)
 		continue_mode = 1;
 		if (direction !== 0)
 		    {
@@ -9853,7 +9848,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
 	  if (btn_type === 2)
 	   {
 	    if (!_pause.paused) _pause.pause();
-		_pauseBtn.setIcon(false)
+		if (_pauseBtn) _pauseBtn.setIcon(false)
 		continue_mode = 2;
 		if (direction !== 0)
 		    {
@@ -9866,7 +9861,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
 	   if (btn_type === 3)
 	   {
 	    if (!_pause.paused) _pause.pause();
-		_pauseBtn.setIcon(false)
+		if (_pauseBtn) _pauseBtn.setIcon(false)
 		continue_mode = 0;
 		if (direction === 0)
 		 {
@@ -10639,12 +10634,22 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
   // ------------------------------------------------------------
   // Timeline definition (single master loop)
   // ------------------------------------------------------------
+  
+
+  const durFade  = 3000;
   const HOLD1 = 5000;
+  
+  const durMorph = 3000;
   const HOLD2 = 3000;
+  
+  const durMove  = 3000;
   const HOLD3 = 3000;
+  
+  const durMajorEdgeFade = 3000;
   const HOLD4 = 3000;
-  const DUR_CARVE = 2000;
-  const HOLD5 = 3000;
+  
+  const durCarve = 3000;
+  const HOLD5 = 5000;
 
   const T0 = 0;
   const T1 = T0 + durFade;
@@ -10655,7 +10660,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
   const T6 = T5 + HOLD3;
   const T7 = T6 + durMajorEdgeFade;
   const T8 = T7 + HOLD4;
-  const T9 = T8 + DUR_CARVE;
+  const T9 = T8 + durCarve;
   const T10 = T9 + HOLD5;
 
   function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
@@ -10679,8 +10684,10 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
   
   //start: renderFade(T0)
   //end:   renderFade(durFade+T0+1)
-  function renderFade(t) {
-    const p = clamp01((t - T0) / durFade);
+  //function renderFade(t) {
+    //const p = clamp01((t - T0) / durFade);
+ function renderFade(p) {
+    p = clamp01(p);
     const e = _easeCos01(p);
 
     gUse.setAttribute("opacity", String(e));
@@ -10716,14 +10723,17 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
         else it.useEl.removeAttribute("stroke-opacity");
       }
     }
+	return p;
   }
 
 
   //start: renderMorph(T2)
   //end:   renderMorph(durMorph+T2+1)
   
-  function renderMorph(t) {
-    const p = clamp01((t - T2) / durMorph);
+ // function renderMorph(t) {
+//    const p = clamp01((t - T2) / durMorph);
+    function renderMorph(p) {
+	 p = clamp01(p);
     const e0 = _easeCos01(p);
     const e = (e0 <= 0) ? 1e-9 : (e0 >= 1 ? (1 - 1e-9) : e0);
 
@@ -10758,14 +10768,17 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
         it._dyCircleStart = it._dyMorph;
       }
     }
+	return p;
   }
 
 
   //start: renderMove(T4)
   //end:   renderMove(durMove+T4+1)
   
-  function renderMove(t) {
-    const p = clamp01((t - T4) / durMove);
+ // function renderMove(t) {
+   // const p = clamp01((t - T4) / durMove);
+   function renderMove(p) {
+	 p = clamp01(p);
     const e = _easeCos01(p);
 
     for (let i = 0; i < items.length; i++) {
@@ -10779,14 +10792,17 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
     if (p >= 1) {
       for (let i = 0; i < items.length; i++) items[i].useEl.removeAttribute("transform");
     }
+	return p;
   }
 
 
 
   //start: renderMajors(T6)
   //end:   renderMajors(durMajorEdgeFade+T6+1)
-  function renderMajors(t) {
-    const p = clamp01((t - T6) / durMajorEdgeFade);
+  //function renderMajors(t) {
+    //const p = clamp01((t - T6) / durMajorEdgeFade);
+	function renderMajors(p) {
+	p = clamp01(p);
     const e = _easeCos01(p);
 
     for (let i = 0; i < majors_labels.length; i++) {
@@ -10827,15 +10843,20 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
         }
       }
     }
+	return p;
   }
 
   //start: renderCarve(T8)
   //end:   renderCarve(DUR_CARVE+T8+1)
-  function renderCarve(t) {
+  //function renderCarve(t) {
+  //const p = clamp01((t - T8) / DUR_CARVE);
     // ensure transforms are cleared before carving
+	function renderCarve(p) {
+	 p = clamp01(p);
+	
     for (let i = 0; i < items.length; i++) items[i].useEl.removeAttribute("transform");
 
-    const p = clamp01((t - T8) / DUR_CARVE);
+    
     const n = carveItems.length;
     const k = Math.min(n, Math.max(0, Math.floor(p * n + 1e-9)));
 
@@ -10886,9 +10907,161 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
   // ------------------------------------------------------------
 
   let fix_rewind = 0;
+ 
+  let once_display = 0;
+  
+  const stages=[];
+  //stage is {func, duration, epilog, run_min, run_max}
+  stages.push({func:renderFade, duration:durFade, epilog:HOLD1, run_min:Infinity, run_max:-Infinity, touched:false});
+  stages.push({func:renderMorph, duration:durMorph, epilog:HOLD2, run_min:Infinity, run_max:-Infinity, touched:false});
+  stages.push({func:renderMove, duration:durMove, epilog:HOLD3, run_min:Infinity, run_max:-Infinity, touched:false});
+  stages.push({func:renderMajors, duration:durMajorEdgeFade, epilog:HOLD4, run_min:Infinity, run_max:-Infinity, touched:false});
+  stages.push({func:renderCarve, duration:durCarve, epilog:HOLD5, run_min:Infinity, run_max:-Infinity, touched:false});
+  
+function reset_stages(stages)
+{
+  for (let i=0; i < stages.length; i++)
+	 {
+	   const stage = stages[i];
+	   stage.run_min = Infinity;
+	   stage.run_max = -Infinity;
+	   stage.touched = false;
+	 }
+}
+
+function reset_stages_limits(stages)
+{
+  for (let i=0; i < stages.length; i++)
+	 {
+	   const stage = stages[i];
+	   stage.run_min = Infinity;
+	   stage.run_max = -Infinity;
+	 }
+}
+
+function run_anim_stages(direction, both, _from, _to, _now, stages){
+
+    function run(stage, p)
+	  {
+	    const pp = p < 0 ? 0 : (p>1 ? 1:p);
+		if (pp !== stage.run_min && pp !== stage.run_max)
+		  {
+			const ppp = stage.func(pp);
+			if (ppp < stage.run_min) stage.run_min = ppp;
+			if (ppp > stage.run_max) stage.run_max = ppp;
+			stage.touched = true;
+		  }
+	  }
+	  
+	let stage_to_run;
+	const ellapsed = direction === 0 ? _now - _from: _to - _now;
+	
+    let parsed = 0;
+	if (direction === 0)
+	  {
+		 stage_to_run = stages.length;
+		 for (let i=0; i < stages.length; i++)
+		 {
+		   const stage = stages[i];
+		   if (ellapsed < parsed + stage.duration + stage.epilog)
+			 {
+			   stage_to_run = i;
+			   break;
+			 }
+			parsed += stage.duration + stage.epilog;
+		 }
+		 
+        if (stage_to_run < stages.length)
+		  {
+		    //if (!stages[stage_to_run].touched)
+			  {
+				let prev = stage_to_run;
+				for (let i=stage_to_run-1; i>=0;i--)
+				  {
+					const stage = stages[i];
+					if (stage.touched)
+					   { prev = i; break; }
+				  }
+			    if (prev === stage_to_run) prev = 0;
+				for (let i=prev; i< stage_to_run;i++)
+				  {
+					const stage = stages[i];
+				    if (both && !stage.touched) run(stage, 0);
+				    run(stage, 1);
+				  }
+			  }
+			  
+		    const stage = stages[stage_to_run];
+			const p = stage.duration<=1e-9 ? 1: (ellapsed-parsed)/stage.duration;
+			if (both && !stage.touched) run(stage, 0);
+			run(stage, p);
+	      }
+		 
+
+	   }
+	else
+	  {
+		 stage_to_run = -1;
+		 for (let i=stages.length-1; i>=0; i--)
+		 {
+		   const stage = stages[i];
+		   if (ellapsed < parsed + stage.duration + stage.epilog)
+			 {
+			   stage_to_run = i;
+			   break;
+			 }
+			parsed += stage.duration + stage.epilog;
+		 }
+		 
+	  if (stage_to_run > -1)
+		  {
+		    //if (!stages[stage_to_run].touched) //they were all touched!!!!!!!!!!
+			  {
+			   let prev = stage_to_run;
+				for (let i=stage_to_run+1; i<stages.length;i++)
+				  {
+					const stage = stages[i];
+					if (stage.touched)
+					   { prev = i; break; }
+				  }
+				  
+				for (let i=prev; i>stage_to_run;i--)
+				  {
+					const stage = stages[i];
+					if (both && !stage.touched) run(stage, 1);
+					run(stage, 0);
+					
+				  }
+			  
+			  }
+ 		  
+		    const stage = stages[stage_to_run];
+			
+			if (ellapsed-parsed < stage.epilog)
+			  {
+			   run(stage, 1);
+			  }
+			else 
+              {
+			    const p = stage.duration<=1e-9 ? 0: 1 - (ellapsed-parsed - stage.epilog)/stage.duration;
+				if (both && !stage.touched) run(stage, 1);
+				run(stage, p);
+			  }			
+	      }
+		  
+	   }
+
+ }
+ 
+ 
+ let last_direction = 0;
   requestAnimationFrame(() => {
-    gUse.style.display = "";
-    for (let i = 0; i < items.length; i++) items[i].useEl.style.display = "";
+    if (!once_display)
+	  {
+	   once_display = 1;
+       gUse.style.display = "";
+       for (let i = 0; i < items.length; i++) items[i].useEl.style.display = "";
+	  }
 
     // Ensure majors edges are initially hidden by opacity as prepped
     // (display already set to "" above for majors groups)
@@ -10901,26 +11074,31 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
       const nowAdj = _pause.now(nowRaw);
       if (!started) { started = true; tStartAdj = nowAdj; }
 	  
+	  const changing_dir = last_direction !== direction;
+	  
+	  if (changing_dir)
+	    {
+	      reset_stages_limits(stages);
+		  last_direction = direction;
+	    }
+	  
 	  if (rewinding)
 	    {
+		  reset_stages_limits(stages);
 		  rewinding = 0;
-		  //if (direction !== 0)
-		    {
-		      const ellapsed = T10 - (nowAdj - tStartAdj);
-		      tStartAdj = nowAdj - ellapsed;
-			}
-		  if (direction !== 0)
-		    fix_rewind = 1;
+	      const ellapsed = T10 - (nowAdj - tStartAdj);
+		  tStartAdj = nowAdj - ellapsed;
 		}
 	  
       const t = direction ===0 ? nowAdj - tStartAdj : T10 - (nowAdj - tStartAdj);
-	  if (t <= 0 && direction!==0)
+	  if (t <= 0 && direction!==0) //end backward animation
 	    {
-		  renderFade(durFade+T0+1);
-		  renderMorph(durMorph+T2+1);
-		  renderMove(durMove+T4+1);
-		  renderMajors(durMajorEdgeFade+T6+1);
-		  renderCarve(DUR_CARVE+T8+1);
+
+		  reset_stages(stages);
+		  
+		  stages[0].touched=true;
+		  run_anim_stages(0, true, T0, T10, T10-1, stages);
+		  
 		  finishAndRestore();
 		  _setUseHref(gUse, "#dzv-00-0000 - full");
 		  return;
@@ -10932,68 +11110,51 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
       if (t < T3) _setUseHref(gUse, "#dzv-00-0000 - crt_stack");
       else _setUseHref(gUse, "#dzv-00-0000 - full");
 	  
-	  if (continue_mode===1) //end
+	  if (continue_mode===1) //ends forward animation
 	    {
-		  if (t < T2) renderFade(durFade+T0+1);
-		  if (t < T4) renderMorph(durMorph+T2+1);
-		  if (t < T6) renderMove(durMove+T4+1);
-		  if (t < T8) renderMajors(durMajorEdgeFade+T6+1);
-		  if (t < T10) renderCarve(DUR_CARVE+T8+1);
+		  let dur = 0;
+		  for (let j=0;j<stages.length;j++)
+		    {
+			  if (t < dur + stages[j].duration + stages[j].epilog)
+			     stages[j].func(1);
+			   dur += stages[j].duration + stages[j].epilog;
+			}
+			
+
 		  finishAndRestore();
           return;
 		}
 		
-	  if (continue_mode===2) //rewind
+	  if (continue_mode===2) //restart
 	    {
-		  if (t > T8) renderCarve(T8);
-		  if (t > T6) renderMajors(T6);
-		  if (t > T4) renderMove(T4);
-		  if (t > T2) renderMorph(T2);
-		  if (t > T0) renderFade(T0);
+		 
+		  let dur = T10;
+		  reset_stages_limits(stages);
+		  
+		  for (let j=stages.length-1;j>-1;j--)
+		    {
+			  if (t > dur - stages[j].duration - stages[j].epilog)
+			     stages[j].func(0);
+			   dur -= stages[j].duration + stages[j].epilog;
+			}
+		  reset_stages(stages);	
 		  _setUseHref(gUse, "#dzv-00-0000 - crt_stack");
-		  tStartAdj =  _pause.now(nowRaw);
+		  ensureStageLabel(0);
+		  started = false;
 		  continue_mode=0;
 		  direction = 0;
 		  requestAnimationFrame(master);
           return;
 		}
+     
+	 
+     run_anim_stages(direction, true, T0, T10, t, stages);
+	 if (t>T10 && direction===0)
+	   {
+	     finishAndRestore();
+         return;
+	   }
 
-      if (t < T1) {
-        renderFade(t);
-      } else if (t < T2) {
-        // hold1: keep end of fade (renderFade at p=1)
-        renderFade(T1);
-		if (fix_rewind !== 0)
-		  {
-		    fix_rewind=0;
-			renderMorph(T2);
-		  }
-      } else if (t < T3) {
-        renderMorph(t);
-      } else if (t < T4) {
-        // hold2: keep end of morph
-        renderMorph(T3);
-      } else if (t < T5) {
-        renderMove(t);
-      } else if (t < T6) {
-        // hold3: keep end of move
-        renderMove(T5);
-      } else if (t < T7) {
-        renderMajors(t);
-      } else if (t < T8) {
-        // hold4: keep end of majors
-        renderMajors(T7);
-      } else if (t < T9) {
-        renderCarve(t);
-      } else if (t < T10) {
-        // hold5: keep end of carve
-        renderCarve(T9);
-      } else {
-        // final
-        renderCarve(T9);
-        finishAndRestore();
-        return;
-      }
 
       if (_pause.paused) {
         _masterRunning = false;
@@ -11010,7 +11171,11 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
 
     _masterRunning = true;
     requestAnimationFrame(master);
-  });
+  }
+  
+  );
+
+
 }
 
 
