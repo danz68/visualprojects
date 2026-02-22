@@ -4385,6 +4385,58 @@ window.dzv = window.dzv || {};
 window.stack_tracking = true;
 window.dzv.animating = true;
 window.dzv.warpingFactor=0;
+window.dzv.minHeightPx = 4;
+window.dzv.storage_key = "dzv_wages_map_attributes_v1";
+
+window.dzv._dzvLoadPrefsObject = function() {
+  try {
+    const raw = localStorage.getItem(window.dzv.storage_key);
+    if (!raw) return {};
+    const obj = JSON.parse(raw);
+    return (obj && typeof obj === "object") ? obj : {};
+  } catch (e) {
+    // corrupted JSON or blocked storage
+    return {};
+  }
+};
+
+window.dzv.dzvSaveVariable = function(key, value) {
+  try {
+    const prefs = window.dzv._dzvLoadPrefsObject();
+    prefs[key] = value;
+    localStorage.setItem(window.dzv.storage_key, JSON.stringify(prefs));
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+window.dzv.dzvLoadVariable = function(key, defaultValue = null) {
+  try {
+    const prefs = window.dzv._dzvLoadPrefsObject();
+
+    if (Object.prototype.hasOwnProperty.call(prefs, key)) {
+      return prefs[key];
+    }
+
+    window.dzv.dzvSaveVariable(key, defaultValue);
+    return defaultValue;
+  } catch (e) {
+    // keep consistent with your intent: try to persist default even on failure
+    try { window.dzv.dzvSaveVariable(key, defaultValue); } catch (_e) {}
+    return defaultValue;
+  }
+};
+
+window.dzv.show_labels = window.dzv.dzvLoadVariable("show_labels", true);
+// on / off
+window.dzv.color_labels =  window.dzv.dzvLoadVariable("color_labels", false);
+// color by violin
+window.dzv.label_density = window.dzv.dzvLoadVariable("label_density", 1.0);
+// 0..1
+window.dzv.auto_hide_overlap = window.dzv.dzvLoadVariable("auto_hide_overlap", true);
+	
+
 
 function rotateStepImmediate(svgEl, degStep = 120) {
   // ensure pivot is valid for inline SVG in HTML
@@ -6477,8 +6529,12 @@ window.dzv.dzv_set_lsc = function (svg, el, lgt, str, ctr){
 }
 
 
+ svg.style.setProperty("--lgt", String(window.dzv.dzvLoadVariable("--lgt", 1)));
+ svg.style.setProperty("--ctr", String(window.dzv.dzvLoadVariable("--ctr", 1)));
+ svg.style.setProperty("--str", String(window.dzv.dzvLoadVariable("--str", 1)));
+ 				
  
-  function applyFromVars(){
+ function applyFromVars(){
    if (window.dzv.dzv_set_lsc_lock>0) return;
     const cs = getComputedStyle(svg);
 
@@ -6752,6 +6808,7 @@ window.dzv.dzv_set_lsc = function (svg, el, lgt, str, ctr){
 	    }
 	    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
 	    p.setAttribute("d", d);
+		 p.setAttribute("vector-effect", "non-scaling-stroke");
 	    _tmpG.appendChild(p);
 	    return p;
 	  }
@@ -6893,174 +6950,431 @@ window.dzv.dzv_set_lsc = function (svg, el, lgt, str, ctr){
 	    return defs;
 	  }
 
-	  function build_array_from_p(p, total_steps) {
-	    // Returns a Float64Array of points [x0,y0,x1,y1,...] for a CLOSED symmetric envelope.
-	    // Points are sampled by cumulative mass in X (area-left / total area), not by arc-length.
-	    // This avoids "turning in the air" when morphing shapes with different curvature.
+// Monotone cubic Hermite (PCHIP / Fritsch–Carlson) y(x) for strictly monotone x.
+// Works for increasing or decreasing x. No extrapolation: clamps to endpoints.
+function pchipMake(x, y) {
+  const n = x.length;
+  if (n !== y.length) throw new Error("x/y length mismatch");
+  if (n < 2) throw new Error("need at least 2 points");
+
+  // verify strict monotone x
+  const dir = (x[n - 1] > x[0]) ? 1 : -1;
+  for (let i = 1; i < n; i++) {
+    if (dir > 0) {
+      if (!(x[i] > x[i - 1])) throw new Error("x must be strictly increasing");
+    } else {
+      if (!(x[i] < x[i - 1])) throw new Error("x must be strictly decreasing");
+    }
+  }
+
+  const h = new Float64Array(n - 1);
+  const d = new Float64Array(n - 1);
+  for (let i = 0; i < n - 1; i++) {
+    h[i] = x[i + 1] - x[i];
+    d[i] = (y[i + 1] - y[i]) / h[i];
+  }
+
+  const m = new Float64Array(n);
+
+  if (n === 2) {
+    m[0] = d[0];
+    m[1] = d[0];
+  } else {
+    // Endpoints: PCHIP one-sided formula + clamping
+    {
+      const h0 = h[0], h1 = h[1];
+      const d0 = d[0], d1 = d[1];
+      let m0 = ((2 * h0 + h1) * d0 - h0 * d1) / (h0 + h1);
+      if (m0 * d0 <= 0) m0 = 0;
+      else if ((d0 * d1 < 0) && (Math.abs(m0) > 3 * Math.abs(d0))) m0 = 3 * d0;
+      m[0] = m0;
+    }
+    {
+      const hn_2 = h[n - 2], hn_3 = h[n - 3];
+      const dn_2 = d[n - 2], dn_3 = d[n - 3];
+      let mn1 = ((2 * hn_2 + hn_3) * dn_2 - hn_2 * dn_3) / (hn_2 + hn_3);
+      if (mn1 * dn_2 <= 0) mn1 = 0;
+      else if ((dn_2 * dn_3 < 0) && (Math.abs(mn1) > 3 * Math.abs(dn_2))) mn1 = 3 * dn_2;
+      m[n - 1] = mn1;
+    }
+
+    // Interior: Fritsch–Carlson weighted harmonic mean
+    for (let i = 1; i <= n - 2; i++) {
+      const di_1 = d[i - 1];
+      const di = d[i];
+      if (di_1 === 0 || di === 0 || (di_1 > 0) !== (di > 0)) {
+        m[i] = 0;
+      } else {
+        const w1 = 2 * h[i] + h[i - 1];
+        const w2 = h[i] + 2 * h[i - 1];
+        m[i] = (w1 + w2) / (w1 / di_1 + w2 / di);
+      }
+    }
+  }
+
+  function evalAt(xq) {
+    // clamp to domain
+    if (dir > 0) {
+      if (xq <= x[0]) return y[0];
+      if (xq >= x[n - 1]) return y[n - 1];
+    } else {
+      if (xq >= x[0]) return y[0];
+      if (xq <= x[n - 1]) return y[n - 1];
+    }
+
+    // binary search interval
+    let lo = 0, hi = n - 2;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const a = x[mid], b = x[mid + 1];
+      if (dir > 0) {
+        if (xq < a) hi = mid - 1;
+        else if (xq > b) lo = mid + 1;
+        else { lo = mid; break; }
+      } else {
+        if (xq > a) hi = mid - 1;
+        else if (xq < b) lo = mid + 1;
+        else { lo = mid; break; }
+      }
+    }
+    const i = lo;
+
+    const xi = x[i], xi1 = x[i + 1];
+    const hiSeg = xi1 - xi;
+    const t = (xq - xi) / hiSeg;
+
+    const t2 = t * t;
+    const t3 = t2 * t;
+
+    const h00 = 2 * t3 - 3 * t2 + 1;
+    const h10 = t3 - 2 * t2 + t;
+    const h01 = -2 * t3 + 3 * t2;
+    const h11 = t3 - t2;
+
+    return h00 * y[i] + h10 * hiSeg * m[i] + h01 * y[i + 1] + h11 * hiSeg * m[i + 1];
+  }
+
+  // Fast vector eval:
+  // - If xqArr is monotone in the same direction as x, does a single forward scan O(n+Q)
+  // - Otherwise falls back to per-query binary search (still avoids per-query closure overhead)
+  function evalArray(xqArr, out) {
+    const Q = xqArr.length | 0;
+    if (!out || out.length !== Q) out = new Float64Array(Q);
+    if (Q <= 0) return out;
+
+    // detect monotone query direction
+    let qdir = 0;
+    if (Q >= 2) qdir = (xqArr[Q - 1] > xqArr[0]) ? 1 : (xqArr[Q - 1] < xqArr[0] ? -1 : 0);
+
+    const sameDir = (qdir !== 0 && qdir === dir);
+
+    if (sameDir) {
+      // one-pass scan
+      let i = 0;
+      const x0 = x[0], xN = x[n - 1];
+
+      for (let q = 0; q < Q; q++) {
+        const xq = xqArr[q];
+
+        // clamp
+        if (dir > 0) {
+          if (xq <= x0) { out[q] = y[0]; continue; }
+          if (xq >= xN) { out[q] = y[n - 1]; continue; }
+          while (i < n - 2 && xq > x[i + 1]) i++;
+        } else {
+          if (xq >= x0) { out[q] = y[0]; continue; }
+          if (xq <= xN) { out[q] = y[n - 1]; continue; }
+          while (i < n - 2 && xq < x[i + 1]) i++;
+        }
+
+        const xi = x[i], xi1 = x[i + 1];
+        const hiSeg = xi1 - xi;
+        const t = (xq - xi) / hiSeg;
+
+        const t2 = t * t;
+        const t3 = t2 * t;
+
+        const h00 = 2 * t3 - 3 * t2 + 1;
+        const h10 = t3 - 2 * t2 + t;
+        const h01 = -2 * t3 + 3 * t2;
+        const h11 = t3 - t2;
+
+        out[q] = h00 * y[i] + h10 * hiSeg * m[i] + h01 * y[i + 1] + h11 * hiSeg * m[i + 1];
+      }
+      return out;
+    }
+
+    // fallback: per-query binary search
+    for (let q = 0; q < Q; q++) {
+      out[q] = evalAt(xqArr[q]);
+    }
+    return out;
+  }
+
+  return { m, evalAt, evalArray };
+}
+
+// convenience
+function pchipEval(pchip, xq) {
+  return pchip.evalAt(xq);
+}
+
+function pchipEvalArray(pchip, xq) {
+  return pchip.evalArray(xq);
+}
 
 
-	    const S = Math.max(16, (total_steps | 0) || 0);
-	    const N = Math.max(8, (S / 2) | 0);
+function build_array_from_p(p, total_steps) {
+  // Closed symmetric envelope sampled by empirical mass in X (no dx, no area).
+  // - Sample path -> (x,y)
+  // - Sort by x
+  // - For each x-group (near-equal x), keep envelope by MAX hh; and if group has spread (vertical),
+  //   emulate with two points x0-eps, x0+eps carrying min/max hh (eps chosen from local gaps so order stays strict)
+  // - Empirical CDF = cumsum(h) on these nodes
+  // - PCHIP: h(x) and x(cdf)
 
+  total_steps = 2 * Math.floor((total_steps + 1) / 2);
+  const S = Math.max(16, (total_steps | 0) || 0);
+  const N = Math.max(8, (S / 2) | 0);
 
-	    let L = 0;
-	    try {
-	      L = p.getTotalLength();
-	    } catch {
-	      L = 0;
-	    }
-	    if (!(L > 0)) return new Float64Array(0);
+  let L = 0;
+  try { L = p.getTotalLength(); } catch { L = 0; }
+  if (!(L > 0)) return new Float64Array(0);
 
-	    // Dense arc-length sampling just to recover bbox and half-height h(x).
-	    const K = S * 2; //Math.max(1024, Math.min(8192, S * 8));
-	    let xmin = Infinity,
-	      xmax = -Infinity,
-	      ymin = Infinity,
-	      ymax = -Infinity;
+  const K = S * 2;
+  
+  
 
-	    const xsDense = new Float64Array(K);
-	    const ysDense = new Float64Array(K);
+  const xs = new Float64Array(K);
+  const ys = new Float64Array(K);
 
-	    for (let i = 0; i < K; i++) {
-	      const t = (K === 1) ? 0 : (i / (K - 1));
-	      const s = t * L;
-	      let q = null;
-	      try {
-	        q = p.getPointAtLength(s);
-	      } catch {
-	        q = null;
-	      }
-	      const x = q ? +q.x : 0;
-	      const y = q ? +q.y : 0;
-	      xsDense[i] = x;
-	      ysDense[i] = y;
-	      if (x < xmin) xmin = x;
-	      if (x > xmax) xmax = x;
-	      if (y < ymin) ymin = y;
-	      if (y > ymax) ymax = y;
-	    }
+  let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
 
-	    if (!(xmin < xmax) || !(ymin < ymax)) return new Float64Array(0);
+  for (let i = 0; i < K; i++) {
+    const t = (K === 1) ? 0 : (i / (K - 1));
+    const s = t * L;
+    let q = null;
+    try { q = p.getPointAtLength(s); } catch { q = null; }
+    const x = q ? +q.x : 0;
+    const y = q ? +q.y : 0;
 
-	    const yCenter = 0.5 * (ymin + ymax);
+    xs[i] = x;
+    ys[i] = y;
 
-	    // Build h(x) on a regular X grid from dense samples.
-	    const M = S * 4; //Math.max(1024, Math.min(16384, S * 8));
-	    const h = new Float64Array(M);
-	    const hit = new Uint8Array(M);
+    if (x < xmin) xmin = x;
+    if (x > xmax) xmax = x;
+    if (y < ymin) ymin = y;
+    if (y > ymax) ymax = y;
+  }
 
-	    const span = xmax - xmin;
-	    const inv = (M - 1) / span;
+  if (!(xmin < xmax) || !(ymin < ymax)) return new Float64Array(0);
+  
+  const yCenter = 0.5 * (ymin + ymax);
+  const span = xmax - xmin;
+  
+  const eps = Math.max(1e-11, 1e-11 * (span > 0 ? span : 1));
+  const epsY = Math.max(1e-11, 1e-11 * (ymax-ymin));
+  
+  
+  // Build one half-curve (TOP if keepAbove=true, BOTTOM if keepAbove=false) from sampled (xs,ys),
+// using yCenter = yc to decide membership, then ensure x-monotone, add endpoints on yc if needed,
+// and compress consecutive near-equal x runs into 2 points: (first) and (last) of the run.
+function build_half_from_samples(xs, ys, yc) {
+  // Assumes xmin, xmax, eps are defined in outer scope.
+  // TOP half only: keep y >= yc, store y offset (y - yc).
+  // If x is already nondecreasing, no sort. If not, sort by x.
+  // Then group consecutive x within eps:
+  //   - compute ymin/ymax over the run (in offset space)
+  //   - emit 1 point if ymin==ymax, else emit 2 points: (x_first,ymin) and (x_last,ymax)
 
-	    for (let i = 0; i < K; i++) {
-	      const x = xsDense[i];
-	      let b = Math.floor((x - xmin) * inv);
-	      if (b < 0) b = 0;
-	      else if (b >= M) b = M - 1;
+  const K = xs.length | 0;
+  if (K !== (ys.length | 0)) throw new Error("xs/ys length mismatch");
+  if (K <= 0) return [new Float64Array(0), new Float64Array(0)];
 
-	      const hh = Math.abs(ysDense[i] - yCenter);
-	      if (!hit[b] || hh > h[b]) {
-	        h[b] = hh;
-	        hit[b] = 1;
-	      }
-	    }
+  // Collect TOP half in original order
+  const xTmp = new Float64Array(K + 2);
+  const yTmp = new Float64Array(K + 2);
+  let n = 0;
 
-	    // Fill gaps linearly.
-	    let last = -1;
-	    for (let i = 0; i < M; i++) {
-	      if (hit[i]) {
-	        if (last < 0) {
-	          for (let k = 0; k < i; k++) {
-	            h[k] = h[i];
-	            hit[k] = 1;
-	          }
-	        } else if (i - last > 1) {
-	          const a = last,
-	            b = i;
-	          for (let k = a + 1; k < b; k++) {
-	            const t = (k - a) / (b - a);
-	            h[k] = h[a] + t * (h[b] - h[a]);
-	            hit[k] = 1;
-	          }
-	        }
-	        last = i;
-	      }
-	    }
-	    if (last >= 0 && last < M - 1) {
-	      for (let k = last + 1; k < M; k++) {
-	        h[k] = h[last];
-	        hit[k] = 1;
-	      }
-	    }
+  // endpoints are added by you; keep them in the stream so grouping can collapse them
+  xTmp[n] = xmin; yTmp[n] = 0; n++;
 
-	    // Force closure at ends.
-	    h[0] = 0;
-	    h[M - 1] = 0;
+  for (let i = 0; i < K; i++) {
+    const y = ys[i];
+    if (y >= yc) {
+      xTmp[n] = xs[i];
+      yTmp[n] = y - yc;
+      n++;
+    }
+  }
 
-	    // Cumulative mass proxy: integral of h(x) dx (factor 2 cancels).
-	    const cdf = new Float64Array(M);
-	    cdf[0] = 0;
-	    const dx = span / (M - 1);
-	    let tot = 0;
-	    for (let i = 0; i < M - 1; i++) {
-	      const a = h[i],
-	        b = h[i + 1];
-	      tot += 0.5 * (a + b) * dx;
-	      cdf[i + 1] = tot;
-	    }
-	    if (!(tot > 0)) return new Float64Array(0);
+  xTmp[n] = xmax; yTmp[n] = 0; n++;
 
-	    // Normalize to [0,1].
-	    for (let i = 0; i < M; i++) cdf[i] /= tot;
+  if (n < 3) return [new Float64Array(0), new Float64Array(0)];
 
-	    function _interpHx(xAbs) {
-	      const u = (xAbs - xmin) / span * (M - 1);
-	      let i0 = Math.floor(u);
-	      if (i0 < 0) i0 = 0;
-	      else if (i0 >= M - 1) i0 = M - 2;
-	      const t = u - i0;
-	      return h[i0] + t * (h[i0 + 1] - h[i0]);
-	    }
+  // Sort only if needed (nondecreasing x)
+  let sorted = true;
+  for (let i = 1; i < n; i++) {
+    if (xTmp[i] < xTmp[i - 1]) { sorted = false; break; }
+  }
 
-	    function _xAtMass(frac) {
-	      const f = (frac <= 0) ? 0 : (frac >= 1 ? 1 : frac);
-	      // binary search in cdf
-	      let lo = 0,
-	        hi = M - 1;
-	      while (hi - lo > 1) {
-	        const mid = (lo + hi) >> 1;
-	        if (cdf[mid] < f) lo = mid;
-	        else hi = mid;
-	      }
-	      const c0 = cdf[lo],
-	        c1 = cdf[hi];
-	      const t = (c1 > c0) ? ((f - c0) / (c1 - c0)) : 0;
-	      return (xmin + (lo + t) * dx);
-	    }
+  let xHalf, yHalf;
+  if (sorted) {
+    xHalf = xTmp.subarray(0, n);
+    yHalf = yTmp.subarray(0, n);
+  } else {
+    const idx = new Array(n);
+    for (let i = 0; i < n; i++) idx[i] = i;
+    idx.sort((a, b) => {
+      const d = xTmp[a] - xTmp[b];
+      return d ? d : (a - b);
+    });
 
-	    const out = new Float64Array(2 * (2 * N));
-	    // Upper: left to right
-	    for (let i = 0; i < N; i++) {
-	      const frac = (N === 1) ? 0 : (i / (N - 1));
-	      const x = _xAtMass(frac);
-	      const hh = _interpHx(x);
-	      out[2 * i] = x;
-	      out[2 * i + 1] = yCenter - hh;
-	    }
-	    // Lower: right to left
-	    for (let i = 0; i < N; i++) {
-	      const j = (N - 1) - i;
-	      const frac = (N === 1) ? 0 : (j / (N - 1));
-	      const x = _xAtMass(frac);
-	      const hh = _interpHx(x);
-	      const k = N + i;
-	      out[2 * k] = x;
-	      out[2 * k + 1] = yCenter + hh;
-	    }
+    xHalf = new Float64Array(n);
+    yHalf = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const j = idx[i];
+      xHalf[i] = xTmp[j];
+      yHalf[i] = yTmp[j];
+    }
+  }
 
-	    return out;
+  // Group consecutive x within eps, collapse to <= 2 points per group
+  const xOut = new Float64Array(2 * n);
+  const yOut = new Float64Array(2 * n);
+  let outN = 0;
+
+  let k = 0;
+  while (k < n) {
+    let k2 = k;
+	let yymin = yHalf[k], yymax = yHalf[k];
+	const xh = xHalf[k];
+    while (k2+1 < n && (xHalf[k2+1] - xh) <= eps) 
+	  {
+	   const yy = yHalf[k2+1];
+       if (yy < yymin) yymin = yy;
+       if (yy > yymax) yymax = yy;
+	   k2++;
+	  }
+	  
+	if (k === k2)
+	  {
+	   xOut[outN] = xHalf[k];
+       yOut[outN] = yymin;
+       outN++;
+	   k++;
+	   continue;
 	  }
 
+    // run is [k, k2)
+
+    if (Math.abs(yymin - yymax) <= epsY) {
+      // identical (flat) group -> one point
+      xOut[outN] = xHalf[k];
+      yOut[outN] = yymin;
+      outN++;
+    } else {
+      // vertical-ish group -> two points: first x with ymin, last x with ymax
+      xOut[outN] = xHalf[k]-0.5*eps;
+      yOut[outN] = yymin;
+      outN++;
+
+      xOut[outN] = xHalf[k2]+0.5*eps;
+      yOut[outN] = yymax;
+      outN++;
+    }
+
+    k = k2+1;
+  }
+  
+  //pchip sanity check/correction
+  for (let i=1;i<outN;i++)
+    {
+	  if (xOut[i]-xOut[i-1]<eps)
+	    xOut[i] = xOut[i-1] + eps;
+	}
+
+  return [xOut.subarray(0, outN), yOut.subarray(0, outN)];
+}
+
+
+  const [xHit, hHit] = build_half_from_samples(xs, ys, yCenter);
+  //console.log(xHit);
+  
+
+
+  const n = xHit.length;
+  if (n < 2) return new Float64Array(0);
+  
+
+
+
+  // Empirical CDF = cumsum(h) (no dx, no normalization needed other than using range when sampling)
+  const pchipHx = pchipMake(xHit, hHit);
+  const m = pchipHx.m;
+
+  // Exact cumulative integral of Hermite cubic per segment:
+  // area = dx * 0.5*(y0+y1) + dx^2*(m0 - m1)/12
+  const cdfHit = new Float64Array(n);
+  cdfHit[0] = 0;
+  let tot = 0;
+  for (let i = 0; i < n - 1; i++) {
+    const dx = xHit[i + 1] - xHit[i];
+    const y0 = hHit[i], y1 = hHit[i + 1];
+    const m0 = m[i],   m1 = m[i + 1];
+    tot += dx * 0.5 * (y0 + y1) + (dx * dx) * (m0 - m1) / 12;
+    cdfHit[i + 1] = tot;
+  }
+  if (!(tot > 0)) return new Float64Array(0);
+
+  for (let i = 0; i < n; i++) cdfHit[i] /= tot;
+
+  // Make CDF strictly increasing (PCHIP requires strict monotone x)
+  const cdfStrict = new Float64Array(n);
+  const epsC = 1e-11;
+  cdfStrict[0] = 0;
+  for (let i = 1; i < n; i++) {
+    let v = cdfHit[i];
+    if (v < 0) v = 0;
+    if (v > 1) v = 1;
+    const prev = cdfStrict[i - 1];
+    if (v <= prev) v = prev + epsC;
+    cdfStrict[i] = v;
+  }
+  cdfStrict[n - 1] = 1;
+  for (let i = n - 2; i >= 0; i--) {
+    if (cdfStrict[i] >= cdfStrict[i + 1]) cdfStrict[i] = cdfStrict[i + 1] - epsC;
+  }
+  cdfStrict[0] = 0;
+
+
+  const pchipXatMass = pchipMake(cdfStrict, xHit);
+
+
+  const out = new Float64Array(4 * N);
+  
+  const fracs = new Float64Array(N);
+  for (let i = 0; i < N; i++)
+    fracs[i] = i / (N - 1);
+	
+  const xxs = pchipEvalArray(pchipXatMass, fracs);
+  const hhs = pchipEvalArray(pchipHx, xxs);
+  
+  for (let i = 0; i < N; i++) {
+
+    const x = xxs[i];
+	const hh = hhs[i]; 
+	
+    out[2 * i] = x;
+    out[2 * i + 1] = yCenter - hh;
+
+    const k = N + ((N - 1) - i);
+    out[2 * k] = x;
+    out[2 * k + 1] = yCenter + hh;
+  }
+
+  return out;
+}
 
 
 	  function build_array_from_data(d, total_steps) {
@@ -7548,6 +7862,7 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	      let morphPath = defs.querySelector(`path[id="${morphId}"]`);
 	      if (!morphPath) {
 	        morphPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+			morphPath.setAttribute("vector-effect", "non-scaling-stroke");
 	        morphPath.setAttribute("id", morphId);
 	        defs.appendChild(morphPath);
 	      }
@@ -7651,6 +7966,7 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	        if (!p) {
 	          p = document.createElementNS("http://www.w3.org/2000/svg", "path");
 	          p.setAttribute("id", id);
+			  p.setAttribute("vector-effect", "non-scaling-stroke");
 	          defs.appendChild(p);
 	        }
 
@@ -7736,7 +8052,7 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	        };
 	      }
 
-	      function _smoothGaussianClampEdgesInPlace(ys, sigmaSamples, passes) {
+	      function _smoothGaussianClampEdgesInPlaceO(ys, sigmaSamples, passes) {
 	        const n = ys.length;
 	        if (n < 7) return;
 
@@ -7773,7 +8089,72 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	          for (let i = 0; i < n; i++) ys[i] = tmp[i];
 	        }
 	      }
+		  
+	
 
+		function _smoothGaussianClampEdgesInPlace(ys, sigmaSamples, passes) {
+
+		   const n = ys.length;
+		  if (n < 7) return;
+
+		  const p = Math.max(1, passes | 0);
+
+		  const ker = _gaussianKernel1D(sigmaSamples);
+		  const k = ker.k;
+		  const R = ker.radius;
+
+		  // Tail length (samples)
+		  const T = n/100;//Math.max(4, Math.min((n >> 2), 2 * R));
+
+		  // Faster rise: use power on the cosine ramp.
+		  // gamma < 1  => faster rise from 0 (what you want)
+		  // gamma = 1  => classic Hann half-window
+		  // gamma > 1  => slower rise
+		  const gamma = 0.35;
+
+		  const tmp = new Float64Array(n);
+
+		  function applyCosineTaperToZero() {
+			// left: i=0..T-1, w goes 0->1
+			for (let i = 0; i < T; i++) {
+			  const t = (T === 1) ? 1 : (i / (T - 1));              // 0..1
+			  let w = 0.5 - 0.5 * Math.cos(Math.PI * t);            // 0..1
+			  w = Math.pow(w, gamma);                               // faster rise
+			  ys[i] *= w;
+			}
+
+			// right: i=n-T..n-1, w goes 1->0
+			for (let j = 0; j < T; j++) {
+			  const i = n - 1 - j;
+			  const t = (T === 1) ? 1 : (j / (T - 1));              // 0..1
+			  let w = 0.5 - 0.5 * Math.cos(Math.PI * t);            // 0..1
+			  w = Math.pow(w, gamma);                               // same shaping
+			  ys[i] *= (1 - w);                                     // 1->0
+			}
+
+			ys[0] = 0;
+			ys[n - 1] = 0;
+		  }
+
+		  for (let it = 0; it < p; it++) {
+			applyCosineTaperToZero();
+
+			for (let i = 0; i < n; i++) {
+			  let acc = 0;
+			  for (let j = -R; j <= R; j++) {
+				let ii = i + j;
+				if (ii < 0) ii = 0;
+				else if (ii >= n) ii = n - 1;
+				acc += ys[ii] * k[j + R];
+			  }
+			  tmp[i] = acc;
+			}
+
+			for (let i = 0; i < n; i++) ys[i] = tmp[i];
+		  }
+
+		  applyCosineTaperToZero();
+		}
 
 
 let YEnvelopeMin, YEnvelopeMax;
@@ -7800,7 +8181,7 @@ if (is_circle)
   const vbW = (vb.length === 4 && Number.isFinite(vb[2])) ? vb[2] : 1;
   const vbH = (vb.length === 4 && Number.isFinite(vb[3])) ? vb[3] : 1;
 
-  const B = 1000;
+  const B = 500;
 
   let env = null;
   let ex0 = vbX, ex1 = vbX + vbW, W = vbW, binW = vbW / B;
@@ -7944,7 +8325,7 @@ if (is_circle)
 
       {
         const sigmaSamples = 3 * Math.max(4, Math.min(32, Math.round(M / 160)));
-        _smoothGaussianClampEdgesInPlace(ys, sigmaSamples, 2);
+        _smoothGaussianClampEdgesInPlace(ys, sigmaSamples, 1);
       }
 
       let Araw = 0;
@@ -8008,7 +8389,8 @@ if (is_circle)
       const gGlobal = metaRoot.querySelector('g[id="00-0000"]');
       const defs = gGlobal ? gGlobal.querySelector("defs") : null;
       const p = defs ? defs.querySelector('path[id="dzv-00-0000 - crt_stack"]') : null;
-      if (p) p.setAttribute("d", dd);
+      if (p) { p.setAttribute("d", dd); p.setAttribute("vector-effect", "non-scaling-stroke");}
+	  
     } catch {}
 
     const pTmp = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -9564,8 +9946,12 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 	  function _hideMajorsExceptGlobal(hide) {
         top_label = svg.querySelector('text[id$="00-0000 - label"]');
 		const top_btn = document.querySelector("#dzv_menu_dots_btn");
+		const gArea0 = svg.querySelector(`g[id="00-0000 - area"]`);
+        const gUse = gArea0 ? gArea0.querySelector("use"):null;
+  
 	    if (hide)
 		 {
+		  if (gUse) _setUseHref(gUse, "#dzv-00-0000 - crt_stack");
 	      if (top_label)
 		  top_label.custom_text = true;
 		  if (top_btn)
@@ -9574,6 +9960,7 @@ function repulsive(xdir, ydir, iters, x, y, rx, ry, xmins, xmaxs, ymins, ymaxs)
 		 }
 		else
 		 {
+		  if (gUse) _setUseHref(gUse, "#dzv-00-0000 - full");
 		  if (top_label)
 		  top_label.custom_text = null;
 		  if (top_btn)
@@ -9761,7 +10148,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
 		l0-0.003c-0.683,0.081-1.371,0.138-2.067,0.152c-11.556,0.223-21.14-8.997-21.362-20.55c-0.223-11.554,8.999-21.135,20.555-21.358
 		c4.878-0.094,9.383,1.517,12.998,4.251l-0.986,0.738l-5.866,4.375c-0.448,0.337-0.678,0.904-0.583,1.46
 		c0.092,0.556,0.49,1.019,1.031,1.188l25.609,8.177C78.042,49.386,78.545,49.299,78.941,49.005z" 
-		style="paint-order:stroke fill;" fill="#666" stroke="white" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+		style="paint-order:stroke fill;" fill="#666" stroke="white" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
     const SVG_REVERSE = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="2 0 26 24" width="20" height="20" aria-hidden="true">
@@ -9771,7 +10158,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
 </svg>`;
     const SVG_END = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-  <rect x="6" y="6" width="12" height="12" rx="3" ry="3"  fill="#666" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" style="paint-order:stroke fill;"></rect>
+  <rect x="6" y="6" width="12" height="12" rx="1" ry="1"  fill="#666" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" style="paint-order:stroke fill;"></rect>
 </svg>`;
 
 
@@ -10310,7 +10697,143 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
     try { useEl.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", href); } catch (e) {}
   }
 
+function d_from_array_C(arr, closed = true) {
+  const a = arr || [];
+  const n = a.length | 0;
+  if (n < 8 || (n & 1)) return "";
+
+  const N = (n / 4) | 0; // points per half
+  if (4 * N !== n || N < 2) return "";
+
+  function fmt(x) {
+    if (!Number.isFinite(x)) return "0";
+    const v = Math.round(x * 1e4) / 1e4;
+    return (Math.abs(v) < 1e-10) ? "0" : String(v);
+  }
+
+  function hx(h, i) { return +a[2 * (h * N + i)]; }
+  function hy(h, i) { return +a[2 * (h * N + i) + 1]; }
+
+  let d = "";
+
+  // ---- start at upper[0] ----
+  d += "M " + fmt(hx(0, 0)) + " " + fmt(hy(0, 0));
+
+  // ---- upper: C to every second point using the intermediary as BOTH controls ----
+  for (let i = 2; i < N; i += 2) {
+    const cx = hx(0, i - 1), cy = hy(0, i - 1);
+    const ex = hx(0, i),     ey = hy(0, i);
+    d += " C " + fmt(cx) + " " + fmt(cy) + " " + fmt(cx) + " " + fmt(cy) + " " + fmt(ex) + " " + fmt(ey);
+  }
+  // if N is even, last point (N-1) wasn't reached by i+=2, so include it
+  if ((N & 1) === 0) d += " L " + fmt(hx(0, N - 1)) + " " + fmt(hy(0, N - 1));
+
+  // ---- connect to lower[0] WITHOUT starting a new subpath ----
+  const lx0 = hx(1, 0), ly0 = hy(1, 0);
+  const uxE = hx(0, N - 1), uyE = hy(0, N - 1);
+  if (lx0 !== uxE || ly0 !== uyE) d += " L " + fmt(lx0) + " " + fmt(ly0);
+
+  // ---- lower: C to every second point using the intermediary as BOTH controls ----
+  for (let i = 2; i < N; i += 2) {
+    const cx = hx(1, i - 1), cy = hy(1, i - 1);
+    const ex = hx(1, i),     ey = hy(1, i);
+    d += " C " + fmt(cx) + " " + fmt(cy) + " " + fmt(cx) + " " + fmt(cy) + " " + fmt(ex) + " " + fmt(ey);
+  }
+  if ((N & 1) === 0) d += " L " + fmt(hx(1, N - 1)) + " " + fmt(hy(1, N - 1));
+
+  if (closed) d += " Z";
+  return d;
+}
+
+
+function d_from_array_or_ellipse(arr,closed = true) {
+  const a = arr || [];
+  const n = a.length | 0;
+  if (n < 4) return "";
+  
+  const eps = 0.001;
+
+  function fmt(x) {
+    if (!Number.isFinite(x)) return "0";
+    const v = Math.round(x * 1e4) / 1e4;
+    return (Math.abs(v) < 1e-10) ? "0" : String(v);
+  }
+
+  function d_polyline() {
+    let d = "M " + fmt(a[0]) + " " + fmt(a[1]);
+    for (let i = 2; i + 1 < n; i += 2) d += " L " + fmt(a[i]) + " " + fmt(a[i + 1]);
+    if (closed) d += " Z";
+    return d;
+  }
+
+  // bbox
+  let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+  for (let i = 0; i + 1 < n; i += 2) {
+    const x = +a[i], y = +a[i + 1];
+    if (x < xmin) xmin = x;
+    if (x > xmax) xmax = x;
+    if (y < ymin) ymin = y;
+    if (y > ymax) ymax = y;
+  }
+  const spanX = xmax - xmin;
+  const spanY = ymax - ymin;
+  if (!(spanX > 0) || !(spanY > 0)) return d_polyline();
+
+  const tol = Math.max(spanX, spanY) * (+eps);
+  if (!(tol > 0)) return d_polyline();
+
+  // axis-aligned ellipse implied by bbox
+  const cx = 0.5 * (xmin + xmax);
+  const cy = 0.5 * (ymin + ymax);
+  const rx = 0.5 * spanX;
+  const ry = 0.5 * spanY;
+  if (!(rx > 0) || !(ry > 0)) return d_polyline();
+
+  // max distance from samples to that ellipse (closest point via angle in normalized space)
+  let maxDist = 0;
+  for (let i = 0; i + 1 < n; i += 2) {
+    const x = +a[i], y = +a[i + 1];
+    const nx = (x - cx) / rx;
+    const ny = (y - cy) / ry;
+    if (!Number.isFinite(nx) || !Number.isFinite(ny)) return d_polyline();
+
+    // if point is extremely close to center, it's not an ellipse boundary sample
+    if ((nx * nx + ny * ny) < 1e-12) return d_polyline();
+
+    const ang = Math.atan2(ny, nx);
+    const xe = cx + rx * Math.cos(ang);
+    const ye = cy + ry * Math.sin(ang);
+
+    const dx = x - xe, dy = y - ye;
+    const d = Math.hypot(dx, dy);
+    if (d > maxDist) maxDist = d;
+    if (maxDist > tol) return d_polyline();
+  }
+
+  // also require the samples to reach near the four extremes (within tol)
+  // (prevents accepting a small arc as a full ellipse)
+  let hitL = false, hitR = false, hitT = false, hitB = false;
+  for (let i = 0; i + 1 < n; i += 2) {
+    const x = +a[i], y = +a[i + 1];
+    if (Math.abs(x - xmin) <= tol) hitL = true;
+    if (Math.abs(x - xmax) <= tol) hitR = true;
+    if (Math.abs(y - ymin) <= tol) hitT = true;
+    if (Math.abs(y - ymax) <= tol) hitB = true;
+  }
+  if (!(hitL && hitR && hitT && hitB)) return d_polyline();
+
+  // return exact ellipse as two arcs
+  // M (cx+rx,cy) A rx ry 0 1 0 (cx-rx,cy) A rx ry 0 1 0 (cx+rx,cy) Z
+  let d = "M " + fmt(cx + rx) + " " + fmt(cy);
+  d += " A " + fmt(rx) + " " + fmt(ry) + " 0 1 0 " + fmt(cx - rx) + " " + fmt(cy);
+  d += " A " + fmt(rx) + " " + fmt(ry) + " 0 1 0 " + fmt(cx + rx) + " " + fmt(cy);
+  if (closed) d += " Z";
+  return d;
+}
+
+  //d_from_array_or_ellipse(arr, closed);
   function d_from_array(arr, closed = true) {
+  
     const a = arr || [];
     const n = a.length | 0;
     if (n < 4) return "";
@@ -10357,15 +10880,16 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
     }
   }
 
+ const global_res = 1024;
   let global_from;
   if (!(is_circle && !useWarp)) {
     if (window.dzv.warpingFactor < 0.5)
-      global_from = build_array_from_data(is_circle ? dzv.linear_stacked_path_circle : dzv.linear_stacked_path_ellipse, 512);
+      global_from = build_array_from_data(is_circle ? dzv.linear_stacked_path_circle : dzv.linear_stacked_path_ellipse, global_res);
     else
-      global_from = build_array_from_data(is_circle ? dzv.warped_stacked_path_circle : dzv.warped_stacked_path_ellipse, 512);
+      global_from = build_array_from_data(is_circle ? dzv.warped_stacked_path_circle : dzv.warped_stacked_path_ellipse, global_res);
   }
 
-  let global_to = build_array_from_p(gPath, 512);
+  let global_to = build_array_from_p(gPath, global_res);
 
   _hideMajorsExceptGlobal(true);
   const crt_stack = document.getElementById('dzv-00-0000 - crt_stack');
@@ -10378,7 +10902,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
     );
   }
 
-  _setUseHref(gUse, "#dzv-00-0000 - crt_stack");
+  //_setUseHref(gUse, "#dzv-00-0000 - crt_stack");
   gUse.style.display = "none";
   gUse.setAttribute("opacity", "0");
   gUse.setAttribute("fill-opacity", "0");
@@ -10519,7 +11043,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
       }
     }
 
-    global_from = build_array_from_data(dzv.linear_stacked_path_circle, 512);
+    global_from = build_array_from_data(dzv.linear_stacked_path_circle, global_res);
     crt_stack.setAttribute("d", dzv.linear_stacked_path_circle);
   }
 
@@ -10550,7 +11074,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
       }
     }
 
-    const d0 = d_from_array(fromArr);
+    const d0 = d_from_array_or_ellipse(fromArr);
 
     _setUseHref(it.useEl, `#dzv-${it.id} - morph`);
     it.morphPath.setAttribute("d", d0);
@@ -10636,19 +11160,19 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
   // ------------------------------------------------------------
   
 
-  const durFade  = 3000;
+  const durFade  = 1000;
   const HOLD1 = 5000;
   
-  const durMorph = 3000;
-  const HOLD2 = 3000;
+  const durMorph = 2000;
+  const HOLD2 = 4000;
   
-  const durMove  = 3000;
-  const HOLD3 = 3000;
+  const durMove  = 2000;
+  const HOLD3 = 4000;
   
-  const durMajorEdgeFade = 3000;
-  const HOLD4 = 3000;
+  const durMajorEdgeFade = 1000;
+  const HOLD4 = 4000;
   
-  const durCarve = 3000;
+  const durCarve = 1000;
   const HOLD5 = 5000;
 
   const T0 = 0;
@@ -10755,12 +11279,12 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
       _setTranslateYPreserve(it.useEl, it._baseTransform, dy_total);
       it._dyMorph = dy_total;
 
-      if (it.morphPath) it.morphPath.setAttribute("d", d_from_array(itmp));
+      if (it.morphPath) it.morphPath.setAttribute("d", e0 < 0.1 ? d_from_array_or_ellipse(itmp):d_from_array(itmp));
     }
 
     if (p >= 1) {
       // after morph, global use points to full
-      _setUseHref(gUse, "#dzv-00-0000 - full");
+      //_setUseHref(gUse, "#dzv-00-0000 - full");
 
       // freeze morph end state for subsequent stages
       for (let i = 0; i < items.length; i++) {
@@ -10883,6 +11407,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
     _dzvVisPause.remove();
     _hideMajorsExceptGlobal(false);
     resumeAllPointer();
+	//_setUseHref(gUse, "#dzv-00-0000 - full");
 
     if (top_label) setSvgTextSmart(top_label, crt_text);
     if (top_label) top_label.style.fill = crt_color;
@@ -10900,6 +11425,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
 	
 	
     _pause.paused = false;
+	
   }
 
   // ------------------------------------------------------------
@@ -10917,6 +11443,14 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
   stages.push({func:renderMove, duration:durMove, epilog:HOLD3, run_min:Infinity, run_max:-Infinity, touched:false});
   stages.push({func:renderMajors, duration:durMajorEdgeFade, epilog:HOLD4, run_min:Infinity, run_max:-Infinity, touched:false});
   stages.push({func:renderCarve, duration:durCarve, epilog:HOLD5, run_min:Infinity, run_max:-Infinity, touched:false});
+  
+  let Ttotal=0;
+  for (let i=0; i < stages.length; i++)
+	 {
+	   const stage = stages[i];
+	   Ttotal += stage.duration + stage.epilog;
+	  } 
+  
   
 function reset_stages(stages)
 {
@@ -11086,29 +11620,29 @@ function run_anim_stages(direction, both, _from, _to, _now, stages){
 	    {
 		  reset_stages_limits(stages);
 		  rewinding = 0;
-	      const ellapsed = T10 - (nowAdj - tStartAdj);
+	      const ellapsed = Ttotal - (nowAdj - tStartAdj);
 		  tStartAdj = nowAdj - ellapsed;
 		}
 	  
-      const t = direction ===0 ? nowAdj - tStartAdj : T10 - (nowAdj - tStartAdj);
+      const t = direction ===0 ? nowAdj - tStartAdj : Ttotal - (nowAdj - tStartAdj);
 	  if (t <= 0 && direction!==0) //end backward animation
 	    {
 
 		  reset_stages(stages);
 		  
 		  stages[0].touched=true;
-		  run_anim_stages(0, true, T0, T10, T10-1, stages);
+		  run_anim_stages(0, true, 0, Ttotal, Ttotal-1, stages);
 		  
 		  finishAndRestore();
-		  _setUseHref(gUse, "#dzv-00-0000 - full");
+		  //_setUseHref(gUse, "#dzv-00-0000 - full");
 		  return;
 		}
 
       ensureStageLabel(t);
 
       // global use href: crt_stack until morph ends
-      if (t < T3) _setUseHref(gUse, "#dzv-00-0000 - crt_stack");
-      else _setUseHref(gUse, "#dzv-00-0000 - full");
+      //if (t < T3) _setUseHref(gUse, "#dzv-00-0000 - crt_stack");
+      //else _setUseHref(gUse, "#dzv-00-0000 - full");
 	  
 	  if (continue_mode===1) //ends forward animation
 	    {
@@ -11148,8 +11682,8 @@ function run_anim_stages(direction, both, _from, _to, _now, stages){
 		}
      
 	 
-     run_anim_stages(direction, true, T0, T10, t, stages);
-	 if (t>T10 && direction===0)
+     run_anim_stages(direction, true, 0, Ttotal, t, stages);
+	 if (t>Ttotal && direction===0)
 	   {
 	     finishAndRestore();
          return;
@@ -11339,13 +11873,7 @@ function run_anim_stages(direction, both, _from, _to, _now, stages){
 	}
 	window.dzv.update_highlight = dzvUpdateHighlightCachesFromMajors;
 
-	window.dzv.show_labels = true;
-	// on / off
-	window.dzv.color_labels = false;
-	// color by violin
-	window.dzv.label_density = 1.0;
-	// 0..1
-	window.dzv.auto_hide_overlap = true;
+
 	// ---------------------------------------------------------------------------
 	// LABELS (integrated):
 	// - uses ONLY dzv.model fields (id, level, label, workers, parent, children, select_area_string, edge_color/area_color)
@@ -11450,6 +11978,7 @@ function run_anim_stages(direction, both, _from, _to, _now, stages){
 	        }
 	        const p = document.createElementNS(SVG_NS, "path");
 	        p.setAttribute("d", patchPath.getAttribute("d") || "");
+			p.setAttribute("vector-effect", "non-scaling-stroke");
 	        clip.appendChild(p);
 	        return clipId;
 	    }
@@ -12431,9 +12960,7 @@ function run_anim_stages(direction, both, _from, _to, _now, stages){
 	    miniPath.setAttribute("stroke", "rgba(0,0,0,0.65)");
 	    miniPath.setAttribute("stroke-width", "1.0");
 	    miniPath.setAttribute("vector-effect", "non-scaling-stroke");
-		//miniPath.setAttribute("style", "filter: brightness(var(--lgt)) saturate(var(--str)) contrast(var(--ctr));");
-		//miniPath.setAttribute("style", `filter: brightness(${window.lgt}) saturate(${window.str}) contrast(${window.ctr});
-		//-webkit-filter: brightness(${window.lgt}) saturate(${window.str}) contrast(${window.ctr});`);
+
 		window.dzv.dzv_set_lsc(miniSvg, miniPath, window.lgt, window.str, window.ctr);
 		
 		
@@ -13324,13 +13851,6 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    function _applyMiniViolinStyle(meta) {
 		    let cs = window.getComputedStyle(svg);
 			
-			//miniSvg.style.setProperty("--lgt", cs.getPropertyValue("--lgt"));
-			//miniSvg.style.setProperty("--str", cs.getPropertyValue("--str"));
-			//miniSvg.style.setProperty("--ctr", cs.getPropertyValue("--ctr"));
-			//miniPath.setAttribute("style", `filter: brightness(${window.lgt}) saturate(${window.str}) contrast(${window.ctr});
-		    //-webkit-filter: brightness(${window.lgt}) saturate(${window.str}) contrast(${window.ctr});`);
-		
-		
 	        const v = window.dzv.getViolin(meta.baseId);
 	        if (!v) {
 	            // fallback to neutral, but still without DOM/style interrogation
@@ -15571,7 +16091,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    if (!model || !model.map_violins) throw new Error("dzvInitHoverFullPathHighlight: missing dzv.model (run dzvBuildModel first)");
 	    const cfg = {
 	        hitSelector: opts.hitSelector ?? 'g.s_e[id$=" - area"], g.s_e[id$=" - edge"], text.s_e[id$=" - label"]',
-	        minHeightPx: opts.minHeightPx ?? 10,
+	        minHeightPx: opts.minHeightPx ?? window.dzv.minHeightPx,
 	        layerId: opts.layerId ?? "dzv-hover-highlight-layer",
 	        pathId: opts.pathId ?? "dzv-hover-highlight-path",
 	        // if pinned, hover-highlight is disabled
@@ -15645,10 +16165,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (v.level === 0)
 	            fill = "none";
 	        outPath.setAttribute("fill", fill);
-			//outPath.setAttribute("style", "filter: brightness(var(--lgt)) saturate(var(--str)) contrast(var(--ctr));");
-			//outPath.setAttribute("style", `filter: brightness(${window.lgt}) saturate(${window.str}) contrast(${window.ctr});
-		//-webkit-filter: brightness(${window.lgt}) saturate(${window.str}) contrast(${window.ctr});`);
-		   window.dzv.dzv_set_lsc(svg, outPath, window.lgt, window.str, window.ctr);
+		    window.dzv.dzv_set_lsc(svg, outPath, window.lgt, window.str, window.ctr);
 			
 			
 	        if (fill !== "none" && fo != null) outPath.setAttribute("fill-opacity", fo);
@@ -15670,6 +16187,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        hPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
 	        hPath.setAttribute("id", cfg.pathId);
 	        hPath.setAttribute("pointer-events", "none");
+			hPath.setAttribute("vector-effect", "non-scaling-stroke");
 	        hPath.style.display = "none";
 	        layer.appendChild(hPath);
 	    }
@@ -16195,7 +16713,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	}
 	// usage:
 	const highlight_stuff = dzvInitHoverFullPathHighlight(svg, {
-	    minHeightPx: 10,
+	    minHeightPx: window.dzv.minHeightPx,
 	    isPinned: () => isPinned()
 	});
 	window.dzv = window.dzv || {};
@@ -19662,14 +20180,15 @@ function applyLayout(items) {
 	        textSlider.addEventListener("input", function() {
 	            const v = parseFloat(textSlider.value) || 1.0;
 	            window.dzv.label_density = v;
+				window.dzv.dzvSaveVariable("label_density", window.dzv.label_density);
 	            if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 	        });
 	        tr_textsize.appendChild(tdTextLabel);
 	        tr_textsize.appendChild(tdTextCtrl);
 	        let sep2 = makeSeparatorRow("");
-	        let contrast_violin = 1.0;
-	        let bright_violin = 1.0;
-	        let color_violin = 1.0;
+	        let contrast_violin = window.dzv.dzvLoadVariable("--ctr", 1);
+	        let bright_violin = window.dzv.dzvLoadVariable("--lgt", 1);
+	        let color_violin = window.dzv.dzvLoadVariable("--str", 1);
 
 	        function create_color_comp(typ, val = 1) {
 	            if (typ != 0 && typ != 1 && typ != 2)
@@ -19740,9 +20259,9 @@ function applyLayout(items) {
 	        }
 	        let sep3 = makeSeparatorRow("");
 			let sep4 = makeSeparatorRow("");
-	        const [lgt_tr, lgt_slider] = create_color_comp(0);
-	        const [ctr_tr, ctr_slider] = create_color_comp(1);
-	        const [satr_tr, satr_slider] = create_color_comp(2);
+	        const [lgt_tr, lgt_slider] = create_color_comp(0, bright_violin);
+	        const [ctr_tr, ctr_slider] = create_color_comp(1, contrast_violin);
+	        const [satr_tr, satr_slider] = create_color_comp(2, color_violin);
 	        const [rowResetColors, btnResetColors] = makeLabelRow("Reset to defaults");
 	        btnResetColors.style.color = "#000";
 	        btnResetColors.style.cursor = "pointer";
@@ -19761,6 +20280,7 @@ function applyLayout(items) {
 				v = Number.isFinite(v) ? v : 1;
 				//if (v>1) v*=3;
 	            svg.style.setProperty("--lgt", String(v));
+				window.dzv.dzvSaveVariable("--lgt", v);
 				window.dzv.dzv_set_lsc_all();
 	        });
 	        ctr_slider.addEventListener("input", function() {
@@ -19768,6 +20288,7 @@ function applyLayout(items) {
 				v = Number.isFinite(v) ? v : 1;
 				//if (v>1) v*=3;
 	            svg.style.setProperty("--ctr", String(v));
+				window.dzv.dzvSaveVariable("--ctr", v);
 				window.dzv.dzv_set_lsc_all();
 	        });
 	        satr_slider.addEventListener("input", function() {
@@ -19775,6 +20296,7 @@ function applyLayout(items) {
 				v = Number.isFinite(v) ? v : 1;
 	            //if (v>1) v*=3;
 	            svg.style.setProperty("--str", String(v));
+				window.dzv.dzvSaveVariable("--str", v);
 				window.dzv.dzv_set_lsc_all();
 	        });
 	        btnResetColors.addEventListener("click", function() {
@@ -19785,6 +20307,10 @@ function applyLayout(items) {
 	            ctr_slider.value = 1;
 	            svg.style.setProperty("--str", "1");
 	            satr_slider.value = 1;
+				window.dzv.dzvSaveVariable("--lgt", 1);
+				window.dzv.dzvSaveVariable("--ctr", 1);
+				window.dzv.dzvSaveVariable("--str", 1);
+				
 				window.dzv.dzv_set_lsc_lock = 0;
 				window.dzv.dzv_set_lsc_all();
 	        });
@@ -20223,6 +20749,8 @@ btn.innerHTML = '<img src="data:image/gif;base64,'
 	        labelsCheckbox.addEventListener("change", function() {
 	            showMajorLabels = labelsCheckbox.checked;
 	            window.dzv.show_labels = showMajorLabels;
+				window.dzv.dzvSaveVariable("show_labels", window.dzv.show_labels);
+				 
 	            // on / off
 	            tr_textsearch.style.display = showMajorLabels ? "" : "none";
 	            tr_major_color.style.display = (reduced || !showMajorLabels) ? "none" : "";
@@ -20258,6 +20786,7 @@ btn.innerHTML = '<img src="data:image/gif;base64,'
 	        labelOverlapCheckbox.addEventListener("change", function() {
 	            hideOverlappedLabels = labelOverlapCheckbox.checked;
 	            window.dzv.auto_hide_overlap = hideOverlappedLabels;
+				window.dzv.dzvSaveVariable("auto_hide_overlap", window.dzv.auto_hide_overlap);
 	            // on / off
 	            if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 	        });
@@ -20330,6 +20859,7 @@ btn.innerHTML = '<img src="data:image/gif;base64,'
 	        labelColorCheckbox.addEventListener("change", function() {
 	            labelsColored = labelColorCheckbox.checked;
 	            window.dzv.color_labels = labelsColored;
+				window.dzv.dzvSaveVariable("color_labels", window.dzv.color_labels);
 	            // color by violin
 	            if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 	            //applyMajorLabelColorMode();
