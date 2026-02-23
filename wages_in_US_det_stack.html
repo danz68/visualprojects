@@ -7701,8 +7701,264 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	      }
 	      return cnt;
 	    }
+		
+		// Fast axis-aligned ellipse from ICDF, computed entirely in *SVG x-coordinates*.
+		// icdf1(u) is in USD space. We convert each sampled USD to SVG-x via usd_to_svg_x(usd).
+		//
+		// Inputs:
+		//   icdf1(u)              : u in (0,1) -> USD
+		//   usd_to_svg_x(usd)     : USD -> SVG-x (linear or warped, your existing mapping)
+		//   usdMin, usdMax        : domain limits in USD (for containment only)
+		//   areaTargetSvg2        : desired ellipse area in SVG units^2 (your employment-based "mass")
+		// Options:
+		//   nU (default 33)       : ICDF samples in u-space
+		//   epsU (default 1e-4)   : trims away 0/1
+		//   containX (default true)
+		//   cy (default 0)        : ellipse centerline y in SVG
+		//
+		// Output: { cx, cy, rx, ry } where rx,ry are semi-axes in SVG units.
+		function ellipseFromICDF_inSvgX(icdf1, usd_to_svg_x, usdMin, usdMax, areaTargetSvg2, opts = {}) {
+		  const nU = Math.max(9, opts.nU ?? 33);
+		  const epsU = Math.min(1e-2, Math.max(1e-12, opts.epsU ?? 1e-4));
+		  const containX = (opts.containX !== false);
+		  const cy = + (opts.cy ?? 0);
+
+		  if (typeof icdf1 !== "function" || typeof usd_to_svg_x !== "function") return null;
+
+		  // ---- 1) Mean/variance in SVG-x via ICDF sampling in u-space
+		  // E[Xsvg]  = ∫ xsvg(u) du ,  E[Xsvg^2] = ∫ xsvg(u)^2 du
+		  let u0 = epsU;
+		  let u1 = 1 - epsU;
+		  if (!(u0 < u1)) { u0 = 1e-6; u1 = 1 - 1e-6; }
+
+		  let sumX = 0, sumX2 = 0, sumW = 0;
+
+		  let prevU = u0;
+		  let prevUsd = +icdf1(prevU);
+		  let prevXsvg = +usd_to_svg_x(prevUsd);
+		  let prevX2 = prevXsvg * prevXsvg;
+
+		  for (let i = 1; i < nU; i++) {
+			const u = u0 + (u1 - u0) * (i / (nU - 1));
+			const usd = +icdf1(u);
+			const xsvg = +usd_to_svg_x(usd);
+			const x2 = xsvg * xsvg;
+
+			const du = u - prevU;
+			if (isFinite(du) && du > 0 && isFinite(prevXsvg) && isFinite(xsvg)) {
+			  sumX  += 0.5 * (prevXsvg + xsvg) * du;
+			  sumX2 += 0.5 * (prevX2   + x2)   * du;
+			  sumW  += du;
+			}
+
+			prevU = u;
+			prevXsvg = xsvg;
+			prevX2 = x2;
+		  }
+
+		  if (!(sumW > 0) || !isFinite(sumX) || !isFinite(sumX2)) return null;
+
+		  const EX  = sumX / sumW;
+		  const EX2 = sumX2 / sumW;
+		  let varX = EX2 - EX * EX;
+		  if (!isFinite(varX) || varX < 0) varX = 0;
+
+		  // For mirrored-PDF violin region: rx = 2*sqrt(Var[Xsvg])
+		  let cx = EX;
+		  let rx = 2 * Math.sqrt(varX);
+
+		  // ---- 2) Optional containment in SVG-x range derived from USD range
+		  if (containX && isFinite(usdMin) && isFinite(usdMax) && usdMin < usdMax) {
+			const xMin = +usd_to_svg_x(usdMin);
+			const xMax = +usd_to_svg_x(usdMax);
+			const xmin = Math.min(xMin, xMax);
+			const xmax = Math.max(xMin, xMax);
+
+			if (isFinite(xmin) && isFinite(xmax) && xmin < xmax && isFinite(cx) && isFinite(rx) && rx >= 0) {
+			  let L = cx - rx;
+			  let R = cx + rx;
+
+			  if (L < xmin || R > xmax) {
+				const width = 2 * rx;
+				const rangeW = xmax - xmin;
+
+				// Try translation first if it can fit without shrinking
+				if (width <= rangeW && isFinite(width) && isFinite(rangeW)) {
+				  if (L < xmin) cx += (xmin - L);
+				  if (R > xmax) cx -= (R - xmax);
+				  // snap inside if numeric residue
+				  if (cx - rx < xmin) cx = xmin + rx;
+				  if (cx + rx > xmax) cx = xmax - rx;
+				} else {
+				  // Too wide: shrink to fit, center in range
+				  cx = 0.5 * (xmin + xmax);
+				  rx = 0.5 * rangeW;
+				}
+			  }
+			}
+		  }
+
+		  // ---- 3) ry from target area (SVG^2): A = pi*rx*ry => ry = A/(pi*rx)
+		  let ry = 0;
+		  if (isFinite(areaTargetSvg2) && areaTargetSvg2 >= 0 && isFinite(rx) && rx > 0) {
+			ry = areaTargetSvg2 / (Math.PI * rx);
+		  } else {
+			ry = 0;
+		  }
+
+		  return { cx, cy, rx, ry };
+		}
 
 
+		// Axis-aligned, mass-preserving "moment-equivalent" ellipse for a filled polygon.
+		// Input: flat array [x0,y0, x1,y1, ..., xn,yn] (closed or not; we'll close implicitly)
+		// Output: { cx, cy, rx, ry } where (rx,ry) are semi-axes (parallel to x/y).
+		//
+		// Assumptions: polygon is simple (non self-intersecting), represents the filled region.
+		function ellipseFromContour_MassAnd2ndMoments(flatXY) {
+		  const m = (flatXY?.length || 0);
+		  if (m < 6 || (m & 1)) return null; // need at least 3 points, even length
+
+		  const n = m >> 1;
+
+		  let A2 = 0;        // 2 * signed area
+		  let Cx_num = 0;    // for centroid
+		  let Cy_num = 0;
+
+		  let Ix_num = 0;    // second moments about origin (signed)
+		  let Iy_num = 0;
+
+		  // iterate edges (i -> j)
+		  for (let i = 0; i < n; i++) {
+			const i2 = i << 1;
+			const j = (i + 1) % n;
+			const j2 = j << 1;
+
+			const xi = +flatXY[i2],     yi = +flatXY[i2 + 1];
+			const xj = +flatXY[j2],     yj = +flatXY[j2 + 1];
+
+			const cross = xi * yj - xj * yi; // signed
+			A2 += cross;
+
+			Cx_num += (xi + xj) * cross;
+			Cy_num += (yi + yj) * cross;
+
+			// Polygon second moments about origin (Green's theorem)
+			// Ix = (1/12) Σ (yi^2 + yi*yj + yj^2) * cross
+			// Iy = (1/12) Σ (xi^2 + xi*xj + xj^2) * cross
+			Ix_num += (yi * yi + yi * yj + yj * yj) * cross;
+			Iy_num += (xi * xi + xi * xj + xj * xj) * cross;
+		  }
+
+		  if (!isFinite(A2) || A2 === 0) return null;
+
+		  // Centroid (works with signed area)
+		  const cx = Cx_num / (3 * A2);
+		  const cy = Cy_num / (3 * A2);
+
+		  // Raw moments about origin
+		  let Ix = Ix_num / 12;
+		  let Iy = Iy_num / 12;
+
+		  // Make area positive (keep centroid as-is; it already came out correct)
+		  if (A2 < 0) { A2 = -A2; Ix = -Ix; Iy = -Iy; }
+
+		  const A = A2 * 0.5; // positive area
+
+		  // Central second moments about centroid
+		  let Ixx_c = Ix - A * cy * cy; // ∫ (y-cy)^2 dA
+		  let Iyy_c = Iy - A * cx * cx; // ∫ (x-cx)^2 dA
+
+		  // Numerical safety
+		  if (!isFinite(Ixx_c) || !isFinite(Iyy_c)) return null;
+		  if (Ixx_c < 0) Ixx_c = 0;
+		  if (Iyy_c < 0) Iyy_c = 0;
+
+		  // For an axis-aligned uniform ellipse of area A:
+		  // Ixx_c = A * ry^2 / 4 ,  Iyy_c = A * rx^2 / 4
+		  const rx = Math.sqrt((4 * Iyy_c) / A);
+		  const ry = Math.sqrt((4 * Ixx_c) / A);
+
+		  return { cx, cy, rx, ry, A };
+		}
+		
+		// Ratio-driven x-range correction (your idea).
+		// If left exceeds: force left to minx, compress the right side by the same ratio, then recenter.
+		// If right exceeds: force right to maxx, compress the left side by the same ratio, then recenter.
+		// If both exceed (too wide): clamp to [minx,maxx] centered.
+		//
+		// Preserves ellipse area by updating ry = A/(pi*rx).
+		//
+		// Inputs: cx, rx, ry (semi-axes), minx, maxx
+		// Output: { cx, rx, ry }
+		function correctEllipseToXRange_ratioPull(cx, rx, ry, minx, maxx) {
+		  if (!isFinite(cx) || !isFinite(rx) || !isFinite(ry)) return { cx, rx, ry };
+		  if (!(minx < maxx) || rx <= 0 || ry < 0) return { cx, rx, ry };
+
+		  const A = Math.PI * rx * ry; // preserve area if rx changes
+
+		  const L = cx - rx;
+		  const R = cx + rx;
+
+		  // Already inside
+		  if (L >= minx && R <= maxx) return { cx, rx, ry };
+
+		  const rangeW = maxx - minx;
+		  const width = 2 * rx;
+
+		  // Too wide no matter what -> clamp to range
+		  if (width >= rangeW) {
+			cx = 0.5 * (minx + maxx);
+			rx = 0.5 * rangeW;
+			ry = (rx > 0) ? (A / (Math.PI * rx)) : 0;
+			return { cx, rx, ry };
+		  }
+
+		  // Left-only violation
+		  if (L < minx && R <= maxx) {
+			const s = (cx - minx) / (cx - L); // (cx-minx)/rx, in (0,1)
+			const newL = minx;
+			const newR = cx + s * (R - cx);   // cx + s*rx
+			cx = 0.5 * (newL + newR);
+			rx = 0.5 * (newR - newL);
+			ry = (rx > 0) ? (A / (Math.PI * rx)) : 0;
+			return { cx, rx, ry };
+		  }
+
+		  // Right-only violation
+		  if (R > maxx && L >= minx) {
+			const s = (maxx - cx) / (R - cx); // (maxx-cx)/rx, in (0,1)
+			const newR = maxx;
+			const newL = cx - s * (cx - L);   // cx - s*rx
+			cx = 0.5 * (newL + newR);
+			rx = 0.5 * (newR - newL);
+			ry = (rx > 0) ? (A / (Math.PI * rx)) : 0;
+			return { cx, rx, ry };
+		  }
+
+		  // Both sides violate but width < rangeW (can be fixed by shifting):
+		  // choose the side with larger violation to be the "trigger" and apply its pull.
+		  const dL = (minx - L); // >0 if left violates
+		  const dR = (R - maxx); // >0 if right violates
+		  if (dL >= dR) {
+			// treat as left-trigger
+			const s = (cx - minx) / (cx - L);
+			const newL = minx;
+			const newR = cx + s * (R - cx);
+			cx = 0.5 * (newL + newR);
+			rx = 0.5 * (newR - newL);
+		  } else {
+			// treat as right-trigger
+			const s = (maxx - cx) / (R - cx);
+			const newR = maxx;
+			const newL = cx - s * (cx - L);
+			cx = 0.5 * (newL + newR);
+			rx = 0.5 * (newR - newL);
+		  }
+
+		  ry = (rx > 0) ? (A / (Math.PI * rx)) : 0;
+		  return { cx, rx, ry };
+		}
 
 	    // Global envelope reference: area (from full path) + workers (emp attribute)
 	    // Detailed target area is derived from workers ratio against this global reference.
@@ -7783,6 +8039,27 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	      const _cm_pairs = Math.max(4, (_cm_numCount / 2) | 0);
 	      const _cm_steps = Math.max(16, _cm_pairs);
 	      const PathLin = build_array_from_data(dFull, _cm_steps);
+		  
+		  // Target area from workers ratio (linear scale reference)
+	      const emp = +mg.getAttribute("emp");
+	      if (!Number.isFinite(emp)) continue;
+
+	      let areaTarget = Math.abs(globalArea) * (emp / globalEmp);
+		  const vmin_usd = parseFloat(mg.getAttribute("vstart"));
+		  const vmax_usd = Math.min(parseFloat(mg.getAttribute("vend")), 240000);
+		  
+		  const v25_usd = parseFloat(mg.getAttribute("v25"));
+		  const v75_usd = parseFloat(mg.getAttribute("v75"));
+		  
+		  let iqrx = USD_to_svgX_linear(v75_usd)-USD_to_svgX_linear(v25_usd);
+		  const vleft = USD_to_svgX_linear(vmin_usd);
+		  const vright = USD_to_svgX_linear(vmax_usd);
+		  
+		  const med_usd = parseFloat(mg.getAttribute("v50"));
+		  const cx2 = USD_to_svgX_linear(med_usd);
+		  
+		  
+		  /*
 	      const p_len = PathLin.length; // number of numbers: [x0,y0,x1,y1,...]
 	      let _ymin = Infinity,
 	        _ymax = -Infinity;
@@ -7807,12 +8084,8 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 
 
 
-	      const vmin_usd = parseFloat(mg.getAttribute("vstart"));
-		  const v25_usd = parseFloat(mg.getAttribute("v25"));
-		  const v75_usd = parseFloat(mg.getAttribute("v75"));
   
 	      const med_usd = parseFloat(mg.getAttribute("v50"));
-	      const vmax_usd = Math.min(parseFloat(mg.getAttribute("vend")), 240000);
 	      const max_usd_span = Math.min(med_usd - vmin_usd, vmax_usd - med_usd);
 	      const vleft_usd = med_usd - max_usd_span;
 
@@ -7828,18 +8101,14 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		  let iqrx = USD_to_svgX_linear(v75_usd)-USD_to_svgX_linear(v25_usd);
 		  
 		  let min_cx = cx - 0.1*iqrx;
-		  //if (min_cx < vleft) min_cx = vleft;
+
 		  
 		  let max_cx = cx + 0.1*iqrx;
-		  //if (max_cx > vright) max_cx = vright;
+
 		  
 
 
-	      // Target area from workers ratio (linear scale reference)
-	      const emp = +mg.getAttribute("emp");
-	      if (!Number.isFinite(emp)) continue;
-
-	      let areaTarget = Math.abs(globalArea) * (emp / globalEmp);
+	      
 
 
 	      // Ellipse semi-axes: rx fixed by violin X-range, ry chosen so pi*rx*ry == |areaTarget|.
@@ -7856,6 +8125,50 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		  
 		  if (min_cx < vleft+r) min_cx = vleft+r;
 		  if (max_cx > vright-r) max_cx = vright-r;
+		  */
+		  
+		  const res_mom2 = ellipseFromContour_MassAnd2ndMoments(PathLin);
+		  
+		  let cx = res_mom2.cx;
+		  let cy = res_mom2.cy;
+		  
+		  const Acalc = res_mom2.A;
+		  const corr = Math.sqrt(areaTarget/Acalc);
+		  
+		  let rx = res_mom2.rx * corr;
+		  let ry = res_mom2.ry * corr;
+		  
+		  const correction = correctEllipseToXRange_ratioPull(cx, rx, ry, vleft, vright);
+		  
+		  rx = correction.rx;
+		  ry = correction.ry;
+		  cx = correction.cx;
+		  
+		  
+		  
+		  
+		  const r = Math.sqrt(Math.abs(areaTarget) / Math.PI);
+		  
+		  
+		  
+		  
+		  let min_cx = cx2 - 0.1*iqrx;
+		  
+		  let max_cx = cx2 + 0.1*iqrx;
+		  
+		  
+		  
+		  if (min_cx < vleft+r) min_cx = vleft+r;
+		  if (max_cx > vright-r) max_cx = vright-r;
+
+  
+	      
+		  
+		  
+		  
+		  
+		  
+		  
 
 	      const defs = _ensureDefs(mg);
 	      const morphId = `dzv-${id} - morph`;
@@ -7872,6 +8185,7 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	        mg,
 			min_cx, 
 			max_cx,
+			cx2,
 	        cx,
 	        cy,
 	        rx,
@@ -8236,7 +8550,7 @@ if (is_circle)
     const it = items[i];
     const c = it._c;
 
-    x[i] = c ? c.cx : 0;
+    x[i] = is_circle ? c.cx2 : c.cx;
 
     const rxi = (is_circle ? c.r*scx : c.rx);
     const ryi = (is_circle ? c.r*scy : c.ry);
@@ -10909,14 +11223,19 @@ function d_from_array_or_ellipse(arr,closed = true) {
   gUse.setAttribute("stroke-opacity", "0");
 
   const stages_labels = [
-    "If occupations were encoded as <b>circles</b> centered on their median, the spatial footprint of wages would be reduced to a <b>conventional geometry</b> rather than to a faithful representation of the underlying <b>data-density</b>.",
+    "If occupations were encoded as mass-preserving <b>circles</b> centered on their median, the spatial footprint of wages would be reduced to a <b>conventional geometry</b> rather than to a faithful representation of the underlying <b>data-density</b>.",
+	
     "<b>Violins</b> encode distributions truthfully, more obviously over long ranges, while maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.",
+	
     "<b>Clustering</b> into major categories improves the <b>proximity</b> principle while the entire structure relies on <b>symmetric</b> placement and a carefully crafted relevance <b>order</b>.",
+	
     "<b>Clipping</b> the violins to their enclosed major envelopes enhances the perception of a <b>shared region</b>, while controlled violins opacity supports <b>closure</b> and <b>continuity</b>."
   ];
 
+
   if (!is_circle) {
-    stages_labels[0] = "If occupations were encoded as <b>ellipses</b> centered on their median, they wouldn’t reflect <b>data-density</b> particularities.";
+    stages_labels[0] = "If occupations were encoded as mass-preserving <b>ellipses</b> that follow the shape’s overall spread as closely as possible, despite being a step closer than the conventional circle to the true distribution shape, they wouldn’t reflect <b>data-density</b> particularities.";
+	
     stages_labels[1] = "<b>Violins</b>, however, encode distributions truthfully while maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.";
   }
 
@@ -16658,6 +16977,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 		
 	
 	    let tim0=0;
+		let time_pending_hit=null;
 		function _tick() {
 		  raf = 0;
 		  if (tim0) { clearTimeout(tim0); tim0=0;}
@@ -16668,6 +16988,20 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 		  if (!hit) hide();
 		  else showForHit(hit);
 		}
+		
+		function _ticking() {
+		  raf = 0;
+		  if (tim0) { clearTimeout(tim0); tim0=0;}
+		  if (cfg.isPinned()) return;
+		  
+		  if (time_pending_hit !== window.dzv.pending_hit) return;
+
+		  const hit = window.dzv.pending_hit;
+		  window.dzv.pending_hit = null;
+		  if (!hit) hide();
+		  else showForHit(hit);
+		}
+		
 		function _isInHighlight(el) {
 		  if (!el || !(el instanceof Element)) return false;
 		  if (el === hPath) return true;
@@ -16722,6 +17056,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 
 		  if (new_pending_hit && (new_pending_hit.getAttribute("id")||"").includes("-0000"))
 		   {
+		    time_pending_hit = new_pending_hit;
 			tim0 = setTimeout(_tick, 400);
 		  }
 		  else
