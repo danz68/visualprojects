@@ -11588,8 +11588,44 @@ function run_anim_stages(direction, both, _from, _to, _now, stages){
  }
  
  
- let last_direction = 0;
-  requestAnimationFrame(() => {
+ 
+  // ------------------------------------------------------------
+  // Yield helper: give the event loop a chance to dispatch input
+  // between heavy animation frames (a practical analogue to Delphi
+  // Application.ProcessMessages for long DOM-heavy stages).
+  //
+  // Schedules: (message task) -> requestAnimationFrame(cb)
+  // ------------------------------------------------------------
+  const dzvBreathingRAF = (() => {
+    let ch = null;
+    let pending = null;
+    function scheduleWithMessage(cb) {
+      if (!ch) {
+        ch = new MessageChannel();
+        ch.port1.onmessage = () => {
+          const fn = pending;
+          pending = null;
+          if (fn) requestAnimationFrame(fn);
+        };
+      }
+      pending = cb;
+      ch.port2.postMessage(0);
+    }
+    return function dzvBreathingRAF(cb) {
+      if (typeof cb !== "function") return;
+      if (typeof MessageChannel !== "undefined") {
+        scheduleWithMessage(cb);
+        return;
+      }
+      // Fallback: macrotask -> rAF
+      setTimeout(() => requestAnimationFrame(cb), 0);
+    };
+  })();
+
+let last_direction = 0;
+  //requestAnimationFrame
+  
+  dzvBreathingRAF(() => {
     if (!once_display)
 	  {
 	   once_display = 1;
@@ -11662,7 +11698,7 @@ function run_anim_stages(direction, both, _from, _to, _now, stages){
 	  if (continue_mode===2) //restart
 	    {
 		 
-		  let dur = T10;
+		  let dur = Ttotal;
 		  reset_stages_limits(stages);
 		  
 		  for (let j=stages.length-1;j>-1;j--)
@@ -11677,7 +11713,7 @@ function run_anim_stages(direction, both, _from, _to, _now, stages){
 		  started = false;
 		  continue_mode=0;
 		  direction = 0;
-		  requestAnimationFrame(master);
+		  dzvBreathingRAF(master);
           return;
 		}
      
@@ -11695,16 +11731,16 @@ function run_anim_stages(direction, both, _from, _to, _now, stages){
         _pause._resumeKick = () => {
           if (_masterRunning) return;
           _masterRunning = true;
-          requestAnimationFrame(master);
+          dzvBreathingRAF(master);
         };
         return;
       }
 
-      requestAnimationFrame(master);
+      dzvBreathingRAF(master);
     }
 
     _masterRunning = true;
-    requestAnimationFrame(master);
+    dzvBreathingRAF(master);
   }
   
   );
@@ -16621,9 +16657,10 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    }
 		
 	
-	
+	    let tim0=0;
 		function _tick() {
 		  raf = 0;
+		  if (tim0) { clearTimeout(tim0); tim0=0;}
 		  if (cfg.isPinned()) return;
 
 		  const hit = window.dzv.pending_hit;
@@ -16668,6 +16705,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 		window.dzv = window.dzv || {};
 		window.dzv.hit_element = _hitFromPoint;
 
+
+		
 		function onPointerMove(ev) {
 		  if (cfg.isPinned()) return;
 
@@ -16676,15 +16715,30 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 		  if (window.dzv.morphing && (new_pending_hit === window.dzv.current_highlight || new_pending_hit === window.dzv.pending_hit)) return;
 
 		  window.dzv.pending_hit = new_pending_hit;
-		  if (raf) cancelAnimationFrame(raf);
-		  raf = requestAnimationFrame(_tick);
+
+		  
+		  if (raf) cancelAnimationFrame(raf); 
+		  if (tim0) { clearTimeout(tim0); tim0=0;}
+
+		  if (new_pending_hit && (new_pending_hit.getAttribute("id")||"").includes("-0000"))
+		   {
+			tim0 = setTimeout(_tick, 400);
+		  }
+		  else
+		   {
+
+		    raf = requestAnimationFrame(_tick);
+		   }	
+		  //requestAnimationFrame(() => {raf = requestAnimationFrame(_tick);});
 		}
 
 		function onPointerLeave(ev) {
 		  if (cfg.isPinned()) return;
 		  window.dzv.pending_hit = null;
+		  //if (raf2) cancelAnimationFrame(raf2);
 		  if (raf) cancelAnimationFrame(raf);
 		  raf = requestAnimationFrame(_tick);
+		  //requestAnimationFrame(() => {raf = requestAnimationFrame(_tick);});
 		}
 
 	
