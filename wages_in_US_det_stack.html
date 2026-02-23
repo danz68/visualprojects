@@ -6784,10 +6784,11 @@ window.dzv.dzv_set_lsc = function (svg, el, lgt, str, ctr){
 	    return DZV.getPlotBox(el);
 	    //try { return el.getBBox(); } catch { return null; }
 	  }
-
+      const yTop_mpl = MPL_YMIN();
+	  const yBot_mpl = MPL_YMAX();
+	  
 	  function _mplDeltaY_to_svgDeltaY(dy_mpl) {
-	    const yTop_mpl = MPL_YMIN();
-	    const yBot_mpl = MPL_YMAX();
+	    
 	    const p = patch2Path();
 	    const b = _safeBBox(p);
 	    if (!Number.isFinite(dy_mpl)) return 0;
@@ -7717,10 +7718,9 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		//   cy (default 0)        : ellipse centerline y in SVG
 		//
 		// Output: { cx, cy, rx, ry } where rx,ry are semi-axes in SVG units.
-		function ellipseFromICDF_inSvgX(icdf1, usd_to_svg_x, usdMin, usdMax, areaTargetSvg2, opts = {}) {
+		function ellipseFromICDF_inSvgX(icdf1, usd_to_svg_x, areaTargetSvg2, opts = {}) {
 		  const nU = Math.max(9, opts.nU ?? 33);
 		  const epsU = Math.min(1e-2, Math.max(1e-12, opts.epsU ?? 1e-4));
-		  const containX = (opts.containX !== false);
 		  const cy = + (opts.cy ?? 0);
 
 		  if (typeof icdf1 !== "function" || typeof usd_to_svg_x !== "function") return null;
@@ -7767,38 +7767,8 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		  let cx = EX;
 		  let rx = 2 * Math.sqrt(varX);
 
-		  // ---- 2) Optional containment in SVG-x range derived from USD range
-		  if (containX && isFinite(usdMin) && isFinite(usdMax) && usdMin < usdMax) {
-			const xMin = +usd_to_svg_x(usdMin);
-			const xMax = +usd_to_svg_x(usdMax);
-			const xmin = Math.min(xMin, xMax);
-			const xmax = Math.max(xMin, xMax);
 
-			if (isFinite(xmin) && isFinite(xmax) && xmin < xmax && isFinite(cx) && isFinite(rx) && rx >= 0) {
-			  let L = cx - rx;
-			  let R = cx + rx;
-
-			  if (L < xmin || R > xmax) {
-				const width = 2 * rx;
-				const rangeW = xmax - xmin;
-
-				// Try translation first if it can fit without shrinking
-				if (width <= rangeW && isFinite(width) && isFinite(rangeW)) {
-				  if (L < xmin) cx += (xmin - L);
-				  if (R > xmax) cx -= (R - xmax);
-				  // snap inside if numeric residue
-				  if (cx - rx < xmin) cx = xmin + rx;
-				  if (cx + rx > xmax) cx = xmax - rx;
-				} else {
-				  // Too wide: shrink to fit, center in range
-				  cx = 0.5 * (xmin + xmax);
-				  rx = 0.5 * rangeW;
-				}
-			  }
-			}
-		  }
-
-		  // ---- 3) ry from target area (SVG^2): A = pi*rx*ry => ry = A/(pi*rx)
+		  // ---- 2) ry from target area (SVG^2): A = pi*rx*ry => ry = A/(pi*rx)
 		  let ry = 0;
 		  if (isFinite(areaTargetSvg2) && areaTargetSvg2 >= 0 && isFinite(rx) && rx > 0) {
 			ry = areaTargetSvg2 / (Math.PI * rx);
@@ -7806,7 +7776,7 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 			ry = 0;
 		  }
 
-		  return { cx, cy, rx, ry };
+		  return { cx, cy, rx, ry, A:areaTargetSvg2 };
 		}
 
 
@@ -7968,6 +7938,22 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	    let globalXmax = -Infinity;
 	    let globalYmin = Infinity;
 	    let globalYmax = -Infinity;
+		
+		const yTop_mpl = parseFloat(svg.getAttribute("ymin"));
+	    const yBot_mpl = parseFloat(svg.getAttribute("ymax"));
+		
+		const bbb = _safeBBox(patch2Path());
+		
+		function mplY_to_svgY(y_mpl) {
+
+	        //const y_mpl    =  parseFloat(vl.getAttribute("yc"));
+	        const yperc = 1.0 - (y_mpl - yTop_mpl) / (yBot_mpl - yTop_mpl);
+	        const yTop_svg = bbb.y;
+	        const yBot_svg = bbb.y + bbb.height;
+	        return yTop_svg + yperc * (yBot_svg - yTop_svg);
+	    }
+		
+			
 
 	    try {
 	      const gGlobal = metaRoot.querySelector('g[id="00-0000"]');
@@ -8019,6 +8005,7 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 
 
 
+	    
 
 	    // One morph-def path per leaf. Store only d strings in JS, not 11 SVG paths.
 	    const metas = metaRoot.querySelectorAll('g[id][yc][yc-global]');
@@ -8057,6 +8044,16 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		  
 		  const med_usd = parseFloat(mg.getAttribute("v50"));
 		  const cx2 = USD_to_svgX_linear(med_usd);
+		  
+		  let _ymin = Infinity, _ymax = -Infinity;
+		  for (let k = 1; k < PathLin.length; k += 2) {
+	        const y1 = PathLin[k];
+	        if (y1 < _ymin) _ymin = y1;
+	        if (y1 > _ymax) _ymax = y1;
+	      }
+
+	      const ccy = 0.5 * (_ymin + _ymax);
+		  
 		  
 		  
 		  /*
@@ -8127,10 +8124,18 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		  if (max_cx > vright-r) max_cx = vright-r;
 		  */
 		  
-		  const res_mom2 = ellipseFromContour_MassAnd2ndMoments(PathLin);
+		  const vio = window.dzv.getViolin(id);
+		  //console.log(vio);
+		  
+		  //const res_mom2 = ellipseFromContour_MassAnd2ndMoments(PathLin);
+		  
+		  const res_mom2 = ellipseFromICDF_inSvgX(vio.icdf1, USD_to_svgX_linear, areaTarget)
+		  
 		  
 		  let cx = res_mom2.cx;
-		  let cy = res_mom2.cy;
+		  //let cy = res_mom2.cy;
+		  let cy  = ccy;//mplY_to_svgY(vio.yc);
+		  
 		  
 		  const Acalc = res_mom2.A;
 		  const corr = Math.sqrt(areaTarget/Acalc);
@@ -8139,6 +8144,8 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		  let ry = res_mom2.ry * corr;
 		  
 		  const correction = correctEllipseToXRange_ratioPull(cx, rx, ry, vleft, vright);
+		  
+		  
 		  
 		  rx = correction.rx;
 		  ry = correction.ry;
@@ -8180,6 +8187,7 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 	        defs.appendChild(morphPath);
 	      }
 	      morphPath.setAttribute("d", "M 0 0");
+		  //console.log(cx, cxxx, cx2);
 	      window.dzv._circleMorphCache[id] = {
 	        id,
 	        mg,
@@ -9589,8 +9597,8 @@ function _badnessFromCounts(c) {
     const envTop = (Number.isFinite(half_dst) ? Yc-half_dst : vbY);
     const envBot = (Number.isFinite(half_dst) ? Yc+half_dst : (vbY + vbH));
 
-    const dmin = Math.max(1e-9, cellY);   // adjustable later
-    const maxIters = 0;                   // adjustable later
+    const dmin = Math.max(1e-9, 0.5*cellY);   // adjustable later
+    const maxIters = 5;                   // adjustable later
     const epsTouch = Math.max(1e-9, 0.01 * cellY);
 
     // Mass proxy for sorting/ties. No DOM reads.
@@ -9639,8 +9647,8 @@ function _badnessFromCounts(c) {
 	  
 
 	  // target border center so SIDE touches envelope
-	  const new_side = EnvExtreme+dir*rE;
-	  const old_side = best+dir*rE;
+	  const new_side = EnvExtreme-dir*rE;
+	  const old_side = best-dir*rE;
 
 	  // distances in dir-space
 	  const oldT = y0 - old_side;
@@ -9652,7 +9660,7 @@ function _badnessFromCounts(c) {
 
 	  for (let i = 1; i < len; i++) {
 		const j = lst[i];
-		y[j] = y0 + (y[j] - y[0]) * scale;
+		y[j] = y0 + (y[j] - y0) * scale;
 	  }
 	  
 	  
