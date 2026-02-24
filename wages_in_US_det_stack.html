@@ -4753,7 +4753,7 @@ window.dzv.rotateSvgOnceAnim = function (svgEl, degStep = 120, ms = 180) {
 
 
 (function () {
-  let _bandwidthUSD = 5000;
+  let _bandwidthUSD = window.dzv.dzvLoadVariable("bandwidthUSD", 5000);
 
   Object.defineProperty(window, "bandwidthUSD", {
     configurable: true,
@@ -4762,11 +4762,13 @@ window.dzv.rotateSvgOnceAnim = function (svgEl, degStep = 120, ms = 180) {
     set(v) {
       const old = _bandwidthUSD;
       _bandwidthUSD = v;
+	 
       if (v !== old) {
         // trigger here
         // recomputeAndApply();
         // or dispatch event:
 		//console.log("bw: ",v);
+		window.dzv.dzvSaveVariable("bandwidthUSD", v);
         window.dispatchEvent(new CustomEvent("bandwidthUSDchange", { detail: { old, value: v } }));
       }
     }
@@ -6198,8 +6200,8 @@ window.dzv.rotateSvgOnceAnim = function (svgEl, degStep = 120, ms = 180) {
 	            cdf1 = function(x) {
 	                const xx = +x;
 	                if (!Number.isFinite(xx)) return NaN;
-	                if (xx <= x0) return 0;
-	                if (xx >= x1) return 1;
+	                if (xx <= x0) {  return 0};
+	                if (xx >= x1) {  return 1;}
 	                // keep within [pMin,pMax] in case endpoints aren't exactly 0/1
 	                const v = cdf1Core(xx);
 	                return Math.max(0, Math.min(1, v));
@@ -7864,6 +7866,12 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		function correctEllipseToXRange_ratioPull(cx, rx, ry, minx, maxx) {
 		  if (!isFinite(cx) || !isFinite(rx) || !isFinite(ry)) return { cx, rx, ry };
 		  if (!(minx < maxx) || rx <= 0 || ry < 0) return { cx, rx, ry };
+		  
+		  const mima_range = maxx - minx;
+		  const min_xpad = 0.02 * mima_range;
+		  if (cx < minx + min_xpad) cx = minx + min_xpad;
+		  if (cx > maxx - min_xpad) cx = maxx - min_xpad;
+		  
 
 		  const A = Math.PI * rx * ry; // preserve area if rx changes
 
@@ -7929,6 +7937,359 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		  ry = (rx > 0) ? (A / (Math.PI * rx)) : 0;
 		  return { cx, rx, ry };
 		}
+
+
+// VERSION 1: coarse scan over all feasible rx, then local refinements (smaller step)
+function ellipseFromICDF_inSvgX_scan(cdf1, icdf1, usd_to_svg_x, usdMin, usdMax, areaTargetSvg2, usdMaxTrim, opts = {}) {
+
+  if (typeof icdf1 !== "function" || typeof cdf1 !== "function" || typeof usd_to_svg_x !== "function") {
+    return { cx: NaN, rx: NaN, ry: NaN };
+  }
+  if (!isFinite(usdMin) || !isFinite(usdMax) || !(usdMin < usdMax)) return { cx: NaN, rx: NaN, ry: NaN };
+  if (!isFinite(areaTargetSvg2) || areaTargetSvg2 <= 0) return { cx: NaN, rx: NaN, ry: 0 };
+
+  const usdMaxEff = (isFinite(usdMaxTrim) && usdMaxTrim < usdMax) ? usdMaxTrim : usdMax;
+
+  let p0 = cdf1(usdMin);
+  let p1 = cdf1(usdMaxEff);
+  if (!isFinite(p0) || !isFinite(p1)) return { cx: NaN, rx: NaN, ry: NaN };
+  if (p0 > p1) { const t = p0; p0 = p1; p1 = t; }
+  const dp = p1 - p0;
+  if (!(dp > 0)) return { cx: NaN, rx: NaN, ry: 0 };
+
+  const a0 = usd_to_svg_x(usdMin);
+  const b0 = usd_to_svg_x(usdMaxEff);
+  if (!isFinite(a0) || !isFinite(b0)) return { cx: NaN, rx: NaN, ry: NaN };
+  const a = Math.min(a0, b0);
+  const b = Math.max(a0, b0);
+  const W = b - a;
+  if (!(W > 0)) return { cx: NaN, rx: NaN, ry: 0 };
+
+  // FIXED CENTER: trimmed-interval median
+  const pC = p0 + 0.50 * dp;
+  const cx = usd_to_svg_x(icdf1(pC));
+  if (!isFinite(cx)) return { cx: NaN, rx: NaN, ry: NaN };
+  if (!(cx > a && cx < b)) return { cx, rx: 0, ry: 0 };
+
+  // Feasible rx so ellipse stays fully within [a,b]
+  const rxMax = Math.min(cx - a, b - cx);
+  const epsRx = (opts.epsRx != null) ? Math.max(1e-12, +opts.epsRx) : 1e-12;
+  if (!(rxMax > epsRx)) return { cx, rx: 0, ry: 0 };
+
+  // Ellipse normalized cumulative area from left end:
+  // F_e(x) = Ce(t)/pi, t=(x-cx)/rx, Ce(-1)=0, Ce(1)=pi
+  function Ce(t) {
+    if (t <= -1) return 0;
+    if (t >=  1) return Math.PI;
+    const s = Math.sqrt(Math.max(0, 1 - t * t));
+    return (Math.asin(t) + t * s + Math.PI / 2);
+  }
+
+  const N = (opts.fitSamples != null) ? Math.max(9, (opts.fitSamples | 0)) : 33;
+
+  // Objective: match ellipse CDF to trimmed-distribution CDF fraction u in (0,1),
+  // sampled at x(u) = usd_to_svg_x(icdf1(p0 + u*dp))
+  const uSamp = new Float64Array(N);
+  const xSamp = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    const u = (i + 0.5) / N;
+    const p = p0 + u * dp;
+    const x = usd_to_svg_x(icdf1(p));
+    if (!isFinite(x)) return { cx: NaN, rx: NaN, ry: NaN };
+    uSamp[i] = u;
+    xSamp[i] = x;
+  }
+
+  function loss(rx) {
+    if (!isFinite(rx) || !(rx > epsRx) || rx > rxMax) return 1e300;
+    let sse = 0;
+    const invPi = 1 / Math.PI;
+    for (let i = 0; i < N; i++) {
+      const F = Ce((xSamp[i] - cx) / rx) * invPi;
+      const d = F - uSamp[i];
+      sse += d * d;
+    }
+    return sse / N;
+  }
+
+  // --- coarse scan ---
+  const coarseSteps = (opts.coarseSteps != null) ? Math.max(8, (opts.coarseSteps | 0)) : 32;
+  let bestRx = epsRx;
+  let bestVal = loss(bestRx);
+
+  for (let k = 1; k <= coarseSteps; k++) {
+    const rx = epsRx + (rxMax - epsRx) * (k / coarseSteps);
+    const v = loss(rx);
+    if (v < bestVal) { bestVal = v; bestRx = rx; }
+  }
+
+  // --- refine around bestRx with shrinking step ---
+  const refineRounds = (opts.refineRounds != null) ? Math.max(1, (opts.refineRounds | 0)) : 4;
+  let step = (rxMax - epsRx) / coarseSteps;
+
+  for (let r = 0; r < refineRounds; r++) {
+    let improved = true;
+    while (improved) {
+      improved = false;
+
+      const r1 = bestRx - step;
+      const r2 = bestRx + step;
+
+      if (r1 > epsRx) {
+        const v1 = loss(r1);
+        if (v1 < bestVal) { bestVal = v1; bestRx = r1; improved = true; continue; }
+      }
+      if (r2 < rxMax) {
+        const v2 = loss(r2);
+        if (v2 < bestVal) { bestVal = v2; bestRx = r2; improved = true; continue; }
+      }
+    }
+    step *= 0.5;
+  }
+
+  const rx = bestRx;
+  const ry = areaTargetSvg2 / (Math.PI * rx);
+  return { cx, rx, ry: (isFinite(ry) && ry > 0) ? ry : 0 };
+}
+
+// Refine exactly as you described:
+// step -> evaluate at best-step/2 and best+step/2, choose best among {best, left, right},
+// then step/=2 and repeat.
+function _dzv_refine_rx_stepHalving(bestRx, bestVal, step, loss, rxMin, rxMax, rounds) {
+  for (let r = 0; r < rounds; r++) {
+    const h = 0.5 * step;
+
+    let rxL = bestRx - h;
+    let rxR = bestRx + h;
+
+    let vL = 1e300;
+    let vR = 1e300;
+
+    if (rxL >= rxMin && rxL <= rxMax) vL = loss(rxL);
+    if (rxR >= rxMin && rxR <= rxMax) vR = loss(rxR);
+
+    // choose best among {best, left, right}
+    if (vL < bestVal && vL <= vR) { bestVal = vL; bestRx = rxL; }
+    else if (vR < bestVal)        { bestVal = vR; bestRx = rxR; }
+
+    step = h; // next refinement uses step/2
+  }
+  return { bestRx, bestVal, step };
+}
+
+// Drop-in coarse-scan + your refinement rule (single function)
+// Fixed cx, rx optimized, ry from fixed ellipse area.
+function ellipseFromICDF_inSvgX_scan_refine(cdf1, icdf1, usd_to_svg_x, usdMin, usdMax, areaTargetSvg2, usdMaxTrim, opts = {}) {
+
+  if (typeof icdf1 !== "function" || typeof cdf1 !== "function" || typeof usd_to_svg_x !== "function") {
+    return { cx: NaN, rx: NaN, ry: NaN };
+  }
+  if (!isFinite(usdMin) || !isFinite(usdMax) || !(usdMin < usdMax)) return { cx: NaN, rx: NaN, ry: NaN };
+  if (!isFinite(areaTargetSvg2) || areaTargetSvg2 <= 0) return { cx: NaN, rx: NaN, ry: 0 };
+
+  const usdMaxEff = (isFinite(usdMaxTrim) && usdMaxTrim < usdMax) ? usdMaxTrim : usdMax;
+
+  let p0 = cdf1(usdMin);
+  let p1 = cdf1(usdMaxEff);
+  if (!isFinite(p0) || !isFinite(p1)) return { cx: NaN, rx: NaN, ry: NaN };
+  if (p0 > p1) { const t = p0; p0 = p1; p1 = t; }
+  const dp = p1 - p0;
+  if (!(dp > 0)) return { cx: NaN, rx: NaN, ry: 0 };
+
+  const xA0 = usd_to_svg_x(usdMin);
+  const xB0 = usd_to_svg_x(usdMaxEff);
+  if (!isFinite(xA0) || !isFinite(xB0)) return { cx: NaN, rx: NaN, ry: NaN };
+  const a = Math.min(xA0, xB0);
+  const b = Math.max(xA0, xB0);
+  const W = b - a;
+  if (!(W > 0)) return { cx: NaN, rx: NaN, ry: 0 };
+
+  // FIXED CENTER: trimmed-interval median
+  const pC = p0 + 0.50 * dp;
+  const cx = usd_to_svg_x(icdf1(pC));
+  if (!isFinite(cx)) return { cx: NaN, rx: NaN, ry: NaN };
+  if (!(cx > a && cx < b)) return { cx, rx: 0, ry: 0 };
+
+  // Feasible rx (ellipse stays inside [a,b])
+  const rxMax = Math.min(cx - a, b - cx);
+  const epsRx =  (opts.epsRx != null) ? Math.max(1e-12, +opts.epsRx) : 1e-12;
+  if (!(rxMax > epsRx)) return { cx, rx: 0, ry: 0 };
+
+  // Ellipse normalized cumulative area from left end:
+  function Ce(t) {
+    if (t <= -1) return 0;
+    if (t >=  1) return Math.PI;
+    const s = Math.sqrt(Math.max(0, 1 - t * t));
+    return (Math.asin(t) + t * s + Math.PI / 2);
+  }
+
+  const N = (opts.fitSamples != null) ? Math.max(9, (opts.fitSamples | 0)) : 33;
+
+  const uSamp = new Float64Array(N);
+  const xSamp = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    const u = (i + 0.5) / N;
+    const p = p0 + u * dp;
+    const x = usd_to_svg_x(icdf1(p));
+    if (!isFinite(x)) return { cx: NaN, rx: NaN, ry: NaN };
+    uSamp[i] = u;
+    xSamp[i] = x;
+  }
+
+  function loss(rx) {
+    if (!isFinite(rx) || !(rx > epsRx) || rx > rxMax) return 1e300;
+    let sse = 0;
+    const invPi = 1 / Math.PI;
+    for (let i = 0; i < N; i++) {
+      const F = Ce((xSamp[i] - cx) / rx) * invPi;
+      const d = F - uSamp[i];
+      sse += d * d;
+    }
+    return sse / N;
+  }
+
+  // --- coarse scan ---
+  const coarseSteps = (opts.coarseSteps != null) ? Math.max(8, (opts.coarseSteps | 0)) : 32;
+
+  let bestRx = epsRx;
+  let bestVal = loss(bestRx);
+
+  for (let k = 1; k <= coarseSteps; k++) {
+    const rx = epsRx + (rxMax - epsRx) * (k / coarseSteps);
+    const v = loss(rx);
+    if (v < bestVal) { bestVal = v; bestRx = rx; }
+  }
+
+  // initial step is the coarse spacing
+  let step = (rxMax - epsRx) / coarseSteps;
+
+  // --- refinement using your exact rule ---
+  const refineRounds = (opts.refineRounds != null) ? Math.max(1, (opts.refineRounds | 0)) : 4;
+  const ref = _dzv_refine_rx_stepHalving(bestRx, bestVal, step, loss, epsRx, rxMax, refineRounds);
+  bestRx = ref.bestRx;
+  bestVal = ref.bestVal;
+
+  const rx = bestRx;
+  const ry = areaTargetSvg2 / (Math.PI * rx);
+  return { cx, rx, ry: (isFinite(ry) && ry > 0) ? ry : 0 };
+}
+// VERSION 2: structured 1D optimization (golden-section search) with multi-start bracketing
+function ellipseFromICDF_inSvgX_opt(cdf1, icdf1, usd_to_svg_x, usdMin, usdMax, areaTargetSvg2, usdMaxTrim, opts = {}) {
+
+  if (typeof icdf1 !== "function" || typeof cdf1 !== "function" || typeof usd_to_svg_x !== "function") {
+    return { cx: NaN, rx: NaN, ry: NaN };
+  }
+  if (!isFinite(usdMin) || !isFinite(usdMax) || !(usdMin < usdMax)) return { cx: NaN, rx: NaN, ry: NaN };
+  if (!isFinite(areaTargetSvg2) || areaTargetSvg2 <= 0) return { cx: NaN, rx: NaN, ry: 0 };
+
+  const usdMaxEff = (isFinite(usdMaxTrim) && usdMaxTrim < usdMax) ? usdMaxTrim : usdMax;
+
+  let p0 = cdf1(usdMin);
+  let p1 = cdf1(usdMaxEff);
+  if (!isFinite(p0) || !isFinite(p1)) return { cx: NaN, rx: NaN, ry: NaN };
+  if (p0 > p1) { const t = p0; p0 = p1; p1 = t; }
+  const dp = p1 - p0;
+  if (!(dp > 0)) return { cx: NaN, rx: NaN, ry: 0 };
+
+  const a0 = usd_to_svg_x(usdMin);
+  const b0 = usd_to_svg_x(usdMaxEff);
+  if (!isFinite(a0) || !isFinite(b0)) return { cx: NaN, rx: NaN, ry: NaN };
+  const a = Math.min(a0, b0);
+  const b = Math.max(a0, b0);
+  const W = b - a;
+  if (!(W > 0)) return { cx: NaN, rx: NaN, ry: 0 };
+
+  // FIXED CENTER: trimmed-interval median
+  const pC = p0 + 0.50 * dp;
+  const cx = usd_to_svg_x(icdf1(pC));
+  if (!isFinite(cx)) return { cx: NaN, rx: NaN, ry: NaN };
+  if (!(cx > a && cx < b)) return { cx, rx: 0, ry: 0 };
+
+  const rxMax = Math.min(cx - a, b - cx);
+  const epsRx =  (opts.epsRx != null) ? Math.max(1e-12, +opts.epsRx) : 1e-12;
+  if (!(rxMax > epsRx)) return { cx, rx: 0, ry: 0 };
+
+  function Ce(t) {
+    if (t <= -1) return 0;
+    if (t >=  1) return Math.PI;
+    const s = Math.sqrt(Math.max(0, 1 - t * t));
+    return (Math.asin(t) + t * s + Math.PI / 2);
+  }
+
+  const N = (opts.fitSamples != null) ? Math.max(9, (opts.fitSamples | 0)) : 33;
+
+  const uSamp = new Float64Array(N);
+  const xSamp = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    const u = (i + 0.5) / N;
+    const p = p0 + u * dp;
+    const x = usd_to_svg_x(icdf1(p));
+    if (!isFinite(x)) return { cx: NaN, rx: NaN, ry: NaN };
+    uSamp[i] = u;
+    xSamp[i] = x;
+  }
+
+  function loss(rx) {
+    if (!isFinite(rx) || !(rx > epsRx) || rx > rxMax) return 1e300;
+    let sse = 0;
+    const invPi = 1 / Math.PI;
+    for (let i = 0; i < N; i++) {
+      const F = Ce((xSamp[i] - cx) / rx) * invPi;
+      const d = F - uSamp[i];
+      sse += d * d;
+    }
+    return sse / N;
+  }
+  
+
+  // Multi-start: pick best bracket region from a small grid, then golden-section in that bracket
+  const grid = (opts.bracketGrid != null) ? Math.max(12, (opts.bracketGrid | 0)) : 32;
+
+  let bestK = 1;
+  let bestV = 1e300;
+  for (let k = 1; k < grid; k++) {
+    const rx = epsRx + (rxMax - epsRx) * (k / grid);
+    const v = loss(rx);
+    if (v < bestV) { bestV = v; bestK = k; }
+  }
+
+  // bracket [L,R] around bestK
+  const kL = Math.max(0, bestK - 2);
+  const kR = Math.min(grid, bestK + 2);
+  let L = epsRx + (rxMax - epsRx) * (kL / grid);
+  let R = epsRx + (rxMax - epsRx) * (kR / grid);
+  if (!(R > L)) { L = epsRx; R = rxMax; }
+
+  // Golden-section search on [L,R]
+  const phi = (Math.sqrt(5) - 1) / 2; // ~0.618
+  let x1 = R - phi * (R - L);
+  let x2 = L + phi * (R - L);
+  let f1 = loss(x1);
+  let f2 = loss(x2);
+
+  const iters = (opts.optIters != null) ? Math.max(10, (opts.optIters | 0)) : 6;
+  const tol = (opts.optTol != null) ? Math.max(0, +opts.optTol) : 1e-10;
+
+  for (let it = 0; it < iters; it++) {
+    if ((R - L) <= tol * (1 + (L + R))) break;
+
+    if (f1 > f2) {
+      L = x1;
+      x1 = x2; f1 = f2;
+      x2 = L + phi * (R - L);
+      f2 = loss(x2);
+    } else {
+      R = x2;
+      x2 = x1; f2 = f1;
+      x1 = R - phi * (R - L);
+      f1 = loss(x1);
+    }
+  }
+
+  const rx = (f1 < f2) ? x1 : x2;
+  const ry = areaTargetSvg2 / (Math.PI * rx);
+  return { cx, rx, ry: (isFinite(ry) && ry > 0) ? ry : 0 };
+}
 
 	    // Global envelope reference: area (from full path) + workers (emp attribute)
 	    // Detailed target area is derived from workers ratio against this global reference.
@@ -8035,6 +8396,10 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		  const vmin_usd = parseFloat(mg.getAttribute("vstart"));
 		  const vmax_usd = Math.min(parseFloat(mg.getAttribute("vend")), 240000);
 		  
+		  const v0_usd = parseFloat(mg.getAttribute("v0"));
+		  const v100_usd =parseFloat(mg.getAttribute("v100"));
+		  
+		  
 		  const v25_usd = parseFloat(mg.getAttribute("v25"));
 		  const v75_usd = parseFloat(mg.getAttribute("v75"));
 		  
@@ -8129,27 +8494,42 @@ function morph_array2(orig_array, targ_array, itmp, u) {
 		  
 		  //const res_mom2 = ellipseFromContour_MassAnd2ndMoments(PathLin);
 		  
-		  const res_mom2 = ellipseFromICDF_inSvgX(vio.icdf1, USD_to_svgX_linear, areaTarget)
+		  //const res_mom2 = ellipseFromICDF_inSvgX(vio.icdf1, USD_to_svgX_linear, areaTarget);
+		  //opts.epsRx = areaTargetSvg2 / (Math.PI * h_max);
+		  const epsRx = Math.min(2 *areaTarget / (Math.PI *(_ymax-_ymin + 1)), 0.025 * (vright-vleft), Math.abs(cx2-USD_to_svgX_linear(v25_usd)), Math.abs(cx2-USD_to_svgX_linear(v75_usd)));
+		  
+		  const res_mom2 =  ellipseFromICDF_inSvgX_scan_refine(vio.cdf1, vio.icdf1, USD_to_svgX_linear, v0_usd, v100_usd, areaTarget, vmax_usd, {epsRx: epsRx});
+		  //console.log("direct", res_mom2);
+		  
+		  
 		  
 		  
 		  let cx = res_mom2.cx;
 		  //let cy = res_mom2.cy;
-		  let cy  = ccy;//mplY_to_svgY(vio.yc);
+		  let cy  = mplY_to_svgY(vio.yc);//ccy;//mplY_to_svgY(vio.yc);
+		  let rx = res_mom2.rx;
+		  let ry = res_mom2.ry;
+		  //if (rx<=0)
+		  //  console.log(epsRx, rx);
 		  
 		  
+		  /*
 		  const Acalc = res_mom2.A;
 		  const corr = Math.sqrt(areaTarget/Acalc);
 		  
-		  let rx = res_mom2.rx * corr;
-		  let ry = res_mom2.ry * corr;
+		  rx = res_mom2.rx * corr;
+		  ry = res_mom2.ry * corr;
+		  */
+		  //const correction = correctEllipseToXRange_ratioPull(cx, rx, ry, USD_to_svgX_linear(v0_usd), USD_to_svgX_linear(v100_usd));
 		  
-		  const correction = correctEllipseToXRange_ratioPull(cx, rx, ry, vleft, vright);
 		  
 		  
+		  //rx = correction.rx;
+		  //ry = correction.ry;
+		  //cx = correction.cx;
 		  
-		  rx = correction.rx;
-		  ry = correction.ry;
-		  cx = correction.cx;
+		  
+		  //console.log("correct", correction);
 		  
 		  
 		  
@@ -9598,7 +9978,7 @@ function _badnessFromCounts(c) {
     const envBot = (Number.isFinite(half_dst) ? Yc+half_dst : (vbY + vbH));
 
     const dmin = Math.max(1e-9, 0.5*cellY);   // adjustable later
-    const maxIters = 5;                   // adjustable later
+    const maxIters = 3;                   // adjustable later
     const epsTouch = Math.max(1e-9, 0.01 * cellY);
 
     // Mass proxy for sorting/ties. No DOM reads.
@@ -9746,7 +10126,11 @@ for (let it = 0;it < maxIters;it++)
   };
   
   if (!is_circle)
-    _dzv_extra_steps_chain_and_stretch();
+  
+   {
+      _dzv_extra_steps_chain_and_stretch();
+	  //refine(false, true, 5, items, x, y, rx, ry);
+	}  
   // Persist maps only
   const dzv = (typeof window !== "undefined") ? (window.dzv || (window.dzv = {})) : {};
 
@@ -11242,7 +11626,7 @@ function d_from_array_or_ellipse(arr,closed = true) {
 
 
   if (!is_circle) {
-    stages_labels[0] = "If occupations were encoded as mass-preserving <b>ellipses</b> that follow the shape’s overall spread as closely as possible, despite being a step closer than the conventional circle to the true distribution shape, they wouldn’t reflect <b>data-density</b> particularities.";
+    stages_labels[0] = "If occupations were encoded as mass-preserving <b>ellipses</b> designed to follow the distribution’s shape as closely as possible, and thus improve upon circles, they would still not reflect <b>data-density</b> particularities.";
 	
     stages_labels[1] = "<b>Violins</b>, however, encode distributions truthfully while maintaining the same degree of <b>similarity</b> for pre-attentive attributes like <b>shape</b> and <b>color</b>.";
   }
@@ -11422,6 +11806,7 @@ function d_from_array_or_ellipse(arr,closed = true) {
 
     // center & p0 for morph mapping (computed once, used in renderMorph)
     const [miy_it, may_it] = mi_ma_y(it._m_from);
+	//if (!Number.isFinite(miy_it) || !Number.isFinite(may_it)) console.log(it._m_from, cRec);
     it.y_center0 = 0.5 * (miy_it + may_it);
   }
 
@@ -11601,7 +11986,12 @@ function d_from_array_or_ellipse(arr,closed = true) {
       const itmp = morph_array2(it._m_from, it._m_to, it._m_tmp, e);
 
       const y_target = miy_now + it._p0 * h_now;
-      const dy_total = y_target - it.y_center0;
+      let dy_total = y_target - it.y_center0;
+	  if (!Number.isFinite(dy_total))
+	    {
+		  dy_total = 0;
+		  //console.log(it._p0, it.y_center0);
+		}
 
       _setTranslateYPreserve(it.useEl, it._baseTransform, dy_total);
       it._dyMorph = dy_total;
@@ -13538,6 +13928,7 @@ cycle_btn.innerHTML =
 	    // --- mini SVG: cycle representation on right-click / long-tap -----------------
 	    function dzvCycleMiniRepresentation() {
 	        state.miniMode = ((state.miniMode | 0) + 1) % 3;
+			window.dzv.dzvSaveVariable("mini_mode", state.miniMode);
 	        // 0=violin, 1=pdf, 2=cdf
 	        const m = state.activeMeta || state.meta;
 	        if (m) updateMini(m, state.lastBand || null);
@@ -14187,7 +14578,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    const state = {
 	        locked: false,
 	        meta: null,
-	        miniMode: 0,
+	        miniMode: window.dzv.dzvLoadVariable("mini_mode", 0),
 	        lastBand: null,
 	        xform: {
 	            sx: 1,
