@@ -21301,7 +21301,7 @@ function applyLayout(items) {
 	        }
 	        window.justHideMenu = justHideMenu;
 
-	        function fitMenu(x, y) {
+	        function fitMenuOld(x, y) {
 	            let w = 0,
 	                h = 0;
 	            try {
@@ -21344,6 +21344,99 @@ function applyLayout(items) {
 	            dzvMenu.style.top = ny + "px";
 	            void dzvMenu.offsetWidth;
 	        }
+			
+			let menu_scroll_bar_width = 0;
+			
+			function fitMenu(x, y) {
+			  let w = 0, h0 = 0;
+
+			  // Measure current (natural) size
+			  try {
+				void dzvMenu.offsetWidth;
+				const rect = dzvMenu.getBoundingClientRect();
+				w = rect.width;
+				h0 = rect.height;
+				if (menu_scroll_bar_width === 0)
+				  {
+				   const wS = d.offsetWidth - d.clientWidth;
+				   if (menu_scroll_bar_width < wS)
+				      menu_scroll_bar_width = wS;
+				  }
+				
+			  } catch (e) {
+				w = dzvMenu.offsetWidth || 0;
+				h0 = dzvMenu.offsetHeight || 0;
+			  }
+
+			  const margin = 4;
+			  const parent = svg.parentElement;
+			  const r = parent.getBoundingClientRect();
+			  const vw = r.width;
+			  const vh = r.height;
+			  const offsetX = r.left;
+			  const offsetY = r.top;
+
+			  let nx = x;
+			  let ny = y;
+
+			  // Determine clamp box (patch2 if present, else parent viewport box)
+			  const patch2Path = svg.querySelector('g#figure_1 > g#axes_1 > g#patch_2 path');
+			  let xLeft, xRight, yTop, yBottom;
+
+			  if (patch2Path) {
+				const patchBox = patch2Path.getBoundingClientRect();
+				xLeft = patchBox.x;
+				xRight = xLeft + patchBox.width;
+				yTop = patchBox.y;
+				yBottom = yTop + patchBox.height;
+			  } else {
+				xLeft = offsetX;
+				xRight = offsetX + vw;
+				yTop = offsetY;
+				yBottom = offsetY + vh;
+			  }
+
+			  // Clamp HEIGHT first (so position uses the effective height)
+			  const maxHAllowed = Math.max(0, Math.floor((yBottom - yTop) - 4 * margin));
+			  if (maxHAllowed > 0 && h0 > maxHAllowed) {
+				dzvMenu.style.maxHeight = maxHAllowed + "px";
+				dzvMenu.style.overflowY = "auto";
+				dzvMenu.style.overflowX = "hidden";
+				dzvMenu.style.overscrollBehavior = "contain";
+				dzvMenu.style.webkitOverflowScrolling = "touch";
+				const sz = 8 + (menu_scroll_bar_width === 0 ? 8:menu_scroll_bar_width);
+				dzvMenu.style.padding = `4px ${sz}px 4px 8px`;
+
+			  } else {
+				dzvMenu.style.maxHeight = "";
+				dzvMenu.style.overflowY = "hidden";
+				dzvMenu.style.overflowX = "hidden";
+				dzvMenu.style.overscrollBehavior = "";
+				dzvMenu.style.webkitOverflowScrolling = "";
+				dzvMenu.style.padding = "4px 8px 4px 8px";
+			  }
+
+			  // Re-measure effective height after maxHeight change
+			  void dzvMenu.offsetWidth;
+			  let h = 0;
+			  try {
+				const rect2 = dzvMenu.getBoundingClientRect();
+				h = rect2.height;
+			  } catch (e) {
+				h = dzvMenu.offsetHeight || h0 || 0;
+			  }
+
+			  // Now do the same side-conditions, but with effective height
+			  if (ny - margin < yTop) ny = yTop + margin;
+			  if (nx - margin < xLeft) nx = xLeft + margin;
+
+			  if (nx + w + margin > xRight) nx = Math.max(xLeft + margin, xRight - margin - w);
+			  if (ny + h + margin > yBottom) ny = Math.max(yTop + margin, yBottom - margin - h);
+
+			  dzvMenu.style.left = nx + "px";
+			  dzvMenu.style.top = ny + "px";
+			  void dzvMenu.offsetWidth;
+			}
 
 	        function showMenuAt(x, y) {
 			    if (window.dzv.animating) return;
