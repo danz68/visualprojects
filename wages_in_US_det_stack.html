@@ -21131,28 +21131,23 @@ function applyLayout(items) {
 			rowCircle.style.display = (reduced || (window.dzvFocusMajor && String(window.dzvFocusMajor))) ? "none" : "";
 			rowEllipse.style.display = rowCircle.style.display;
 			sep4.style.display = reduced ? "none" : "";
-			
-
 	        rowReduce.style.display = "";
+			
 	        menuBody.appendChild(rowGuide);
 	        menuBody.appendChild(sep0);
-	        menuBody.appendChild(rowZoom);
 			
-	        menuBody.appendChild(tr_adapt);
+	        menuBody.appendChild(rowZoom);
+			menuBody.appendChild(tr_adapt);
 	        menuBody.appendChild(sep1);
+			
+			
 	        menuBody.appendChild(tr_major_label);
-
-
 	        menuBody.appendChild(tr_textsearch);
 	        menuBody.appendChild(tr_major_color);
 	        menuBody.appendChild(tr_label_overlap);
 	        menuBody.appendChild(tr_textsize);
-	        menuBody.appendChild(sep2);
-	        menuBody.appendChild(lgt_tr);
-	        menuBody.appendChild(ctr_tr);
-	        menuBody.appendChild(satr_tr);
-	        menuBody.appendChild(rowResetColors);
-	        menuBody.appendChild(sep3);
+			menuBody.appendChild(sep2);
+			
 			if (!!window.stack_tracking)
 	          {
 			    menuBody.appendChild(tr_stack_tracking);
@@ -21160,9 +21155,20 @@ function applyLayout(items) {
 				menuBody.appendChild(rowEllipse);
 				menuBody.appendChild(sep4);
 			  }
+			
+			
+	        
+	        menuBody.appendChild(lgt_tr);
+	        menuBody.appendChild(ctr_tr);
+	        menuBody.appendChild(satr_tr);
+	        menuBody.appendChild(rowResetColors);
+	        menuBody.appendChild(sep3);
+			
 			  
 	        menuBody.appendChild(rowReduce);
+			
 	        document.body.appendChild(dzvMenu);
+			
 	        dzvMenu.addEventListener('contextmenu', (e) => { 
 	            e.preventDefault();
 	            e.stopPropagation();
