@@ -14431,8 +14431,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        let pad = 14;
 	        const cons = getConstraintRect();
 	        const innerPad = cfg.padInConstraint;
-	        const W = cfg.tipWidth * cfg.uiScale;
-	        const H = cfg.tipHeight * cfg.uiScale;
+	        const W = parseFloat(tip.style.width);//cfg.tipWidth * cfg.uiScale;
+	        const H = parseFloat(tip.style.height);//cfg.tipHeight * cfg.uiScale;
 	        let left = clientX + pad;
 	        let top = clientY + pad;
 	        const minLeft = cons.left + innerPad;
@@ -14457,8 +14457,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (!tipPos.pinned) return;
 	        const cons = getConstraintRect();
 	        const innerPad = cfg.padInConstraint;
-	        const W = cfg.tipWidth * cfg.uiScale;
-	        const H = cfg.tipHeight * cfg.uiScale;
+	        const W = parseFloat(tip.style.width);//cfg.tipWidth * cfg.uiScale;
+	        const H = parseFloat(tip.style.height);//cfg.tipHeight * cfg.uiScale;
 	        let left = tipPos.left;
 	        let top = tipPos.top;
 	        const minLeft = cons.left + innerPad;
@@ -14481,8 +14481,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (!tipPos.pinned) return;
 	        const cons = getConstraintRect();
 	        const innerPad = cfg.padInConstraint;
-	        const W = cfg.tipWidth * cfg.uiScale;
-	        const H = cfg.tipHeight * cfg.uiScale;
+	        const W = parseFloat(tip.style.width);//cfg.tipWidth * cfg.uiScale;
+	        const H = parseFloat(tip.style.height);//cfg.tipHeight * cfg.uiScale;
 	        const minLeft = cons.left + innerPad;
 	        const minTop = cons.top + innerPad;
 	        const maxLeft = cons.right - innerPad - W;
@@ -14498,6 +14498,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        tipPos.top = top;
 	        tip.style.left = `${left}px`;
 	        tip.style.top = `${top}px`;
+			//console.log(cons.left, cons.right, W);
 	    }
 
 
@@ -20187,7 +20188,7 @@ function applyLayout(items) {
 	        dzvMenu.style.zIndex = "9999";
 	        dzvMenu.style.background = "rgba(255,255,255,0.98)";
 	        dzvMenu.style.border = "1px solid #ccc";
-	        dzvMenu.style.padding = "4px 16px 4px 8px";
+	        dzvMenu.style.padding = "4px 8px 4px 8px";
 	        dzvMenu.style.borderRadius = "4px";
 	        dzvMenu.style.fontFamily = "system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 	        dzvMenu.style.fontSize = "12px";
@@ -21290,7 +21291,7 @@ function applyLayout(items) {
 	            if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable)) return;
 	            if (!menuVisible) return;
 	            menuVisible = false;
-				//dzvMenu.style.padding = "4px 8px 4px 8px";
+				dzvMenu.style.padding = "4px 8px 4px 8px";
 	            dzvMenu.style.display = "none";
 				
 	            document.removeEventListener("mousedown", onDocMouseDown);
@@ -21299,7 +21300,7 @@ function applyLayout(items) {
 	        function justHideMenu() {
 	            if (!menuVisible) return;
 	            menuVisible = false;
-				//dzvMenu.style.padding = "4px 8px 4px 8px";
+				dzvMenu.style.padding = "4px 8px 4px 8px";
 	            dzvMenu.style.display = "none";
 
 	            document.removeEventListener("mousedown", onDocMouseDown);
@@ -21410,7 +21411,7 @@ function applyLayout(items) {
 				dzvMenu.style.overscrollBehavior = "contain";
 				dzvMenu.style.webkitOverflowScrolling = "touch";
 				const sz = 8 + (menu_scroll_bar_width === 0 ? 8:menu_scroll_bar_width);
-				//dzvMenu.style.padding = `4px ${sz}px 4px 8px`;
+				dzvMenu.style.padding = `4px ${sz}px 4px 8px`;
 
 			  } else {
 				dzvMenu.style.maxHeight = "";
@@ -21418,7 +21419,7 @@ function applyLayout(items) {
 				dzvMenu.style.overflowX = "hidden";
 				dzvMenu.style.overscrollBehavior = "";
 				dzvMenu.style.webkitOverflowScrolling = "";
-				//dzvMenu.style.padding = "4px 8px 4px 8px";
+				dzvMenu.style.padding = "4px 8px 4px 8px";
 			  }
 
 			  // Re-measure effective height after maxHeight change
