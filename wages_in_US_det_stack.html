@@ -20439,123 +20439,137 @@ function applyLayout(items) {
       }
     }
     _setupOverlayHitTest();
-	// --- layer1 hover/press opacity --------------------------------------------
 
-	// --- unified feedback for layer1 opacity + tapped control highlight ----------
-// --- unified feedback for layer1 opacity + tapped control highlight ----------
-(function () {
-  const BASE_LAYER_OP  = 0.5;
-  const HOVER_LAYER_OP = 1.0;
-  const FLASH_MS       = 220;
-  const OTHER_DIM_OP   = 0.55; // only during touch flash, to make tapped control obvious
+	// --- mobile + desktop feedback: layer1 lift + tapped control highlight -------
+	(function () {
+	  const BASE_LAYER_OP  = 0.5;
+	  const HOVER_LAYER_OP = 1.0;
+	  const FLASH_MS       = 400;
+	  const OTHER_DIM_OP   = 0.55; // during flash only
 
-  function _getSvg() { return _getInjectedSvg(overlayDiv); }
-  function _layer1() {
-    const s = _getSvg();
-    return s ? s.querySelector("#layer1") : null;
-  }
-  function _setLayer1(op) {
-    const l1 = _layer1();
-    if (!l1) return;
-    l1.style.opacity = String(op);
-  }
+	  function _getSvg() { return _getInjectedSvg(overlayDiv); }
 
-  function _getGroup(id) {
-    const s = _getSvg();
-    if (!s) return null;
-    return s.querySelector(`#${CSS.escape(id)}`);
-  }
+	  function _layer1() {
+		const s = _getSvg();
+		return s ? s.querySelector("#layer1") : null;
+	  }
 
-  function _clearAllControlOpacities() {
-    for (const id of allowedSet) {
-      if (id === "corner_buttons") continue;
-      const g = _getGroup(id);
-      if (!g) continue;
-      g.style.opacity = "";
-    }
-  }
+	  function _setLayer1(op) {
+		const l1 = _layer1();
+		if (!l1) return;
+		l1.style.opacity = String(op);
+	  }
 
-  function _setControlsDuringFlash(hitId) {
-    for (const id of allowedSet) {
-      if (id === "corner_buttons") continue;
-      const g = _getGroup(id);
-      if (!g) continue;
-      g.style.opacity = (id === hitId) ? "1.0" : String(OTHER_DIM_OP);
-    }
-  }
+	  function _getGroup(id) {
+		const s = _getSvg();
+		if (!s) return null;
+		return s.querySelector(`#${CSS.escape(id)}`);
+	  }
 
-  let _hoverMouse = false;
-  let _flashTimer = 0;
-  let _touchPtrId = -1;
+	  function _clearAllControlOpacities() {
+		for (const id of allowedSet) {
+		  if (id === "corner_buttons") continue;
+		  const g = _getGroup(id);
+		  if (!g) continue;
+		  g.style.opacity = "";
+		}
+	  }
 
-  function _applySteadyState() {
-    // after any temporary state, restore based on current hover
-    _setLayer1(_hoverMouse ? HOVER_LAYER_OP : BASE_LAYER_OP);
-  }
+	  function _setControlsDuringFlash(hitId) {
+		for (const id of allowedSet) {
+		  if (id === "corner_buttons") continue;
+		  const g = _getGroup(id);
+		  if (!g) continue;
+		  g.style.opacity = (id === hitId) ? "1.0" : String(OTHER_DIM_OP);
+		}
+	  }
 
-  function _endFlash() {
-    if (_flashTimer) { clearTimeout(_flashTimer); _flashTimer = 0; }
-    _clearAllControlOpacities();
-    _applySteadyState();
-  }
+	  let _hoverMouse = false;
+	  let _flashTimer = 0;
 
-  // Desktop hover (mouse only)
-  overlayDiv.addEventListener("pointerenter", (ev) => {
-    if (!ev || ev.pointerType !== "mouse") return;
-    _hoverMouse = true;
-    // if not currently flashing, lift immediately
-    if (!_flashTimer) _setLayer1(HOVER_LAYER_OP);
-  }, { passive: true });
+	  function _applySteadyState() {
+		_setLayer1(_hoverMouse ? HOVER_LAYER_OP : BASE_LAYER_OP);
+	  }
 
-  overlayDiv.addEventListener("pointerleave", (ev) => {
-    if (!ev || ev.pointerType !== "mouse") return;
-    _hoverMouse = false;
-    // if not currently flashing, drop immediately
-    if (!_flashTimer) _setLayer1(BASE_LAYER_OP);
-  }, { passive: true });
+	  function _endFlash() {
+		if (_flashTimer) { clearTimeout(_flashTimer); _flashTimer = 0; }
+		_clearAllControlOpacities();
+		_applySteadyState();
+	  }
 
-  // Touch tap feedback: only when tapping allowed control (except corner_buttons)
-  overlayDiv.addEventListener("pointerdown", (ev) => {
-    if (!ev || ev.pointerType !== "touch") return;
+	  function _startFlash(hitId) {
+		if (!hitId || hitId === "corner_buttons") return;
 
-    const t = _overlayTopElementAt(ev) || ev.target;
-    const hitId = _findAllowedAncestorId(t, overlayDiv);
-    if (!hitId || hitId === "corner_buttons") return;
+		if (_flashTimer) { clearTimeout(_flashTimer); _flashTimer = 0; }
 
-    // capture so we always get pointerup/cancel even if finger leaves overlay
-    try { overlayDiv.setPointerCapture(ev.pointerId); } catch (e) {}
-    _touchPtrId = ev.pointerId;
+		_setLayer1(HOVER_LAYER_OP);
+		_setControlsDuringFlash(hitId);
 
-    if (_flashTimer) { clearTimeout(_flashTimer); _flashTimer = 0; }
+		_flashTimer = setTimeout(() => {
+		  _flashTimer = 0;
+		  _endFlash();
+		}, FLASH_MS);
+	  }
 
-    _setLayer1(HOVER_LAYER_OP);
-    _setControlsDuringFlash(hitId);
+	  // Desktop hover only
+	  overlayDiv.addEventListener("pointerenter", (ev) => {
+		if (!ev || ev.pointerType !== "mouse") return;
+		_hoverMouse = true;
+		if (!_flashTimer) _setLayer1(HOVER_LAYER_OP);
+	  }, { passive: true });
 
-    _flashTimer = setTimeout(() => {
-      _flashTimer = 0;
-      _endFlash();
-    }, FLASH_MS);
-  }, { passive: true });
+	  overlayDiv.addEventListener("pointerleave", (ev) => {
+		if (!ev || ev.pointerType !== "mouse") return;
+		_hoverMouse = false;
+		if (!_flashTimer) _setLayer1(BASE_LAYER_OP);
+	  }, { passive: true });
 
-  overlayDiv.addEventListener("pointerup", (ev) => {
-    if (!ev || ev.pointerType !== "touch") return;
-    if (_touchPtrId !== -1 && ev.pointerId !== _touchPtrId) return;
-    _touchPtrId = -1;
-    try { overlayDiv.releasePointerCapture(ev.pointerId); } catch (e) {}
-    _endFlash();
-  }, { passive: true });
+	  // Pointer path (Android Chrome etc). Treat any non-mouse as "touch-like".
+	  overlayDiv.addEventListener("pointerdown", (ev) => {
+		if (!ev) return;
+		if (ev.pointerType === "mouse") return;
 
-  overlayDiv.addEventListener("pointercancel", (ev) => {
-    if (ev && ev.pointerType === "touch") {
-      _touchPtrId = -1;
-      try { overlayDiv.releasePointerCapture(ev.pointerId); } catch (e) {}
-    }
-    _endFlash();
-  }, { passive: true });
+		const t = _overlayTopElementAt(ev) || ev.target;
+		const hitId = _findAllowedAncestorId(t, overlayDiv);
+		if (!hitId || hitId === "corner_buttons") return;
 
-  // Ensure initial steady state matches baseline
-  _setLayer1(BASE_LAYER_OP);
-})();
+		// make it immediate and avoid synthetic click delays/scroll interactions
+		try { ev.preventDefault(); } catch (e) {}
+		_startFlash(hitId);
+	  }, { passive: false });
+
+	  // Touch fallback (iOS Safari, or when PointerEvent is unreliable)
+	  overlayDiv.addEventListener("touchstart", (ev) => {
+		if (!ev) return;
+
+		// identify the element under the finger inside the overlay SVG
+		let hitId = null;
+		try {
+		  const t0 = ev.changedTouches && ev.changedTouches[0];
+		  if (t0) {
+			const lst = document.elementsFromPoint(t0.clientX, t0.clientY) || [];
+			for (let i = 0; i < lst.length; i++) {
+			  const el = lst[i];
+			  if (!el) continue;
+			  if (el === overlayDiv) continue;
+			  if (overlayDiv.contains(el)) {
+				hitId = _findAllowedAncestorId(el, overlayDiv);
+				break;
+			  }
+			}
+		  }
+		} catch (e) {}
+
+		if (!hitId || hitId === "corner_buttons") return;
+
+		// avoid delayed click and keep it snappy
+		try { ev.preventDefault(); } catch (e) {}
+		_startFlash(hitId);
+	  }, { passive: false });
+
+	  // Initial state
+	  _setLayer1(BASE_LAYER_OP);
+	})();
 
     // 2) Handle overlay actions (pointerdown) when clicking allowed controls
     function handleAction(ev) {
