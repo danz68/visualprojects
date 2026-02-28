@@ -20224,307 +20224,6 @@ function applyLayout(items) {
 //   // cleanup:
 //   overlay.destroy();
 
-if (false)
-(function () {
-  function _asEl(x) { return (x && x.nodeType === 1) ? x : null; }
-
-  function _ensurePositioned(el) {
-    const cs = getComputedStyle(el);
-    if (cs.position === "static") el.style.position = "relative";
-  }
-
-  // Convert base SVG user coords to pixels relative to hostEl
-  function _svgPointToHostPx(baseSvgEl, hostEl, xSvg, ySvg) {
-    const ctm = baseSvgEl.getScreenCTM && baseSvgEl.getScreenCTM();
-    if (!ctm) return { x: 0, y: 0 };
-
-    const p = new DOMPoint(xSvg, ySvg).matrixTransform(ctm);
-    const r = hostEl.getBoundingClientRect();
-    return { x: p.x - r.left, y: p.y - r.top };
-  }
-
-  function _getInjectedSvg(overlayDiv) {
-    return overlayDiv ? overlayDiv.querySelector("svg") : null;
-  }
-
-  function _measureInjectedSvgPx(overlayDiv) {
-    const s = _getInjectedSvg(overlayDiv);
-    if (!s) return { w: 0, h: 0 };
-    const r = s.getBoundingClientRect();
-    return { w: r.width || 0, h: r.height || 0 };
-  }
-
-  function dzvCreateSvgOverlay(cfg) {
-    const baseSvgEl = _asEl(cfg.baseSvgEl);
-    if (!baseSvgEl || baseSvgEl.namespaceURI !== "http://www.w3.org/2000/svg")
-      throw new Error("dzvCreateSvgOverlay: baseSvgEl must be an SVG element");
-
-    const hostEl = _asEl(cfg.hostEl) || baseSvgEl.parentElement;
-    if (!hostEl) throw new Error("dzvCreateSvgOverlay: hostEl missing and baseSvgEl.parentElement is null");
-
-    _ensurePositioned(hostEl);
-
-    const overlayDiv = document.createElement("div");
-    overlayDiv.className = cfg.className || "overlaySvgDiv";
-    overlayDiv.style.position = "absolute";
-    overlayDiv.style.left = "0px";
-    overlayDiv.style.top = "0px";
-    overlayDiv.style.pointerEvents = "auto";  // we keep this, but we forward events when needed
-    overlayDiv.style.userSelect = "none";
-    overlayDiv.style.touchAction = "manipulation";
-    overlayDiv.style.zIndex = String(cfg.zIndex == null ? 30 : cfg.zIndex);
-
-    if (typeof cfg.svgInnerHTML === "string") overlayDiv.innerHTML = cfg.svgInnerHTML;
-    hostEl.appendChild(overlayDiv);
-
-    const allowedSet = new Set([
-      "Y_UpPan",
-      "Y_DnPan",
-      "X_UpZoom",
-      "Y_UpZoom",
-      "X_DnZoom",
-      "Y_DnZoom",
-      "X_RtPan",
-      "X_LtPan",
-      "XY_Fit"
-    ]);
-
-    const state = {
-      hostEl,
-      baseSvgEl,
-      overlayDiv,
-      anchorLB: { x: (cfg.anchorLB && +cfg.anchorLB.x) || 0, y: (cfg.anchorLB && +cfg.anchorLB.y) || 0 },
-      onAction: (typeof cfg.onAction === "function") ? cfg.onAction : null,
-      stopPropagation: cfg.stopPropagation !== false,
-      preventDefault: cfg.preventDefault !== false,
-      destroyed: false,
-      _rafId: 0,
-      _forwarding: false,
-      _lastMoveFwd: 0
-    };
-
-    function positionNow() {
-      const p = _svgPointToHostPx(state.baseSvgEl, state.hostEl, state.anchorLB.x, state.anchorLB.y);
-      const sz = _measureInjectedSvgPx(state.overlayDiv);
-      state.overlayDiv.style.left = p.x + "px";
-      state.overlayDiv.style.top = (p.y - sz.h) + "px"; // left-bottom anchor
-    }
-
-    function schedule() {
-      if (state.destroyed) return;
-      if (state._rafId) cancelAnimationFrame(state._rafId);
-      state._rafId = requestAnimationFrame(() => {
-        state._rafId = 0;
-        positionNow();
-      });
-    }
-
-    // Initial
-    schedule();
-
-    // Keep position stable on viewport changes (CTM changes)
-    function onWinChange() { schedule(); }
-    window.addEventListener("resize", onWinChange, { passive: true });
-    window.addEventListener("scroll", onWinChange, { passive: true, capture: true });
-
-    const ro = (window.ResizeObserver) ? new ResizeObserver(() => schedule()) : null;
-    if (ro) { ro.observe(hostEl); ro.observe(baseSvgEl); }
-
-    function _findAllowedAncestorId(target, stopEl) {
-      let el = target;
-      while (el && el !== stopEl) {
-        if (el.id && allowedSet.has(el.id)) return el.id;
-        el = el.parentNode;
-      }
-      return null;
-    }
-
-    function _withOverlayDisabled(fn) {
-      const prevPE = overlayDiv.style.pointerEvents;
-      overlayDiv.style.pointerEvents = "none";
-      let out = null;
-      try { out = fn(); } finally { overlayDiv.style.pointerEvents = prevPE; }
-      return out;
-    }
-
-    function _underElementAt(ev) {
-      return _withOverlayDisabled(() => {
-        try { return document.elementFromPoint(ev.clientX, ev.clientY); } catch (e) { return null; }
-      });
-    }
-
-    function _dispatchCloneTo(target, ev, typeOverride) {
-      if (!target) return;
-      const type = typeOverride || ev.type;
-
-      // Prefer PointerEvent to preserve pointerId, etc.
-      let e2 = null;
-      try {
-        e2 = new PointerEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          pointerId: ev.pointerId,
-          pointerType: ev.pointerType,
-          isPrimary: ev.isPrimary,
-          button: ev.button,
-          buttons: ev.buttons,
-          clientX: ev.clientX,
-          clientY: ev.clientY,
-          screenX: ev.screenX,
-          screenY: ev.screenY,
-          ctrlKey: ev.ctrlKey,
-          shiftKey: ev.shiftKey,
-          altKey: ev.altKey,
-          metaKey: ev.metaKey,
-        });
-      } catch (e) {
-        e2 = new MouseEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          button: ev.button,
-          buttons: ev.buttons,
-          clientX: ev.clientX,
-          clientY: ev.clientY,
-          screenX: ev.screenX,
-          screenY: ev.screenY,
-          ctrlKey: ev.ctrlKey,
-          shiftKey: ev.shiftKey,
-          altKey: ev.altKey,
-          metaKey: ev.metaKey,
-        });
-      }
-
-      target.dispatchEvent(e2);
-    }
-
-    // 1) Only allowed controls are hittable in the injected SVG
-    function _setupOverlayHitTest() {
-      const s = _getInjectedSvg(overlayDiv);
-      if (!s) return;
-
-      // everything inside SVG is transparent by default
-      s.style.pointerEvents = "none";
-
-      // allowed groups are interactive and show finger cursor
-      for (const id of allowedSet) {
-        const g = s.querySelector(`#${CSS.escape(id)}`);
-        if (!g) continue;
-
-        g.style.pointerEvents = "auto";
-        g.style.cursor = "pointer";
-
-        g.querySelectorAll("*").forEach(n => {
-          n.style.pointerEvents = "auto";
-          n.style.cursor = "pointer";
-        });
-      }
-    }
-    _setupOverlayHitTest();
-
-    // 2) Handle overlay actions (pointerdown) when clicking allowed controls
-    function handleAction(ev) {
-      if (state.destroyed) return;
-      if (state._forwarding) return;
-
-      const hitId = _findAllowedAncestorId(ev.target, overlayDiv);
-      if (!hitId) return;
-
-      if (state.onAction) state.onAction(hitId, "", ev);
-      if (state.preventDefault) ev.preventDefault();
-      if (state.stopPropagation) ev.stopPropagation();
-    }
-
-    // 3) Forward ALL pointer interactions to underlying content when not on allowed controls
-    function forwardIfNotAllowed(ev) {
-      if (state.destroyed) return;
-      if (state._forwarding) return;
-
-      const hitId = _findAllowedAncestorId(ev.target, overlayDiv);
-      if (hitId) return; // let overlay handle it
-
-      // throttle pointermove forwarding a bit (optional but avoids floods)
-      if (ev.type === "pointermove") {
-        const now = performance.now();
-        if (now - state._lastMoveFwd < 8) return; // ~125 Hz max
-        state._lastMoveFwd = now;
-      }
-
-      const under = _underElementAt(ev);
-      if (!under || under === overlayDiv) return;
-
-      state._forwarding = true;
-      try {
-        _dispatchCloneTo(under, ev);
-      } finally {
-        state._forwarding = false;
-      }
-    }
-
-    // Overlay own action handler
-    overlayDiv.addEventListener("pointerdown", handleAction, { passive: false });
-
-    // Forwarding handlers
-    overlayDiv.addEventListener("pointerdown", forwardIfNotAllowed, { passive: false });
-    overlayDiv.addEventListener("pointerup", forwardIfNotAllowed, { passive: false });
-    overlayDiv.addEventListener("pointercancel", forwardIfNotAllowed, { passive: true });
-    overlayDiv.addEventListener("pointermove", forwardIfNotAllowed, { passive: true });
-
-    // Cursor: if over allowed => pointer, else mirror underlying cursor
-    function onPointerMoveCursor(ev) {
-      if (state.destroyed) return;
-
-      const hitId = _findAllowedAncestorId(ev.target, overlayDiv);
-      if (hitId) {
-        overlayDiv.style.cursor = "pointer";
-        return;
-      }
-
-      const under = _withOverlayDisabled(() => {
-        try { return document.elementFromPoint(ev.clientX, ev.clientY); } catch (e) { return null; }
-      });
-      if (!under) { overlayDiv.style.cursor = ""; return; }
-
-      try {
-        const cs = getComputedStyle(under);
-        overlayDiv.style.cursor = (cs && cs.cursor) ? cs.cursor : "";
-      } catch (e) {
-        overlayDiv.style.cursor = "";
-      }
-    }
-    overlayDiv.addEventListener("pointermove", onPointerMoveCursor, { passive: true });
-    overlayDiv.addEventListener("pointerleave", () => { overlayDiv.style.cursor = ""; }, { passive: true });
-
-    return {
-      allowedSet,
-      el: overlayDiv,
-      hostEl,
-      setAnchorLB(x, y) { state.anchorLB.x = +x || 0; state.anchorLB.y = +y || 0; schedule(); },
-      setSVG(html) { overlayDiv.innerHTML = String(html == null ? "" : html); _setupOverlayHitTest(); schedule(); },
-      repositionNow() { if (!state.destroyed) positionNow(); },
-      destroy() {
-        if (state.destroyed) return;
-        state.destroyed = true;
-        if (state._rafId) cancelAnimationFrame(state._rafId);
-
-        overlayDiv.removeEventListener("pointerdown", handleAction);
-        overlayDiv.removeEventListener("pointerdown", forwardIfNotAllowed);
-        overlayDiv.removeEventListener("pointerup", forwardIfNotAllowed);
-        overlayDiv.removeEventListener("pointercancel", forwardIfNotAllowed);
-        overlayDiv.removeEventListener("pointermove", forwardIfNotAllowed);
-        overlayDiv.removeEventListener("pointermove", onPointerMoveCursor);
-
-        window.removeEventListener("resize", onWinChange, { passive: true });
-        window.removeEventListener("scroll", onWinChange, { passive: true, capture: true });
-        if (ro) ro.disconnect();
-        if (overlayDiv.parentNode) overlayDiv.parentNode.removeChild(overlayDiv);
-      }
-    };
-  }
-
-  window.dzvCreateSvgOverlay = dzvCreateSvgOverlay;
-})();
 
 
 (function () {
@@ -20740,6 +20439,123 @@ if (false)
       }
     }
     _setupOverlayHitTest();
+	// --- layer1 hover/press opacity --------------------------------------------
+
+	// --- unified feedback for layer1 opacity + tapped control highlight ----------
+// --- unified feedback for layer1 opacity + tapped control highlight ----------
+(function () {
+  const BASE_LAYER_OP  = 0.5;
+  const HOVER_LAYER_OP = 1.0;
+  const FLASH_MS       = 220;
+  const OTHER_DIM_OP   = 0.55; // only during touch flash, to make tapped control obvious
+
+  function _getSvg() { return _getInjectedSvg(overlayDiv); }
+  function _layer1() {
+    const s = _getSvg();
+    return s ? s.querySelector("#layer1") : null;
+  }
+  function _setLayer1(op) {
+    const l1 = _layer1();
+    if (!l1) return;
+    l1.style.opacity = String(op);
+  }
+
+  function _getGroup(id) {
+    const s = _getSvg();
+    if (!s) return null;
+    return s.querySelector(`#${CSS.escape(id)}`);
+  }
+
+  function _clearAllControlOpacities() {
+    for (const id of allowedSet) {
+      if (id === "corner_buttons") continue;
+      const g = _getGroup(id);
+      if (!g) continue;
+      g.style.opacity = "";
+    }
+  }
+
+  function _setControlsDuringFlash(hitId) {
+    for (const id of allowedSet) {
+      if (id === "corner_buttons") continue;
+      const g = _getGroup(id);
+      if (!g) continue;
+      g.style.opacity = (id === hitId) ? "1.0" : String(OTHER_DIM_OP);
+    }
+  }
+
+  let _hoverMouse = false;
+  let _flashTimer = 0;
+  let _touchPtrId = -1;
+
+  function _applySteadyState() {
+    // after any temporary state, restore based on current hover
+    _setLayer1(_hoverMouse ? HOVER_LAYER_OP : BASE_LAYER_OP);
+  }
+
+  function _endFlash() {
+    if (_flashTimer) { clearTimeout(_flashTimer); _flashTimer = 0; }
+    _clearAllControlOpacities();
+    _applySteadyState();
+  }
+
+  // Desktop hover (mouse only)
+  overlayDiv.addEventListener("pointerenter", (ev) => {
+    if (!ev || ev.pointerType !== "mouse") return;
+    _hoverMouse = true;
+    // if not currently flashing, lift immediately
+    if (!_flashTimer) _setLayer1(HOVER_LAYER_OP);
+  }, { passive: true });
+
+  overlayDiv.addEventListener("pointerleave", (ev) => {
+    if (!ev || ev.pointerType !== "mouse") return;
+    _hoverMouse = false;
+    // if not currently flashing, drop immediately
+    if (!_flashTimer) _setLayer1(BASE_LAYER_OP);
+  }, { passive: true });
+
+  // Touch tap feedback: only when tapping allowed control (except corner_buttons)
+  overlayDiv.addEventListener("pointerdown", (ev) => {
+    if (!ev || ev.pointerType !== "touch") return;
+
+    const t = _overlayTopElementAt(ev) || ev.target;
+    const hitId = _findAllowedAncestorId(t, overlayDiv);
+    if (!hitId || hitId === "corner_buttons") return;
+
+    // capture so we always get pointerup/cancel even if finger leaves overlay
+    try { overlayDiv.setPointerCapture(ev.pointerId); } catch (e) {}
+    _touchPtrId = ev.pointerId;
+
+    if (_flashTimer) { clearTimeout(_flashTimer); _flashTimer = 0; }
+
+    _setLayer1(HOVER_LAYER_OP);
+    _setControlsDuringFlash(hitId);
+
+    _flashTimer = setTimeout(() => {
+      _flashTimer = 0;
+      _endFlash();
+    }, FLASH_MS);
+  }, { passive: true });
+
+  overlayDiv.addEventListener("pointerup", (ev) => {
+    if (!ev || ev.pointerType !== "touch") return;
+    if (_touchPtrId !== -1 && ev.pointerId !== _touchPtrId) return;
+    _touchPtrId = -1;
+    try { overlayDiv.releasePointerCapture(ev.pointerId); } catch (e) {}
+    _endFlash();
+  }, { passive: true });
+
+  overlayDiv.addEventListener("pointercancel", (ev) => {
+    if (ev && ev.pointerType === "touch") {
+      _touchPtrId = -1;
+      try { overlayDiv.releasePointerCapture(ev.pointerId); } catch (e) {}
+    }
+    _endFlash();
+  }, { passive: true });
+
+  // Ensure initial steady state matches baseline
+  _setLayer1(BASE_LAYER_OP);
+})();
 
     // 2) Handle overlay actions (pointerdown) when clicking allowed controls
     function handleAction(ev) {
@@ -20867,13 +20683,15 @@ window.dzv.create_zoom_controls = function (how)
 	 }
 	 return;
   }
+  
+  
 window.dzv.zoom_controls = dzvCreateSvgOverlay({
   baseSvgEl: document.getElementById("dzv_gen"),
   anchorLB: { x: 8, y: 479 }, // LEFT-BOTTOM in base SVG user coords
   svgInnerHTML: `
-<svg xmlns="http://www.w3.org/2000/svg" id="svg_zoom_pan"  width="100" height="100" version="1.1" viewBox="0 0 82.584 82.461">
+<svg xmlns="http://www.w3.org/2000/svg" id="svg_zoom_pan"  width="8em" height="8em" version="1.1" viewBox="0 0 82.584 82.461">
   <path id="corner_buttons" d="M0 0v82.46h82.584l-.006-19.2H18.58V0Z" style="fill:#fafafa;stroke:none;stroke-width:0;stroke-miterlimit:0;fill-opacity:0.2"/>
-  <g id="layer1" transform="translate(-21.84 -31.287)">
+  <g id="layer1" transform="translate(-21.84 -31.287)" opacity="0.5">
     <g id="g27" transform="translate(4.13 4.123)">
       <g id="Y_UpPan">
         <path id="path2-2-1" d="M125.539 50.063h-22.285a3.714 3.714 0 0 0-3.714 3.714v22.285a3.714 3.714 0 0 0 3.714 3.714h22.285a3.714 3.714 0 0 0 3.714-3.714V53.777a3.714 3.714 0 0 0-3.714-3.714z" style="fill:#fff;fill-opacity:1;fill-rule:evenodd;stroke:#8d8d8d;stroke-width:1.7;stroke-dasharray:none;stroke-opacity:1" transform="translate(-14.521 44.475)scale(.368)"/>
