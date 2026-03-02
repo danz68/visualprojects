@@ -4479,54 +4479,50 @@ dzvWheelBlock(false);  // when ready; backlog gets eaten for 250ms
     }
 
     let _tf_prev = false;
-let _tf_saved = false;
-let _tf_oldAnimating = false;
-let lp_timer = 0;
-window.dzv.too_soon = false;
+    let _tf_saved = false;
+    let _tf_oldAnimating = false;
+    let lp_timer = 0;
+    if (!window.dzv) window.dzv = {};
+    window.dzv.too_soon = false;
 
-function _updateGlobalFlag() {
-  let nonMousePtrN = 0;
-  const nonMouseIds = [];
-  for (const [id, v] of ptrMap.entries()) {
-    if (v && v.pointerType && v.pointerType !== "mouse") {
-      nonMousePtrN++;
-      nonMouseIds.push(id);
+    function _updateGlobalFlag() {
+      let nonMousePtrN = 0;
+      const nonMouseIds = [];
+      for (const [id, v] of ptrMap.entries()) {
+        if (v && v.pointerType && v.pointerType !== "mouse") {
+          nonMousePtrN++;
+          nonMouseIds.push(id);
+        }
+      }
+      twoPtrIds = _pickTwoIds(nonMouseIds, twoPtrIds);
+
+      const n = (touchCount > nonMousePtrN) ? touchCount : nonMousePtrN;
+      window.dzvTwoFingersDown = (n >= 2);
+
+      const now = !!window.dzvTwoFingersDown;
+
+      // transition OFF -> ON
+      if (now && !_tf_prev) {
+        _tf_oldAnimating = !!(window.dzv && window.dzv.animating);
+        _tf_saved = true;
+        if (window.dzv) window.dzv.animating = true;
+      }
+
+      // transition ON -> OFF
+      if (!now && _tf_prev) {
+        if (window.dzv && _tf_saved) window.dzv.animating = _tf_oldAnimating;
+        _tf_saved = false;
+      }
+
+      _tf_prev = now;
+
+      if (lp_timer) clearTimeout(lp_timer);
+      if (window.dzvTwoFingersDown) {
+        window.dzv.too_soon = true;
+      } else {
+        lp_timer = setTimeout(() => { window.dzv.too_soon = false; }, 1000);
+      }
     }
-  }
-  twoPtrIds = _pickTwoIds(nonMouseIds, twoPtrIds);
-
-  const n = (touchCount > nonMousePtrN) ? touchCount : nonMousePtrN;
-  window.dzvTwoFingersDown = (n >= 2);
-
-  const now = !!window.dzvTwoFingersDown;
-
-  // transition OFF -> ON
-  if (now && !_tf_prev) {
-    _tf_oldAnimating = !!(window.dzv && window.dzv.animating);
-    _tf_saved = true;
-    if (window.dzv) window.dzv.animating = true;
-  }
-
-  // transition ON -> OFF
-  if (!now && _tf_prev) {
-    if (window.dzv && _tf_saved) window.dzv.animating = _tf_oldAnimating;
-    _tf_saved = false;
-  }
-
-  _tf_prev = now;
-  
-  if (lp_timer) clearTimeout(lp_timer);
-  if (window.dzvTwoFingersDown)
-   {
-    window.dzv.too_soon = true;
-	}
-  else 
-   {
-    lp_timer = setTimeout(() => {window.dzv.too_soon = false;}, 1000);
-   }
-	
-  
-}
 
     function _syncTouch(ev) {
       touchMap.clear();
@@ -4619,6 +4615,46 @@ function _updateGlobalFlag() {
       } catch (e) {}
     }
 
+    // ---- RAF-throttled MOVE emission ----
+    let _rafMove = 0;
+    let _pendingMove = false;
+    let _pendingMoveNativeEv = null;
+    let _pendingMoveInRoot = false;
+
+    function _cancelPendingMove() {
+      _pendingMove = false;
+      _pendingMoveNativeEv = null;
+      _pendingMoveInRoot = false;
+      if (_rafMove) {
+        try { cancelAnimationFrame(_rafMove); } catch (e) {}
+        _rafMove = 0;
+      }
+    }
+
+    function _scheduleMove(nativeEv) {
+      _pendingMove = true;
+      _pendingMoveNativeEv = nativeEv || null;
+      _pendingMoveInRoot = nativeEv ? inRootPath(nativeEv) : false;
+
+      if (_rafMove) return;
+      _rafMove = requestAnimationFrame(() => {
+        _rafMove = 0;
+        if (!_pendingMove) return;
+
+        const ev = _pendingMoveNativeEv;
+        const okInRoot = _pendingMoveInRoot;
+
+        _pendingMove = false;
+        _pendingMoveNativeEv = null;
+        _pendingMoveInRoot = false;
+
+        if (!window.dzvTwoFingersDown) return;
+        if (!okInRoot) return;
+
+        _emit("dzv:twofingermove", ev);
+      });
+    }
+
     // ---- Touch handlers (CAPTURE) ----
     function onTouchStart(ev) {
       _syncTouch(ev);
@@ -4630,12 +4666,13 @@ function _updateGlobalFlag() {
     function onTouchMove(ev) {
       _syncTouch(ev);
       if (!window.dzvTwoFingersDown) return;
-      if (inRootPath(ev)) _emit("dzv:twofingermove", ev);
+      _scheduleMove(ev);
       _hardStop(ev);
     }
 
     function onTouchEndCancel(ev) {
       const wasTwo = window.dzvTwoFingersDown;
+      _cancelPendingMove();
       _syncTouch(ev);
       if (!wasTwo) return;
       if (inRootPath(ev)) _emit("dzv:twofingerend", ev);
@@ -4658,12 +4695,13 @@ function _updateGlobalFlag() {
     function onPointerMove(ev) {
       _syncPtr(ev);
       if (!window.dzvTwoFingersDown) return;
-      if (inRootPath(ev)) _emit("dzv:twofingermove", ev);
+      _scheduleMove(ev);
       _hardStop(ev);
     }
 
     function onPointerUpCancel(ev) {
       const wasTwo = window.dzvTwoFingersDown;
+      _cancelPendingMove();
       _syncPtr(ev);
       if (!wasTwo) return;
       if (inRootPath(ev)) _emit("dzv:twofingerend", ev);
@@ -4675,10 +4713,9 @@ function _updateGlobalFlag() {
     document.addEventListener("pointerup", onPointerUpCancel, { capture: true, passive: false });
     document.addEventListener("pointercancel", onPointerUpCancel, { capture: true, passive: false });
 
-    // ---- Gate everything else while 2 fingers are down (CAPTURE) ----
+    // ---- Gate everything else while 2 fingers are down OR too_soon (CAPTURE) ----
     function gateOther(ev) {
-      //if (!window.dzvTwoFingersDown) return;
-	  if (!(window.dzvTwoFingersDown || (window.dzv && window.dzv.too_soon))) return;
+      if (!(window.dzvTwoFingersDown || (window.dzv && window.dzv.too_soon))) return;
       _hardStop(ev);
     }
 
@@ -4702,6 +4739,8 @@ function _updateGlobalFlag() {
 
       ptrMap.clear();
       twoPtrIds = [null, null];
+
+      _cancelPendingMove();
     }
 
     window.addEventListener("blur", hardReset, { passive: true });
@@ -4727,8 +4766,6 @@ function _updateGlobalFlag() {
 
   window.dzvInstallTwoFingerBlocker = dzvInstallTwoFingerBlocker;
 })();
-
-
 
 
 
