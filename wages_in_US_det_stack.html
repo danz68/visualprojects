@@ -4411,6 +4411,7 @@ window.dzv.ypanpx = 0.0;
 
 
 
+
 const ref_vals = [0, 0, 0, 0];
 function applyScrollScaleClippedPercent(ref_chart, ref_axis, clip_chart, clip_axis) {
   const sx = Math.max(1, +window.dzv.xscale || 1);
@@ -20489,7 +20490,7 @@ function applyLayout(items) {
     overlayDiv.style.position = "absolute";
     overlayDiv.style.left = "0px";
     overlayDiv.style.top = "0px";
-    overlayDiv.style.pointerEvents = "auto";  // we keep this, but we forward events when needed
+    overlayDiv.style.pointerEvents = "auto";
     overlayDiv.style.userSelect = "none";
     overlayDiv.style.touchAction = "manipulation";
     overlayDiv.style.zIndex = String(cfg.zIndex == null ? 30 : cfg.zIndex);
@@ -20498,7 +20499,7 @@ function applyLayout(items) {
     hostEl.appendChild(overlayDiv);
 
     const allowedSet = new Set([
-	"corner_buttons",
+      "corner_buttons",
       "Y_UpPan",
       "Y_DnPan",
       "X_UpZoom",
@@ -20521,14 +20522,15 @@ function applyLayout(items) {
       destroyed: false,
       _rafId: 0,
       _forwarding: false,
-      _lastMoveFwd: 0
+      _lastMoveFwd: 0,
+      _onBaseSvgWheel: null,
     };
 
     function positionNow() {
       const p = _svgPointToHostPx(state.baseSvgEl, state.hostEl, state.anchorLB.x, state.anchorLB.y);
       const sz = _measureInjectedSvgPx(state.overlayDiv);
       state.overlayDiv.style.left = p.x + "px";
-      state.overlayDiv.style.top = (p.y - sz.h) + "px"; // left-bottom anchor
+      state.overlayDiv.style.top = (p.y - sz.h) + "px";
     }
 
     function schedule() {
@@ -20540,10 +20542,8 @@ function applyLayout(items) {
       });
     }
 
-    // Initial
     schedule();
 
-    // Keep position stable on viewport changes (CTM changes)
     function onWinChange() { schedule(); }
     window.addEventListener("resize", onWinChange, { passive: true });
     window.addEventListener("scroll", onWinChange, { passive: true, capture: true });
@@ -20574,7 +20574,6 @@ function applyLayout(items) {
       });
     }
 
-    // Resolve what the overlay is actually "over" inside its own SVG, even if pointer capture makes ev.target be overlayDiv.
     function _overlayTopElementAt(ev) {
       try {
         const lst = document.elementsFromPoint(ev.clientX, ev.clientY);
@@ -20593,7 +20592,6 @@ function applyLayout(items) {
       if (!target) return;
       const type = typeOverride || ev.type;
 
-      // Prefer PointerEvent to preserve pointerId, etc.
       let e2 = null;
       try {
         e2 = new PointerEvent(type, {
@@ -20635,15 +20633,12 @@ function applyLayout(items) {
       target.dispatchEvent(e2);
     }
 
-    // 1) Only allowed controls are hittable in the injected SVG
     function _setupOverlayHitTest() {
       const s = _getInjectedSvg(overlayDiv);
       if (!s) return;
 
-      // everything inside SVG is transparent by default
       s.style.pointerEvents = "none";
 
-      // allowed groups are interactive and show finger cursor
       for (const id of allowedSet) {
         const g = s.querySelector(`#${CSS.escape(id)}`);
         if (!g) continue;
@@ -20659,138 +20654,115 @@ function applyLayout(items) {
     }
     _setupOverlayHitTest();
 
-	// --- mobile + desktop feedback: layer1 lift + tapped control highlight -------
-	(function () {
-	  const BASE_LAYER_OP  = 0.5;
-	  const HOVER_LAYER_OP = 1.0;
-	  const FLASH_MS       = 400;
-	  const OTHER_DIM_OP   = 0.55; // during flash only
+    // --- mobile + desktop feedback: layer1 lift + tapped control highlight -------
+    (function () {
+      const BASE_LAYER_OP  = 0.5;
+      const HOVER_LAYER_OP = 1.0;
+      const FLASH_MS       = 400;
+      const OTHER_DIM_OP   = 0.55;
 
-	  function _getSvg() { return _getInjectedSvg(overlayDiv); }
+      function _getSvg() { return _getInjectedSvg(overlayDiv); }
+      function _layer1() { const s = _getSvg(); return s ? s.querySelector("#layer1") : null; }
 
-	  function _layer1() {
-		const s = _getSvg();
-		return s ? s.querySelector("#layer1") : null;
-	  }
+      function _setLayer1(op) {
+        const l1 = _layer1();
+        if (!l1) return;
+        l1.style.opacity = String(op);
+      }
 
-	  function _setLayer1(op) {
-		const l1 = _layer1();
-		if (!l1) return;
-		l1.style.opacity = String(op);
-	  }
+      function _getGroup(id) {
+        const s = _getSvg();
+        if (!s) return null;
+        return s.querySelector(`#${CSS.escape(id)}`);
+      }
 
-	  function _getGroup(id) {
-		const s = _getSvg();
-		if (!s) return null;
-		return s.querySelector(`#${CSS.escape(id)}`);
-	  }
+      function _clearAllControlOpacities() {
+        for (const id of allowedSet) {
+          if (id === "corner_buttons") continue;
+          const g = _getGroup(id);
+          if (!g) continue;
+          g.style.opacity = "";
+        }
+      }
 
-	  function _clearAllControlOpacities() {
-		for (const id of allowedSet) {
-		  if (id === "corner_buttons") continue;
-		  const g = _getGroup(id);
-		  if (!g) continue;
-		  g.style.opacity = "";
-		}
-	  }
+      function _setControlsDuringFlash(hitId) {
+        for (const id of allowedSet) {
+          if (id === "corner_buttons") continue;
+          const g = _getGroup(id);
+          if (!g) continue;
+          g.style.opacity = (id === hitId) ? "1.0" : String(OTHER_DIM_OP);
+        }
+      }
 
-	  function _setControlsDuringFlash(hitId) {
-		for (const id of allowedSet) {
-		  if (id === "corner_buttons") continue;
-		  const g = _getGroup(id);
-		  if (!g) continue;
-		  g.style.opacity = (id === hitId) ? "1.0" : String(OTHER_DIM_OP);
-		}
-	  }
+      let _hoverMouse = false;
+      let _flashTimer = 0;
 
-	  let _hoverMouse = false;
-	  let _flashTimer = 0;
+      function _applySteadyState() { _setLayer1(_hoverMouse ? HOVER_LAYER_OP : BASE_LAYER_OP); }
 
-	  function _applySteadyState() {
-		_setLayer1(_hoverMouse ? HOVER_LAYER_OP : BASE_LAYER_OP);
-	  }
+      function _endFlash() {
+        if (_flashTimer) { clearTimeout(_flashTimer); _flashTimer = 0; }
+        _clearAllControlOpacities();
+        _applySteadyState();
+      }
 
-	  function _endFlash() {
-		if (_flashTimer) { clearTimeout(_flashTimer); _flashTimer = 0; }
-		_clearAllControlOpacities();
-		_applySteadyState();
-	  }
+      function _startFlash(hitId) {
+        if (!hitId || hitId === "corner_buttons") return;
+        if (_flashTimer) { clearTimeout(_flashTimer); _flashTimer = 0; }
+        _setLayer1(HOVER_LAYER_OP);
+        _setControlsDuringFlash(hitId);
+        _flashTimer = setTimeout(() => { _flashTimer = 0; _endFlash(); }, FLASH_MS);
+      }
 
-	  function _startFlash(hitId) {
-		if (!hitId || hitId === "corner_buttons") return;
+      overlayDiv.addEventListener("pointerenter", (ev) => {
+        if (!ev || ev.pointerType !== "mouse") return;
+        _hoverMouse = true;
+        if (!_flashTimer) _setLayer1(HOVER_LAYER_OP);
+      }, { passive: true });
 
-		if (_flashTimer) { clearTimeout(_flashTimer); _flashTimer = 0; }
+      overlayDiv.addEventListener("pointerleave", (ev) => {
+        if (!ev || ev.pointerType !== "mouse") return;
+        _hoverMouse = false;
+        if (!_flashTimer) _setLayer1(BASE_LAYER_OP);
+      }, { passive: true });
 
-		_setLayer1(HOVER_LAYER_OP);
-		_setControlsDuringFlash(hitId);
+      overlayDiv.addEventListener("pointerdown", (ev) => {
+        if (!ev) return;
+        if (ev.pointerType === "mouse") return;
+        const t = _overlayTopElementAt(ev) || ev.target;
+        const hitId = _findAllowedAncestorId(t, overlayDiv);
+        if (!hitId || hitId === "corner_buttons") return;
+        try { ev.preventDefault(); } catch (e) {}
+        _startFlash(hitId);
+      }, { passive: false });
 
-		_flashTimer = setTimeout(() => {
-		  _flashTimer = 0;
-		  _endFlash();
-		}, FLASH_MS);
-	  }
+      overlayDiv.addEventListener("touchstart", (ev) => {
+        if (!ev) return;
 
-	  // Desktop hover only
-	  overlayDiv.addEventListener("pointerenter", (ev) => {
-		if (!ev || ev.pointerType !== "mouse") return;
-		_hoverMouse = true;
-		if (!_flashTimer) _setLayer1(HOVER_LAYER_OP);
-	  }, { passive: true });
+        let hitId = null;
+        try {
+          const t0 = ev.changedTouches && ev.changedTouches[0];
+          if (t0) {
+            const lst = document.elementsFromPoint(t0.clientX, t0.clientY) || [];
+            for (let i = 0; i < lst.length; i++) {
+              const el = lst[i];
+              if (!el) continue;
+              if (el === overlayDiv) continue;
+              if (overlayDiv.contains(el)) {
+                hitId = _findAllowedAncestorId(el, overlayDiv);
+                break;
+              }
+            }
+          }
+        } catch (e) {}
 
-	  overlayDiv.addEventListener("pointerleave", (ev) => {
-		if (!ev || ev.pointerType !== "mouse") return;
-		_hoverMouse = false;
-		if (!_flashTimer) _setLayer1(BASE_LAYER_OP);
-	  }, { passive: true });
+        if (!hitId || hitId === "corner_buttons") return;
+        try { ev.preventDefault(); } catch (e) {}
+        _startFlash(hitId);
+      }, { passive: false });
 
-	  // Pointer path (Android Chrome etc). Treat any non-mouse as "touch-like".
-	  overlayDiv.addEventListener("pointerdown", (ev) => {
-		if (!ev) return;
-		if (ev.pointerType === "mouse") return;
+      _setLayer1(BASE_LAYER_OP);
+    })();
 
-		const t = _overlayTopElementAt(ev) || ev.target;
-		const hitId = _findAllowedAncestorId(t, overlayDiv);
-		if (!hitId || hitId === "corner_buttons") return;
-
-		// make it immediate and avoid synthetic click delays/scroll interactions
-		try { ev.preventDefault(); } catch (e) {}
-		_startFlash(hitId);
-	  }, { passive: false });
-
-	  // Touch fallback (iOS Safari, or when PointerEvent is unreliable)
-	  overlayDiv.addEventListener("touchstart", (ev) => {
-		if (!ev) return;
-
-		// identify the element under the finger inside the overlay SVG
-		let hitId = null;
-		try {
-		  const t0 = ev.changedTouches && ev.changedTouches[0];
-		  if (t0) {
-			const lst = document.elementsFromPoint(t0.clientX, t0.clientY) || [];
-			for (let i = 0; i < lst.length; i++) {
-			  const el = lst[i];
-			  if (!el) continue;
-			  if (el === overlayDiv) continue;
-			  if (overlayDiv.contains(el)) {
-				hitId = _findAllowedAncestorId(el, overlayDiv);
-				break;
-			  }
-			}
-		  }
-		} catch (e) {}
-
-		if (!hitId || hitId === "corner_buttons") return;
-
-		// avoid delayed click and keep it snappy
-		try { ev.preventDefault(); } catch (e) {}
-		_startFlash(hitId);
-	  }, { passive: false });
-
-	  // Initial state
-	  _setLayer1(BASE_LAYER_OP);
-	})();
-
-    // 2) Handle overlay actions (pointerdown) when clicking allowed controls
     function handleAction(ev) {
       if (state.destroyed) return;
       if (state._forwarding) return;
@@ -20804,19 +20776,18 @@ function applyLayout(items) {
       if (state.stopPropagation) ev.stopPropagation();
     }
 
-    // 3) Forward ALL pointer interactions to underlying content when not on allowed controls
     function forwardIfNotAllowed(ev) {
       if (state.destroyed) return;
       if (state._forwarding) return;
+	  if (state._gesture2Active) return;
 
       const t = _overlayTopElementAt(ev) || ev.target;
       const hitId = _findAllowedAncestorId(t, overlayDiv);
-      if (hitId) return; // let overlay handle it
+      if (hitId) return;
 
-      // throttle pointermove forwarding a bit (optional but avoids floods)
       if (ev.type === "pointermove") {
         const now = performance.now();
-        if (now - state._lastMoveFwd < 8) return; // ~125 Hz max
+        if (now - state._lastMoveFwd < 8) return;
         state._lastMoveFwd = now;
       }
 
@@ -20824,32 +20795,23 @@ function applyLayout(items) {
       if (!under || under === overlayDiv) return;
 
       state._forwarding = true;
-      try {
-        _dispatchCloneTo(under, ev);
-      } finally {
-        state._forwarding = false;
-      }
+      try { _dispatchCloneTo(under, ev); }
+      finally { state._forwarding = false; }
     }
 
-    // Overlay own action handler
     overlayDiv.addEventListener("pointerdown", handleAction, { passive: false });
 
-    // Forwarding handlers
     overlayDiv.addEventListener("pointerdown", forwardIfNotAllowed, { passive: false });
     overlayDiv.addEventListener("pointerup", forwardIfNotAllowed, { passive: false });
     overlayDiv.addEventListener("pointercancel", forwardIfNotAllowed, { passive: true });
     overlayDiv.addEventListener("pointermove", forwardIfNotAllowed, { passive: true });
 
-    // Cursor: if over allowed => pointer, else mirror underlying cursor
     function onPointerMoveCursor(ev) {
       if (state.destroyed) return;
 
       const t = _overlayTopElementAt(ev) || ev.target;
       const hitId = _findAllowedAncestorId(t, overlayDiv);
-      if (hitId) {
-        overlayDiv.style.cursor = "pointer";
-        return;
-      }
+      if (hitId) { overlayDiv.style.cursor = "pointer"; return; }
 
       const under = _withOverlayDisabled(() => {
         try { return document.elementFromPoint(ev.clientX, ev.clientY); } catch (e) { return null; }
@@ -20859,244 +20821,574 @@ function applyLayout(items) {
       try {
         const cs = getComputedStyle(under);
         overlayDiv.style.cursor = (cs && cs.cursor) ? cs.cursor : "";
-      } catch (e) {
-        overlayDiv.style.cursor = "";
-      }
+      } catch (e) { overlayDiv.style.cursor = ""; }
     }
-	
-	// Wheel router: if the pointer is over one of your control IDs, call
-//   OnZoomPan(action, delta)
-// where action ∈ {"zoomx","zoomy","panx","pany"} and delta is the raw wheel delta (normalized only by deltaMode).
-//
-// You decide what delta means inside OnZoomPan (step, factor, pixels, etc).
-
 
     overlayDiv.addEventListener("pointermove", onPointerMoveCursor, { passive: true });
     overlayDiv.addEventListener("pointerleave", () => { overlayDiv.style.cursor = ""; }, { passive: true });
+
+    function key4(a, b, c, d) {
+      return `${a}\u001F${b}\u001F${c}\u001F${d}`;
+    }
+
+    function DefaultZoomPan(action, delta) {
+      const step_scale = 0.1;
+      const step_pan = 10;
+      const max_scale = 2;
+      const max_pan = 100;
+      const eps = 0.001;
+
+      const before = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
+
+      if (action === "pany" && delta > 0 && window.dzv.ypan < (1 - eps) * max_pan) window.dzv.ypan += step_pan;
+      if (action === "pany" && delta < 0 && window.dzv.ypan > 0)                   window.dzv.ypan -= step_pan;
+
+      if (action === "panx" && delta > 0 && window.dzv.xpan < (1 - eps) * max_pan) window.dzv.xpan += step_pan;
+      if (action === "panx" && delta < 0 && window.dzv.xpan > 0)                   window.dzv.xpan -= step_pan;
+
+      if (action === "zoomy" && delta > 0 && window.dzv.yscale < (1 - eps) * max_scale) window.dzv.yscale += step_scale;
+      if (action === "zoomy" && delta < 0 && window.dzv.yscale > 1)                     window.dzv.yscale -= step_scale;
+
+      if (action === "zoomx" && delta > 0 && window.dzv.xscale < (1 - eps) * max_scale) window.dzv.xscale += step_scale;
+      if (action === "zoomx" && delta < 0 && window.dzv.xscale > 1)                     window.dzv.xscale -= step_scale;
+
+      window.dzv.xscale = Math.max(1, Math.min(max_scale, +window.dzv.xscale || 1));
+      window.dzv.yscale = Math.max(1, Math.min(max_scale, +window.dzv.yscale || 1));
+
+      window.dzv.xscale = Math.floor((window.dzv.xscale + eps * step_scale) / step_scale) * step_scale;
+      window.dzv.yscale = Math.floor((window.dzv.yscale + eps * step_scale) / step_scale) * step_scale;
+
+      window.dzv.xpan   = Math.max(0, Math.min(max_pan, +window.dzv.xpan || 0));
+      window.dzv.ypan   = Math.max(0, Math.min(max_pan, +window.dzv.ypan || 0));
+
+      window.dzv.xpan = Math.floor((window.dzv.xpan + eps * step_pan) / step_pan) * step_pan;
+      window.dzv.ypan = Math.floor((window.dzv.ypan + eps * step_pan) / step_pan) * step_pan;
+
+      if (window.dzv.xscale === 1) window.dzv.xpan = 0;
+      if (window.dzv.yscale === 1) window.dzv.ypan = 0;
+
+      if (action === "XY_Fit") {
+        window.dzv.xscale = 1.0;
+        window.dzv.yscale = 1.0;
+        window.dzv.xpan = 0.0;
+        window.dzv.ypan = 0.0;
+      }
+
+      const after = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
+
+      if (before !== after) {
+        window.dzv.zoom();
+        if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
+        if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+      }
+    }
+
+    function DefaultOnAction(action) {
+      let delta = 0;
+
+      if (action === "Y_UpPan")  { action = "pany";  delta =  1; }
+      if (action === "Y_DnPan")  { action = "pany";  delta = -1; }
+
+      if (action === "X_RtPan")  { action = "panx";  delta =  1; }
+      if (action === "X_LtPan")  { action = "panx";  delta = -1; }
+
+      if (action === "Y_UpZoom") { action = "zoomy"; delta =  1; }
+      if (action === "Y_DnZoom") { action = "zoomy"; delta = -1; }
+
+      if (action === "X_UpZoom") { action = "zoomx"; delta =  1; }
+      if (action === "X_DnZoom") { action = "zoomx"; delta = -1; }
+
+      DefaultZoomPan(action, delta);
+    }
+
+    state.onAction = DefaultOnAction;
+
+    function dzvInitWheelOnControls_UnionPairs(opts) {
+      const rootEl = opts && opts.rootEl;
+      const OnZoomPan = opts && opts.OnZoomPan;
+      const pad = (opts && opts.padPx) != null ? opts.padPx : 0;
+
+      if (!rootEl) throw new Error("dzvInitWheelOnControls_UnionPairs: missing rootEl");
+      if (typeof OnZoomPan !== "function") throw new Error("dzvInitWheelOnControls_UnionPairs: missing OnZoomPan(action, delta)");
+
+      const ID_TO_ACTION = {
+        "Y_UpPan":  "pany",
+        "Y_DnPan":  "pany",
+        "X_RtPan":  "panx",
+        "X_LtPan":  "panx",
+        "X_UpZoom": "zoomx",
+        "X_DnZoom": "zoomx",
+        "Y_UpZoom": "zoomy",
+        "Y_DnZoom": "zoomy",
+      };
+
+      const PAIRS = [
+        ["Y_UpPan",  "Y_DnPan",  "pany"],
+        ["X_RtPan",  "X_LtPan",  "panx"],
+        ["X_UpZoom", "X_DnZoom", "zoomx"],
+        ["Y_UpZoom", "Y_DnZoom", "zoomy"],
+      ];
+
+      function _wheelToPxLike(ev) {
+        let dx = ev.deltaX, dy = ev.deltaY;
+        if (ev.deltaMode === 1) { dx *= 16; dy *= 16; }
+        else if (ev.deltaMode === 2) { dx *= innerHeight; dy *= innerHeight; }
+        return { dx, dy };
+      }
+
+      function _fastIdUnderPointer(ev) {
+        const el0 = document.elementFromPoint(ev.clientX, ev.clientY);
+        if (!el0) return null;
+
+        let el = el0;
+        for (let i = 0; i < 12 && el; i++) {
+          const id = el.id || "";
+          if (id && (id in ID_TO_ACTION)) return id;
+          if (el === rootEl) break;
+          el = el.parentElement;
+        }
+        return null;
+      }
+
+      function _unionRect(r1, r2, padPx) {
+        const L = Math.min(r1.left,   r2.left)   - padPx;
+        const R = Math.max(r1.right,  r2.right)  + padPx;
+        const T = Math.min(r1.top,    r2.top)    - padPx;
+        const B = Math.max(r1.bottom, r2.bottom) + padPx;
+        return { left: L, right: R, top: T, bottom: B };
+      }
+
+      function _inRect(x, y, r) {
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      }
+
+      function _pairActionUnderPointer(ev) {
+        const x = ev.clientX, y = ev.clientY;
+
+        for (let i = 0; i < PAIRS.length; i++) {
+          const idA = PAIRS[i][0];
+          const idB = PAIRS[i][1];
+          const action = PAIRS[i][2];
+
+          const elA = document.getElementById(idA);
+          const elB = document.getElementById(idB);
+          if (!elA || !elB) continue;
+
+          const rA = elA.getBoundingClientRect();
+          const rB = elB.getBoundingClientRect();
+
+          const ru = _unionRect(rA, rB, pad);
+          if (_inRect(x, y, ru)) return action;
+        }
+        return null;
+      }
+
+      function _onWheel(ev) {
+        const id = _fastIdUnderPointer(ev);
+        if (id) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const { dy } = _wheelToPxLike(ev);
+          OnZoomPan(ID_TO_ACTION[id], -dy);
+          return;
+        }
+
+        const action = _pairActionUnderPointer(ev);
+        if (action) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const { dy } = _wheelToPxLike(ev);
+          OnZoomPan(action, -dy);
+          return;
+        }
+      }
+
+      rootEl.addEventListener("wheel", _onWheel, { passive: false });
+
+      return function dzvDisposeWheelOnControls_UnionPairs() {
+        rootEl.removeEventListener("wheel", _onWheel, { passive: false });
+      };
+    }
+
+    dzvInitWheelOnControls_UnionPairs({
+      rootEl: overlayDiv,
+      OnZoomPan: DefaultZoomPan,
+    });
+
+    // ---------------- GLOBAL WHEEL ZOOM AT CURSOR (smooth, no rounding, anchor-hold in your pan/scale model) ----------------
+
+    function _wheelToPxLike(ev) {
+      let dx = ev.deltaX, dy = ev.deltaY;
+      if (ev.deltaMode === 1) { dx *= 16; dy *= 16; }
+      else if (ev.deltaMode === 2) { dx *= innerHeight; dy *= innerHeight; }
+      return { dx, dy };
+    }
+
+    function _clientToSvgUser(svgEl, clientX, clientY) {
+      const m = svgEl.getScreenCTM && svgEl.getScreenCTM();
+      if (!m) return null;
+      try { return new DOMPoint(clientX, clientY).matrixTransform(m.inverse()); }
+      catch (e) { return null; }
+    }
+
+    function _getPatch2BBoxSafe() {
+      try {
+        const p2 = state.baseSvgEl.querySelector('g#figure_1 > g#axes_1 > g#patch_2');
+        if (!p2 || !p2.getBBox) return null;
+        const B = p2.getBBox();
+        if (!isFinite(B.x) || !isFinite(B.y) || !isFinite(B.width) || !isFinite(B.height)) return null;
+        if (!(B.width > 0) || !(B.height > 0)) return null;
+        return B;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // This matches the common "pan percent of extra range" model:
+    // visible span = W/s; left = (panPct/100) * (W - W/s)
+    // screenX (in patch-local coords) = (xLocal - left) * s
+    //
+    // It keeps the cursor point fixed in screen coords unless clamping prevents it.
+    function GlobalZoomAtCursor(cx_svg, cy_svg, delta) {
+      const max_scale = 2;
+      const max_pan = 100;
+
+      const B = _getPatch2BBoxSafe();
+      if (!B) return;
+
+      // Anchor point in patch-local coords
+      const ax = cx_svg - B.x;
+      const ay = cy_svg - B.y;
+
+      // Old state
+      const sx0 = +window.dzv.xscale || 1;
+      const sy0 = +window.dzv.yscale || 1;
+      const px0 = +window.dzv.xpan   || 0; // percent-like [0..100]
+      const py0 = +window.dzv.ypan   || 0;
+
+      // Continuous zoom factor (no rounding)
+      const step = 0.1;
+      const f = (delta > 0) ? (1 + step) : (delta < 0 ? (1 / (1 + step)) : 1);
+
+      let sx1 = sx0 * f;
+      let sy1 = sy0 * f;
+      sx1 = Math.max(1, Math.min(max_scale, sx1));
+      sy1 = Math.max(1, Math.min(max_scale, sy1));
+
+      // Patch extents
+      const W = B.width;
+      const H = B.height;
+
+      // Old left/top in patch-local coords given pan percent
+      const extraW0 = W - (W / sx0);
+      const extraH0 = H - (H / sy0);
+
+      const left0 = (extraW0 > 0) ? (px0 / 100) * extraW0 : 0;
+      const top0  = (extraH0 > 0) ? (py0 / 100) * extraH0 : 0;
+
+      // Old screen coords in patch-local pixel-space (up to uniform screen scale, cancels out)
+      const scrx0 = (ax - left0) * sx0;
+      const scry0 = (ay - top0)  * sy0;
+
+      // Solve new left/top so the same screen coords hold
+      const left1 = ax - (scrx0 / sx1);
+      const top1  = ay - (scry0 / sy1);
+
+      // Convert left/top back to pan percent for new scales
+      const extraW1 = W - (W / sx1);
+      const extraH1 = H - (H / sy1);
+
+      let px1 = 0;
+      let py1 = 0;
+
+      if (extraW1 > 0) px1 = 100 * (left1 / extraW1);
+      if (extraH1 > 0) py1 = 100 * (top1  / extraH1);
+
+      // Clamp pans
+      px1 = Math.max(0, Math.min(max_pan, px1));
+      py1 = Math.max(0, Math.min(max_pan, py1));
+
+      // If scale returns to 1, keep your rule: pan = 0
+      if (sx1 === 1) px1 = 0;
+      if (sy1 === 1) py1 = 0;
+
+      const before = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
+
+      window.dzv.xscale = sx1;
+      window.dzv.yscale = sy1;
+      window.dzv.xpan   = px1;
+      window.dzv.ypan   = py1;
+
+      const after = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
+
+      if (before !== after) {
+        window.dzv.zoom();
+        if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
+        if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+      }
+    }
+
+    function _onBaseSvgWheel(ev) {
+      if (state.destroyed) return;
+
+      // Ignore if wheel is over overlay controls area
+      try {
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        if (el && overlayDiv && overlayDiv.contains(el)) return;
+      } catch (e) {}
+
+      ev.preventDefault();
+      ev.stopPropagation();
+
+      const p = _clientToSvgUser(state.baseSvgEl, ev.clientX, ev.clientY);
+      if (!p) return;
+
+      const { dy } = _wheelToPxLike(ev);
+      const delta = -dy;
+
+      GlobalZoomAtCursor(p.x, p.y, delta);
+    }
+
+    state._onBaseSvgWheel = _onBaseSvgWheel;
+    state.baseSvgEl.addEventListener("wheel", _onBaseSvgWheel, { passive: false });
 	
-	function key4(a, b, c, d) {
-			  return `${a}\u001F${b}\u001F${c}\u001F${d}`; // \u001F = unlikely separator
-			}
-	
-	
-	function DefaultZoomPan(action, delta) {
-		// action: "zoomx"|"zoomy"|"panx"|"pany"
-		// delta: signed wheel delta (px-like)
-		// your logic here
-		//console.log(action, delta);
-		
-		const step_scale = 0.1;
-		const step_pan = 10;
-		const max_scale = 2;
-		const max_pan = 100;
-		const eps = 0.001;
-		
-
-		//if (action === "panx")
-		  //delta = -delta;
-		  
-		const before  = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
-		
-		if (action === "pany" && delta>0 && window.dzv.ypan < (1-eps) * max_pan) window.dzv.ypan += step_pan;
-		if (action === "pany" && delta<0 && window.dzv.ypan > 0)  window.dzv.ypan -= step_pan;
-
-		if (action === "panx" && delta>0 && window.dzv.xpan < (1-eps) * max_pan) window.dzv.xpan += step_pan;
-		if (action === "panx" && delta<0 && window.dzv.xpan > 0)  window.dzv.xpan -= step_pan;
-
-		if (action === "zoomy" && delta>0 && window.dzv.yscale < (1-eps) * max_scale) window.dzv.yscale += step_scale;
-		if (action === "zoomy" && delta<0 && window.dzv.yscale > 1)     window.dzv.yscale -= step_scale;
-
-		if (action === "zoomx" && delta>0 && window.dzv.xscale < (1-eps) * max_scale) window.dzv.xscale += step_scale;
-		if (action === "zoomx" && delta<0 && window.dzv.xscale > 1)     window.dzv.xscale -= step_scale;
-
-
-
-		window.dzv.xscale = Math.max(1, Math.min(max_scale, +window.dzv.xscale || 1));
-		window.dzv.yscale = Math.max(1, Math.min(max_scale, +window.dzv.yscale || 1));
-		
-		window.dzv.xscale = Math.floor((window.dzv.xscale+eps * step_scale)/step_scale)*step_scale;
-		window.dzv.yscale = Math.floor((window.dzv.yscale+eps * step_scale)/step_scale)*step_scale;
-		
-		
-		
-		window.dzv.xpan   = Math.max(0, Math.min(max_pan, +window.dzv.xpan || 0));
-		window.dzv.ypan   = Math.max(0, Math.min(max_pan, +window.dzv.ypan || 0));
-		
-		window.dzv.xpan = Math.floor((window.dzv.xpan+eps * step_pan)/step_pan)*step_pan;
-		window.dzv.ypan = Math.floor((window.dzv.ypan+eps * step_pan)/step_pan)*step_pan;
-
-		if (window.dzv.xscale === 1) window.dzv.xpan = 0;
-		if (window.dzv.yscale === 1) window.dzv.ypan = 0;
-		
-		if (action == "XY_Fit") {
-		  window.dzv.xscale = 1.0;
-		  window.dzv.yscale = 1.0;
-		  window.dzv.xpan = 0.0;
-		  window.dzv.ypan = 0.0;
-		}
-		
-
-		const after = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
-		
-		if (before !== after)
-			{
-				window.dzv.zoom();
-				if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
-				if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
-			}
-		
-	  }
-
-	
-	
-    function DefaultOnAction(action){
-  
-    let delta = 0;
-	
-    if (action == "Y_UpPan") { action = "pany"; delta = 1;} 
-    if (action == "Y_DnPan") { action = "pany"; delta = -1;} 
-
-    if (action == "X_RtPan") { action = "panx"; delta = 1;} 
-    if (action == "X_LtPan") { action = "panx"; delta = -1;} 
-	
-    if (action == "Y_UpZoom") { action = "zoomy"; delta = 1;} 
-    if (action == "Y_DnZoom") { action = "zoomy"; delta = -1;} 
-
-    if (action == "X_UpZoom") { action = "zoomx"; delta = 1;} 
-    if (action == "X_DnZoom") { action = "zoomx"; delta = -1;} 
-
-    DefaultZoomPan(action, delta);
-  };
-  
-  state.onAction = DefaultOnAction;
-  
-// Wheel router that:
-// 1) If pointer is over any of the 8 controls (or their children), triggers that control's ACTION.
-// 2) Else, if pointer is inside the UNION-RECT of a PAIR (leftmost/rightmost/topmost/bottommost),
-//    triggers that PAIR's ACTION.
-// No delta flipping. No "positive ids". Delta is wheel delta (only normalized by deltaMode).
+// Full replacement for your initPinchAndTwoFingerPan() that fixes the “pinch back” issue
+// by using an INCREMENTAL baseline while fingers stay down.
+// Key change: after each successful apply, we rebase:
+//   startDist   = dNow
+//   startCenter = cNow
+//   sx0/sy0/px0/py0 = the just-applied state
 //
-// Calls: OnZoomPan(action, delta)
-// action ∈ {"zoomx","zoomy","panx","pany"}
+// This prevents the “stuck” feeling when you hit clamp and then pinch back without lifting.
 
-function dzvInitWheelOnControls_UnionPairs(opts) {
-  const rootEl = opts && opts.rootEl;
-  const OnZoomPan = opts && opts.OnZoomPan;
-  const pad = (opts && opts.padPx) != null ? opts.padPx : 0;
+(function initPinchAndTwoFingerPan() {
+  const max_scale = 2;
+  const max_pan = 100;
 
-  if (!rootEl) throw new Error("dzvInitWheelOnControls_UnionPairs: missing rootEl");
-  if (typeof OnZoomPan !== "function") throw new Error("dzvInitWheelOnControls_UnionPairs: missing OnZoomPan(action, delta)");
+  const pointers = new Map();
+  let gActive = false;
 
-  const ID_TO_ACTION = {
-    "Y_UpPan":  "pany",
-    "Y_DnPan":  "pany",
-    "X_RtPan":  "panx",
-    "X_LtPan":  "panx",
-    "X_UpZoom": "zoomx",
-    "X_DnZoom": "zoomx",
-    "Y_UpZoom": "zoomy",
-    "Y_DnZoom": "zoomy",
+  let startDist = 0;
+  let startCenter = { x: 0, y: 0 };
+
+  let sx0 = 1, sy0 = 1, px0 = 0, py0 = 0;
+
+  function _dist(a, b) {
+    const dx = a.x - b.x, dy = a.y - b.y;
+    return Math.hypot(dx, dy);
+  }
+
+  function _center(a, b) {
+    return { x: 0.5 * (a.x + b.x), y: 0.5 * (a.y + b.y) };
+  }
+
+  function _getPatch2BBoxSafe() {
+    try {
+      const p2 = state.baseSvgEl.querySelector('g#figure_1 > g#axes_1 > g#patch_2');
+      if (!p2 || !p2.getBBox) return null;
+      const B = p2.getBBox();
+      if (!isFinite(B.x) || !isFinite(B.y) || !isFinite(B.width) || !isFinite(B.height)) return null;
+      if (!(B.width > 0) || !(B.height > 0)) return null;
+      return B;
+    } catch (e) { return null; }
+  }
+
+  function _clientToSvgUser(svgEl, clientX, clientY) {
+    const m = svgEl.getScreenCTM && svgEl.getScreenCTM();
+    if (!m) return null;
+    try { return new DOMPoint(clientX, clientY).matrixTransform(m.inverse()); }
+    catch (e) { return null; }
+  }
+
+  function _applyPanScale(sx1, sy1, px1, py1) {
+    px1 = Math.max(0, Math.min(max_pan, px1));
+    py1 = Math.max(0, Math.min(max_pan, py1));
+    if (sx1 === 1) px1 = 0;
+    if (sy1 === 1) py1 = 0;
+
+    const before = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
+
+    window.dzv.xscale = sx1;
+    window.dzv.yscale = sy1;
+    window.dzv.xpan = px1;
+    window.dzv.ypan = py1;
+
+    const after = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
+
+    if (before !== after) {
+      window.dzv.zoom();
+      if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
+      if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+      return true;
+    }
+    return false;
+  }
+
+  function _leftTopToPanPct(left, top, W, H, sx, sy) {
+    const extraW = W - (W / sx);
+    const extraH = H - (H / sy);
+    const px = (extraW > 0) ? (100 * left / extraW) : 0;
+    const py = (extraH > 0) ? (100 * top  / extraH) : 0;
+    return { px, py };
+  }
+
+  function _panPctToLeftTop(px, py, W, H, sx, sy) {
+    const extraW = W - (W / sx);
+    const extraH = H - (H / sy);
+    const left = (extraW > 0) ? (px / 100) * extraW : 0;
+    const top  = (extraH > 0) ? (py / 100) * extraH : 0;
+    return { left, top };
+  }
+
+  function _updateGesture() {
+    if (pointers.size !== 2) return;
+
+    const B = _getPatch2BBoxSafe();
+    if (!B) return;
+
+    const it = pointers.values();
+    const pA = it.next().value;
+    const pB = it.next().value;
+
+    const cNow = _center(pA, pB);
+    const dNow = Math.max(1e-6, _dist(pA, pB));
+
+    // INCREMENTAL ratio: compare to the last applied distance (startDist),
+    // then REBASE startDist to dNow after applying.
+    //
+    // If you want your custom sensitivity, keep it as a multiplier/exponent here.
+    // Your previous 0.25 factor makes zoom extremely sluggish and also distorts reversibility.
+    // If you insist on it, apply it as exponent: ratio = Math.pow(dNow/startDist, 0.25)
+    // (that preserves reversibility). Default here is linear.
+    //let ratio = dNow / Math.max(1e-6, startDist);
+	let ratio = Math.pow(dNow / Math.max(1e-6, startDist), 0.25);
+
+    // desired smooth scales (no rounding)
+    let sx1 = sx0 * ratio;
+    let sy1 = sy0 * ratio;
+    sx1 = Math.max(1, Math.min(max_scale, sx1));
+    sy1 = Math.max(1, Math.min(max_scale, sy1));
+
+    // Convert center to SVG user coords, then to patch-local anchor coords
+    const pSvg = _clientToSvgUser(state.baseSvgEl, cNow.x, cNow.y);
+    if (!pSvg) return;
+
+    const ax = pSvg.x - B.x;
+    const ay = pSvg.y - B.y;
+
+    const W = B.width, H = B.height;
+
+    // Baseline left/top from baseline pan percent
+    const baseLT = _panPctToLeftTop(px0, py0, W, H, sx0, sy0);
+    const left0 = baseLT.left;
+    const top0  = baseLT.top;
+
+    // Screen coords in patch-local space at baseline
+    const scrx0 = (ax - left0) * sx0;
+    const scry0 = (ay - top0)  * sy0;
+
+    // Solve left/top for zoom-anchor hold at new scales
+    let left1 = ax - (scrx0 / sx1);
+    let top1  = ay - (scry0 / sy1);
+
+    // Add 2-finger pan from center movement since last frame (incremental too)
+    const dxPx = cNow.x - startCenter.x;
+    const dyPx = cNow.y - startCenter.y;
+
+    left1 -= (dxPx / sx1);
+    top1  -= (dyPx / sy1);
+
+    const pan1 = _leftTopToPanPct(left1, top1, W, H, sx1, sy1);
+
+    const changed = _applyPanScale(sx1, sy1, pan1.px, pan1.py);
+
+    // REBASE ALWAYS (even if clamped and "changed" is false, we must rebase distances/center)
+    // so pinch-back works smoothly without lifting.
+    sx0 = +window.dzv.xscale || sx1;
+    sy0 = +window.dzv.yscale || sy1;
+    px0 = +window.dzv.xpan   || pan1.px;
+    py0 = +window.dzv.ypan   || pan1.py;
+
+    startDist = dNow;
+    startCenter = cNow;
+  }
+
+  function _beginGestureIfReady() {
+    if (gActive) return;
+    if (pointers.size !== 2) return;
+
+    const it = pointers.values();
+    const pA = it.next().value;
+    const pB = it.next().value;
+
+    startDist = Math.max(1e-6, _dist(pA, pB));
+    startCenter = _center(pA, pB);
+
+    sx0 = +window.dzv.xscale || 1;
+    sy0 = +window.dzv.yscale || 1;
+    px0 = +window.dzv.xpan   || 0;
+    py0 = +window.dzv.ypan   || 0;
+
+    gActive = true;
+    state._gesture2Active = true;
+  }
+
+  function _endGesture() {
+    gActive = false;
+    state._gesture2Active = false;
+  }
+
+  function onPointerDown(ev) {
+    if (!ev) return;
+    if (ev.pointerType === "mouse") return;
+
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+    try { state.baseSvgEl.setPointerCapture(ev.pointerId); } catch (e) {}
+
+    if (pointers.size === 2) {
+      try { ev.preventDefault(); } catch (e) {}
+      _beginGestureIfReady();
+      _updateGesture();
+    }
+  }
+
+  function onPointerMove(ev) {
+    if (!ev) return;
+    if (!pointers.has(ev.pointerId)) return;
+
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+    if (pointers.size === 2) {
+      try { ev.preventDefault(); } catch (e) {}
+      _beginGestureIfReady();
+      _updateGesture();
+    }
+  }
+
+  function onPointerUpOrCancel(ev) {
+    if (!ev) return;
+    if (pointers.has(ev.pointerId)) pointers.delete(ev.pointerId);
+
+    try { state.baseSvgEl.releasePointerCapture(ev.pointerId); } catch (e) {}
+
+    if (pointers.size < 2 && gActive) _endGesture();
+  }
+
+  try { state.baseSvgEl.style.touchAction = "none"; } catch (e) {}
+
+  state.baseSvgEl.addEventListener("pointerdown", onPointerDown, { passive: false });
+  state.baseSvgEl.addEventListener("pointermove", onPointerMove, { passive: false });
+  state.baseSvgEl.addEventListener("pointerup", onPointerUpOrCancel, { passive: true });
+  state.baseSvgEl.addEventListener("pointercancel", onPointerUpOrCancel, { passive: true });
+
+  state._pinchDispose = function () {
+    state.baseSvgEl.removeEventListener("pointerdown", onPointerDown, { passive: false });
+    state.baseSvgEl.removeEventListener("pointermove", onPointerMove, { passive: false });
+    state.baseSvgEl.removeEventListener("pointerup", onPointerUpOrCancel, { passive: true });
+    state.baseSvgEl.removeEventListener("pointercancel", onPointerUpOrCancel, { passive: true });
   };
-
-  // Union-pair zones that should also trigger when pointer is in-between.
-  // For each pair: [idA, idB, action]
-  const PAIRS = [
-    ["Y_UpPan",  "Y_DnPan",  "pany"],
-    ["X_RtPan",  "X_LtPan",  "panx"],
-    ["X_UpZoom", "X_DnZoom", "zoomx"],
-    ["Y_UpZoom", "Y_DnZoom", "zoomy"],
-  ];
-
-  function _wheelToPxLike(ev) {
-    let dx = ev.deltaX, dy = ev.deltaY;
-    if (ev.deltaMode === 1) { dx *= 16; dy *= 16; }
-    else if (ev.deltaMode === 2) { dx *= innerHeight; dy *= innerHeight; }
-    return { dx, dy };
-  }
-
-  function _fastIdUnderPointer(ev) {
-    const el0 = document.elementFromPoint(ev.clientX, ev.clientY);
-    if (!el0) return null;
-
-    let el = el0;
-    for (let i = 0; i < 12 && el; i++) {
-      const id = el.id || "";
-      if (id && (id in ID_TO_ACTION)) return id;
-      if (el === rootEl) break;
-      el = el.parentElement;
-    }
-    return null;
-  }
-
-  function _unionRect(r1, r2, padPx) {
-    const L = Math.min(r1.left,  r2.left)  - padPx;
-    const R = Math.max(r1.right, r2.right) + padPx;
-    const T = Math.min(r1.top,   r2.top)   - padPx;
-    const B = Math.max(r1.bottom,r2.bottom)+ padPx;
-    return { left: L, right: R, top: T, bottom: B };
-  }
-
-  function _inRect(x, y, r) {
-    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-  }
-
-  function _pairActionUnderPointer(ev) {
-    const x = ev.clientX, y = ev.clientY;
-
-    for (let i = 0; i < PAIRS.length; i++) {
-      const idA = PAIRS[i][0];
-      const idB = PAIRS[i][1];
-      const action = PAIRS[i][2];
-
-      const elA = document.getElementById(idA);
-      const elB = document.getElementById(idB);
-      if (!elA || !elB) continue;
-
-      const rA = elA.getBoundingClientRect();
-      const rB = elB.getBoundingClientRect();
-
-      const ru = _unionRect(rA, rB, pad);
-      if (_inRect(x, y, ru)) return action;
-    }
-    return null;
-  }
-
-  function _onWheel(ev) {
-    // 1) direct hit on a control id
-    const id = _fastIdUnderPointer(ev);
-    if (id) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      const { dy } = _wheelToPxLike(ev);
-      OnZoomPan(ID_TO_ACTION[id], -dy);
-      return;
-    }
-
-    // 2) union-rect hit (gap between pair)
-    const action = _pairActionUnderPointer(ev);
-    if (action) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      const { dy } = _wheelToPxLike(ev);
-      OnZoomPan(action, -dy);
-      return;
-    }
-
-    // else: do nothing; let normal page scroll happen
-  }
-  
-
-  rootEl.addEventListener("wheel", _onWheel, { passive: false });
-
-  return function dzvDisposeWheelOnControls_UnionPairs() {
-    rootEl.removeEventListener("wheel", _onWheel, { passive: false });
-  };
-}
-	dzvInitWheelOnControls_UnionPairs({
-	  rootEl: overlayDiv,
-	  OnZoomPan: DefaultZoomPan,
-	  });
-
+})();
 
     return {
       allowedSet,
@@ -21105,7 +21397,7 @@ function dzvInitWheelOnControls_UnionPairs(opts) {
       setAnchorLB(x, y) { state.anchorLB.x = +x || 0; state.anchorLB.y = +y || 0; schedule(); },
       setSVG(html) { overlayDiv.innerHTML = String(html == null ? "" : html); _setupOverlayHitTest(); schedule(); },
       repositionNow() { if (!state.destroyed) positionNow(); },
-	  DefaultZoomPan,
+      DefaultZoomPan,
       destroy() {
         if (state.destroyed) return;
         state.destroyed = true;
@@ -21118,10 +21410,16 @@ function dzvInitWheelOnControls_UnionPairs(opts) {
         overlayDiv.removeEventListener("pointermove", forwardIfNotAllowed);
         overlayDiv.removeEventListener("pointermove", onPointerMoveCursor);
 
+        if (state._onBaseSvgWheel) {
+          state.baseSvgEl.removeEventListener("wheel", state._onBaseSvgWheel, { passive: false });
+          state._onBaseSvgWheel = null;
+        }
+
         window.removeEventListener("resize", onWinChange, { passive: true });
         window.removeEventListener("scroll", onWinChange, { passive: true, capture: true });
         if (ro) ro.disconnect();
         if (overlayDiv.parentNode) overlayDiv.parentNode.removeChild(overlayDiv);
+		if (state._pinchDispose) { state._pinchDispose(); state._pinchDispose = null; }
       }
     };
   }
@@ -21130,31 +21428,27 @@ function dzvInitWheelOnControls_UnionPairs(opts) {
 })();
 
 window.dzv.zoom_controls = null;
-window.dzv.create_zoom_controls = function (how)
-{
- if (!how)
-  {
-   if (window.dzv.zoom_controls)
-     {
-	   window.dzv.zoom_controls.destroy();
-	   window.dzv.zoom_controls = null;
-	   window.dzv.xscale = 1.0;
-       window.dzv.yscale = 1.0;
-       window.dzv.xpan = 0.0;
-       window.dzv.ypan = 0.0;
-       window.dzv.zoom();
-       
-	   if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
-       if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
-	 }
-	 return;
+window.dzv.create_zoom_controls = function (how) {
+  if (!how) {
+    if (window.dzv.zoom_controls) {
+      window.dzv.zoom_controls.destroy();
+      window.dzv.zoom_controls = null;
+      window.dzv.xscale = 1.0;
+      window.dzv.yscale = 1.0;
+      window.dzv.xpan = 0.0;
+      window.dzv.ypan = 0.0;
+      window.dzv.zoom();
+
+      if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
+      if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+    }
+    return;
   }
-  
-  
-window.dzv.zoom_controls = dzvCreateSvgOverlay({
-  baseSvgEl: document.getElementById("dzv_gen"),
-  anchorLB: { x: 8, y: 479 }, // LEFT-BOTTOM in base SVG user coords
-  svgInnerHTML: `
+
+  window.dzv.zoom_controls = dzvCreateSvgOverlay({
+    baseSvgEl: document.getElementById("dzv_gen"),
+    anchorLB: { x: 8, y: 479 }, // LEFT-BOTTOM in base SVG user coords
+    svgInnerHTML: `
 <svg xmlns="http://www.w3.org/2000/svg" id="svg_zoom_pan"  width="8em" height="8em" version="1.1" viewBox="0 0 82.584 82.461">
   <path id="corner_buttons" d="M0 0v82.46h82.584l-.006-19.2H18.58V0Z" style="fill:#fafafa;stroke:none;stroke-width:0;stroke-miterlimit:0;fill-opacity:0.2"/>
   <g id="layer1" transform="translate(-21.84 -31.287)" opacity="0.5">
@@ -21215,15 +21509,13 @@ window.dzv.zoom_controls = dzvCreateSvgOverlay({
     </g>
   </g>
 </svg>
-
-  `,
-  zIndex: 9999
-});	
-
+    `,
+    zIndex: 9999
+  });
 };
-	
+
 if (window.dzv.show_zoom_controls)
-  window.dzv.create_zoom_controls(window.dzv.show_zoom_controls);	
+  window.dzv.create_zoom_controls(window.dzv.show_zoom_controls);
 	
 	    (function() {
 	        "use strict";
@@ -24079,6 +24371,136 @@ runWhenFullyLoaded(() => {
 
 </script> 
 
+
+<script>
+// Global 2-finger "kill switch" that blocks ALL your scattered handlers
+// while 2 fingers are down, without touching any existing code.
+//
+// Place this once, anywhere after the DOM exists (end of your main JS is fine).
+// Call: window.dzvInstallTwoFingerBlocker({ rootEl: document.getElementById("dzv_gen") });
+
+// Global 2-finger "kill switch" that blocks ALL your scattered handlers
+// ONLY while 2 fingers are down, and reliably turns OFF on finger lift.
+//
+// Place once, after DOM exists (end of HTML or last script).
+// Install: window.dzvUninstallTwoFingerBlocker = dzvInstallTwoFingerBlocker({ rootEl: document.getElementById("dzv_gen") });
+
+
+// Two-finger global blocker that DOES NOT kill your pinch code on rootEl.
+// It blocks almost everything during 2-finger, but ALLOWS pointer events
+// that originate inside rootEl (composedPath contains rootEl), so your
+// earlier pinch implementation can keep running.
+//
+// Install once (last script):
+// window.dzvUninstallTwoFingerBlocker = dzvInstallTwoFingerBlocker({ rootEl: document.getElementById("dzv_gen") });
+
+(function () {
+  function dzvInstallTwoFingerBlocker(opts) {
+    const rootEl = (opts && opts.rootEl) ? opts.rootEl : null;
+    if (!rootEl) throw new Error("dzvInstallTwoFingerBlocker: missing rootEl");
+
+    try { rootEl.style.touchAction = "none"; } catch (e) {}
+
+    const active = new Map(); // pointerId -> pointerType
+    let blockerOn = false;
+
+    function countNonMouse() {
+      let n = 0;
+      for (const t of active.values()) if (t && t !== "mouse") n++;
+      return n;
+    }
+
+    function updateBlocker() {
+      blockerOn = (countNonMouse() >= 2);
+      // console.log("TwoFingerBlocker:", blockerOn ? "ON" : "OFF", "active:", countNonMouse());
+    }
+
+    function inRootPath(ev) {
+      try {
+        const p = ev.composedPath ? ev.composedPath() : null;
+        if (p && p.length) return p.indexOf(rootEl) >= 0;
+      } catch (e) {}
+      // fallback: best-effort containment check
+      const t = ev.target;
+      return !!(t && rootEl.contains && rootEl.contains(t));
+    }
+
+    // ---- Tracker (must always run) ----
+    function trackDown(ev) {
+      active.set(ev.pointerId, ev.pointerType || "touch");
+      updateBlocker();
+      if (blockerOn) {
+        try { rootEl.setPointerCapture(ev.pointerId); } catch (e) {}
+      }
+    }
+    function trackUp(ev) {
+      if (active.has(ev.pointerId)) active.delete(ev.pointerId);
+      updateBlocker();
+      try { rootEl.releasePointerCapture(ev.pointerId); } catch (e) {}
+    }
+
+    document.addEventListener("pointerdown", trackDown, { capture: true, passive: true });
+    document.addEventListener("pointerup", trackUp, { capture: true, passive: true });
+    document.addEventListener("pointercancel", trackUp, { capture: true, passive: true });
+
+    // ---- Blocker (capture) ----
+    function block(ev) {
+      if (!blockerOn) return;
+
+      const t = ev.type;
+
+      // Never block these, otherwise we can get stuck ON
+      if (t === "pointerup" || t === "pointercancel") return;
+
+      // Allow pointer events inside rootEl so your pinch code can run
+      // (pointerdown/move on the SVG/inside it).
+      if (t === "pointerdown" || t === "pointermove") {
+        if (inRootPath(ev)) return;
+      }
+
+      // Block everything else
+      try { ev.preventDefault(); } catch (e) {}
+      try { ev.stopPropagation(); } catch (e) {}
+    }
+
+    const BLOCK_EVENTS = [
+      // Pointer hover-ish / other
+      "pointermove", "pointerover", "pointerout", "pointerenter", "pointerleave",
+      "pointerdown", // will be conditionally allowed when inRootPath
+      // Mouse
+      "mousedown", "mousemove", "mouseup", "click", "dblclick", "contextmenu",
+      // Touch (Safari)
+      "touchstart", "touchmove", "touchend", "touchcancel",
+      // Wheel
+      "wheel",
+    ];
+
+    for (const t of BLOCK_EVENTS) {
+      document.addEventListener(t, block, { capture: true, passive: false });
+    }
+
+    function hardReset() { active.clear(); updateBlocker(); }
+    window.addEventListener("blur", hardReset, { passive: true });
+    document.addEventListener("visibilitychange", () => { if (document.hidden) hardReset(); }, { passive: true });
+
+    return function dzvUninstallTwoFingerBlocker() {
+      for (const t of BLOCK_EVENTS) document.removeEventListener(t, block, { capture: true });
+      document.removeEventListener("pointerdown", trackDown, { capture: true });
+      document.removeEventListener("pointerup", trackUp, { capture: true });
+      document.removeEventListener("pointercancel", trackUp, { capture: true });
+      window.removeEventListener("blur", hardReset, { passive: true });
+      active.clear();
+      blockerOn = false;
+    };
+  }
+
+  window.dzvInstallTwoFingerBlocker = dzvInstallTwoFingerBlocker;
+})();
+
+
+// Example install (do this once):
+window.dzvUninstallTwoFingerBlocker = window.dzvInstallTwoFingerBlocker({ rootEl: document.getElementById("dzv_gen") });
+</script>
 
 	<!-- ====== U.S. Wages Guide Overlay (injected) ====== -->
 	<style>
