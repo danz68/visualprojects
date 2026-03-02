@@ -4393,8 +4393,357 @@
 
 	</div>
 
+<script>
+
+// Global gate
+
+ window.dzv = window.dzv || {};
+
+let wheelBlocked = true;       // start blocked during loader
+let wheelDrainUntil = 0;       // time until which we discard backlog
+
+window.dzv.WheelBlock = function (on) {
+  wheelBlocked = !!on;
+  if (!wheelBlocked) {
+    // discard queued wheel events for a short window
+    wheelDrainUntil = performance.now() + 250; // tune: 150..500ms
+  }
+}
+
+function dzvWheelShouldDiscard() {
+  const now = performance.now();
+  return wheelBlocked || now < wheelDrainUntil;
+}
+
+// Put this EARLY (before your other wheel listeners), capture phase
+window.addEventListener("wheel", (e) => {
+  if (dzvWheelShouldDiscard()) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    return;
+  }
+  // let normal wheel handlers run
+}, { passive: false, capture: true });
+
+/* usage:
+dzvWheelBlock(true);   // during loader
+...
+dzvWheelBlock(false);  // when ready; backlog gets eaten for 250ms
+*/
+
+
+
+
+
+
+(function () {
+  function dzvInstallTwoFingerBlocker(opts) {
+    const rootEl = (opts && opts.rootEl) ? opts.rootEl : null;
+    if (!rootEl) throw new Error("dzvInstallTwoFingerBlocker: missing rootEl");
+
+    // Global flag you can read anywhere
+    window.dzvTwoFingersDown = false;
+
+    try { rootEl.style.touchAction = "none"; } catch (e) {}
+
+    // Touch tracking
+    let touchCount = 0;
+    const touchMap = new Map(); // id -> {id, clientX, clientY, pageX, pageY}
+    let twoTouchIds = [null, null];
+
+    // Pointer tracking (for browsers that do not deliver touch* reliably)
+    const ptrMap = new Map();   // pointerId -> {pointerId, pointerType, clientX, clientY, pageX, pageY}
+    let twoPtrIds = [null, null];
+
+    function inRootPath(ev) {
+      try {
+        const p = ev.composedPath ? ev.composedPath() : null;
+        if (p && p.length) return p.indexOf(rootEl) >= 0;
+      } catch (e) {}
+      const t = ev.target;
+      return !!(t && rootEl.contains && rootEl.contains(t));
+    }
+
+    function _hardStop(ev) {
+      try { ev.preventDefault(); } catch (e) {}
+      try { ev.stopImmediatePropagation(); } catch (e) {}
+      try { ev.stopPropagation(); } catch (e) {}
+    }
+
+    function _pickTwoIds(keysArr, prevPair) {
+      if (keysArr.length < 2) return [null, null];
+      const a0 = prevPair[0], a1 = prevPair[1];
+      if (a0 != null && keysArr.indexOf(a0) >= 0 && a1 != null && keysArr.indexOf(a1) >= 0) return [a0, a1];
+      return [keysArr[0], keysArr[1]];
+    }
+
+    let _tf_prev = false;
+let _tf_saved = false;
+let _tf_oldAnimating = false;
+let lp_timer = 0;
+window.dzv.too_soon = false;
+
+function _updateGlobalFlag() {
+  let nonMousePtrN = 0;
+  const nonMouseIds = [];
+  for (const [id, v] of ptrMap.entries()) {
+    if (v && v.pointerType && v.pointerType !== "mouse") {
+      nonMousePtrN++;
+      nonMouseIds.push(id);
+    }
+  }
+  twoPtrIds = _pickTwoIds(nonMouseIds, twoPtrIds);
+
+  const n = (touchCount > nonMousePtrN) ? touchCount : nonMousePtrN;
+  window.dzvTwoFingersDown = (n >= 2);
+
+  const now = !!window.dzvTwoFingersDown;
+
+  // transition OFF -> ON
+  if (now && !_tf_prev) {
+    _tf_oldAnimating = !!(window.dzv && window.dzv.animating);
+    _tf_saved = true;
+    if (window.dzv) window.dzv.animating = true;
+  }
+
+  // transition ON -> OFF
+  if (!now && _tf_prev) {
+    if (window.dzv && _tf_saved) window.dzv.animating = _tf_oldAnimating;
+    _tf_saved = false;
+  }
+
+  _tf_prev = now;
+  
+  if (lp_timer) clearTimeout(lp_timer);
+  if (window.dzvTwoFingersDown)
+   {
+    window.dzv.too_soon = true;
+	}
+  else 
+   {
+    lp_timer = setTimeout(() => {window.dzv.too_soon = false;}, 1000);
+   }
+	
+  
+}
+
+    function _syncTouch(ev) {
+      touchMap.clear();
+      let n = 0;
+      try {
+        const ts = ev.touches;
+        n = ts ? ts.length : 0;
+        if (ts && ts.length) {
+          for (let i = 0; i < ts.length; i++) {
+            const t = ts[i];
+            touchMap.set(t.identifier, {
+              id: t.identifier,
+              clientX: t.clientX, clientY: t.clientY,
+              pageX: t.pageX, pageY: t.pageY
+            });
+          }
+        }
+      } catch (e) { n = 0; }
+
+      touchCount = n;
+
+      const ids = Array.from(touchMap.keys());
+      twoTouchIds = _pickTwoIds(ids, twoTouchIds);
+
+      _updateGlobalFlag();
+    }
+
+    function _syncPtr(ev) {
+      const pt = ev.pointerType || "touch";
+      if (pt === "mouse") {
+        _updateGlobalFlag();
+        return;
+      }
+
+      if (ev.type === "pointerdown" || ev.type === "pointermove") {
+        ptrMap.set(ev.pointerId, {
+          pointerId: ev.pointerId,
+          pointerType: pt,
+          clientX: ev.clientX, clientY: ev.clientY,
+          pageX: ev.pageX, pageY: ev.pageY
+        });
+      } else if (ev.type === "pointerup" || ev.type === "pointercancel") {
+        ptrMap.delete(ev.pointerId);
+      }
+
+      _updateGlobalFlag();
+    }
+
+    function _getTwoForEmit(nativeEv) {
+      // Prefer touch if we have 2 touches
+      if (touchCount >= 2) {
+        const t0 = touchMap.get(twoTouchIds[0]);
+        const t1 = touchMap.get(twoTouchIds[1]);
+        if (t0 && t1) return { t0, t1, n: touchCount };
+      }
+
+      // Else fallback to pointer non-mouse
+      const p0 = ptrMap.get(twoPtrIds[0]);
+      const p1 = ptrMap.get(twoPtrIds[1]);
+      if (p0 && p1) {
+        const t0 = { id: p0.pointerId, clientX: p0.clientX, clientY: p0.clientY, pageX: p0.pageX, pageY: p0.pageY };
+        const t1 = { id: p1.pointerId, clientX: p1.clientX, clientY: p1.clientY, pageX: p1.pageX, pageY: p1.pageY };
+        let nonMousePtrN = 0;
+        for (const v of ptrMap.values()) if (v && v.pointerType !== "mouse") nonMousePtrN++;
+        return { t0, t1, n: nonMousePtrN };
+      }
+
+      return null;
+    }
+
+    function _emit(type, nativeEv) {
+      const two = _getTwoForEmit(nativeEv);
+      if (!two) return;
+
+      const detail = {
+        t0: two.t0,
+        t1: two.t1,
+        n: two.n,
+        cx0: two.t0.clientX, cy0: two.t0.clientY,
+        cx1: two.t1.clientX, cy1: two.t1.clientY,
+        cxm: 0.5 * (two.t0.clientX + two.t1.clientX),
+        cym: 0.5 * (two.t0.clientY + two.t1.clientY),
+        dist: Math.hypot(two.t0.clientX - two.t1.clientX, two.t0.clientY - two.t1.clientY),
+        nativeType: nativeEv ? nativeEv.type : "",
+        timeStamp: (nativeEv && typeof nativeEv.timeStamp === "number") ? nativeEv.timeStamp : performance.now()
+      };
+
+      try {
+        rootEl.dispatchEvent(new CustomEvent(type, { detail, bubbles: false, cancelable: false }));
+      } catch (e) {}
+    }
+
+    // ---- Touch handlers (CAPTURE) ----
+    function onTouchStart(ev) {
+      _syncTouch(ev);
+      if (!window.dzvTwoFingersDown) return;
+      if (inRootPath(ev)) _emit("dzv:twofingerstart", ev);
+      _hardStop(ev);
+    }
+
+    function onTouchMove(ev) {
+      _syncTouch(ev);
+      if (!window.dzvTwoFingersDown) return;
+      if (inRootPath(ev)) _emit("dzv:twofingermove", ev);
+      _hardStop(ev);
+    }
+
+    function onTouchEndCancel(ev) {
+      const wasTwo = window.dzvTwoFingersDown;
+      _syncTouch(ev);
+      if (!wasTwo) return;
+      if (inRootPath(ev)) _emit("dzv:twofingerend", ev);
+      _hardStop(ev);
+    }
+
+    document.addEventListener("touchstart", onTouchStart, { capture: true, passive: false });
+    document.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
+    document.addEventListener("touchend", onTouchEndCancel, { capture: true, passive: false });
+    document.addEventListener("touchcancel", onTouchEndCancel, { capture: true, passive: false });
+
+    // ---- Pointer handlers (CAPTURE) ----
+    function onPointerDown(ev) {
+      _syncPtr(ev);
+      if (!window.dzvTwoFingersDown) return;
+      if (inRootPath(ev)) _emit("dzv:twofingerstart", ev);
+      _hardStop(ev);
+    }
+
+    function onPointerMove(ev) {
+      _syncPtr(ev);
+      if (!window.dzvTwoFingersDown) return;
+      if (inRootPath(ev)) _emit("dzv:twofingermove", ev);
+      _hardStop(ev);
+    }
+
+    function onPointerUpCancel(ev) {
+      const wasTwo = window.dzvTwoFingersDown;
+      _syncPtr(ev);
+      if (!wasTwo) return;
+      if (inRootPath(ev)) _emit("dzv:twofingerend", ev);
+      _hardStop(ev);
+    }
+
+    document.addEventListener("pointerdown", onPointerDown, { capture: true, passive: false });
+    document.addEventListener("pointermove", onPointerMove, { capture: true, passive: false });
+    document.addEventListener("pointerup", onPointerUpCancel, { capture: true, passive: false });
+    document.addEventListener("pointercancel", onPointerUpCancel, { capture: true, passive: false });
+
+    // ---- Gate everything else while 2 fingers are down (CAPTURE) ----
+    function gateOther(ev) {
+      //if (!window.dzvTwoFingersDown) return;
+	  if (!(window.dzvTwoFingersDown || (window.dzv && window.dzv.too_soon))) return;
+      _hardStop(ev);
+    }
+
+    const OTHER_EVENTS = [
+      "contextmenu",
+      "mousedown","mousemove","mouseup","click","dblclick",
+      "wheel",
+      "gesturestart","gesturechange","gestureend",
+      "pointerover","pointerout","pointerenter","pointerleave"
+    ];
+    for (const t of OTHER_EVENTS) {
+      document.addEventListener(t, gateOther, { capture: true, passive: false });
+    }
+
+    function hardReset() {
+      window.dzvTwoFingersDown = false;
+
+      touchCount = 0;
+      touchMap.clear();
+      twoTouchIds = [null, null];
+
+      ptrMap.clear();
+      twoPtrIds = [null, null];
+    }
+
+    window.addEventListener("blur", hardReset, { passive: true });
+    document.addEventListener("visibilitychange", () => { if (document.hidden) hardReset(); }, { passive: true });
+
+    return function dzvUninstallTwoFingerBlocker() {
+      document.removeEventListener("touchstart", onTouchStart, { capture: true });
+      document.removeEventListener("touchmove", onTouchMove, { capture: true });
+      document.removeEventListener("touchend", onTouchEndCancel, { capture: true });
+      document.removeEventListener("touchcancel", onTouchEndCancel, { capture: true });
+
+      document.removeEventListener("pointerdown", onPointerDown, { capture: true });
+      document.removeEventListener("pointermove", onPointerMove, { capture: true });
+      document.removeEventListener("pointerup", onPointerUpCancel, { capture: true });
+      document.removeEventListener("pointercancel", onPointerUpCancel, { capture: true });
+
+      for (const t of OTHER_EVENTS) document.removeEventListener(t, gateOther, { capture: true });
+
+      window.removeEventListener("blur", hardReset, { passive: true });
+      hardReset();
+    };
+  }
+
+  window.dzvInstallTwoFingerBlocker = dzvInstallTwoFingerBlocker;
+})();
+
+
+
+
+
+
+// Example install (do this once):
+window.dzvUninstallTwoFingerBlocker = window.dzvInstallTwoFingerBlocker({ rootEl: document.getElementById("dzv_gen") });
+
+window.dzv.WheelBlock(true);
+
+</script>
+
+
 
 <script type = "module"	description = "API" > 
+
 window.dzv = window.dzv || {};
 window.stack_tracking = true;
 window.dzv.animating = true;
@@ -14889,7 +15238,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    });
 	    rowMetaPre.addEventListener("pointerdown", (e) => {
 	        // Only if the actual hit is inside rowBand
-			if (window.dzv.morphing || window.dzv.animating) return;
+			if (window.dzv.morphing || window.dzv.animating || window.dzv.too_soon) return;
 	        if (!rowMetaPre.contains(e.target)) return;
 	        const isPrimaryClick = (e.pointerType === "mouse") ? (e.button === 0) : true;
 	        if (!isPrimaryClick) return;
@@ -14913,7 +15262,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    });
 	    rowTitle.addEventListener("pointerdown", (e) => {
 	        // Only if the actual hit is inside rowBand
-			if (window.dzv.morphing || window.dzv.animating) return;
+			if (window.dzv.morphing || window.dzv.animating || window.dzv.too_soon) return;
 	        if (!rowTitle.contains(e.target)) return;
 	        const isPrimaryClick = (e.pointerType === "mouse") ? (e.button === 0) : true;
 	        if (!isPrimaryClick) return;
@@ -17070,7 +17419,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    }
 
 	    function showTip() {
-	        if (window.dzv.focusing || (window.dzv.animating && !window.dzv.morphing)) return;
+	        if (window.dzv.focusing ||  window.dzv.too_soon || (window.dzv.animating && !window.dzv.morphing)) return;
 	        const cs = getComputedStyle(svg);
 	        const cons = getConstraintRect();
 	        if (cons.width < cfg.tipWidth)
@@ -17798,7 +18147,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 
 	    function showForHit(hit) {
 		    if (window.dzv.morphing) return showForHitInPlace(hit);
-	        if (window.dzv.focusing  || (window.dzv.animating && !window.dzv.morphing)) return hide_force();
+	        if (window.dzv.focusing  || window.dzv.too_soon || (window.dzv.animating && !window.dzv.morphing)) return hide_force();
 	        const baseId = _getBaseIdFromHit(hit);
 	        if (!baseId) return hide();
 
@@ -20984,6 +21333,7 @@ function applyLayout(items) {
       }
 
       function _onWheel(ev) {
+	    if (window.dzv.animating) return;
         const id = _fastIdUnderPointer(ev);
         if (id) {
           ev.preventDefault();
@@ -21130,6 +21480,7 @@ function applyLayout(items) {
 
     function _onBaseSvgWheel(ev) {
       if (state.destroyed) return;
+	  if (window.dzv.animating) return;
 
       // Ignore if wheel is over overlay controls area
       try {
@@ -21376,7 +21727,9 @@ function applyLayout(items) {
   }
 
   try { state.baseSvgEl.style.touchAction = "none"; } catch (e) {}
-
+  
+  
+/*
   state.baseSvgEl.addEventListener("pointerdown", onPointerDown, { passive: false });
   state.baseSvgEl.addEventListener("pointermove", onPointerMove, { passive: false });
   state.baseSvgEl.addEventListener("pointerup", onPointerUpOrCancel, { passive: true });
@@ -21388,6 +21741,88 @@ function applyLayout(items) {
     state.baseSvgEl.removeEventListener("pointerup", onPointerUpOrCancel, { passive: true });
     state.baseSvgEl.removeEventListener("pointercancel", onPointerUpOrCancel, { passive: true });
   };
+  */
+  
+// Replace your pointer listeners with this adapter for dzv:twofinger*
+(function () {
+  const el = state.baseSvgEl;
+
+  // stable ids for the two touches inside your existing pinch code
+  const PID0 = 10101;
+  const PID1 = 10102;
+
+  function _mkPseudoPointer(d, which, type, nativeEv) {
+    const t = (which === 0) ? d.t0 : d.t1;
+    if (!t) return null;
+
+    // Minimal PointerEvent-like object your handlers typically use
+    return {
+      type,
+      pointerType: "touch",
+      pointerId: (which === 0) ? PID0 : PID1,
+      isPrimary: (which === 0),
+      clientX: t.clientX,
+      clientY: t.clientY,
+      pageX: t.pageX,
+      pageY: t.pageY,
+      buttons: 1,
+      pressure: 0.5,
+      timeStamp: (nativeEv && typeof nativeEv.timeStamp === "number") ? nativeEv.timeStamp : performance.now(),
+      // pass-through stubs
+      preventDefault: function () { try { nativeEv && nativeEv.preventDefault && nativeEv.preventDefault(); } catch (e) {} },
+      stopPropagation: function () { try { nativeEv && nativeEv.stopPropagation && nativeEv.stopPropagation(); } catch (e) {} },
+      stopImmediatePropagation: function () { try { nativeEv && nativeEv.stopImmediatePropagation && nativeEv.stopImmediatePropagation(); } catch (e) {} }
+    };
+  }
+
+  function _twoStart(ev) {
+    if (window.dzv.hide_tip) window.dzv.hide_tip();
+    if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+    if (typeof window.justHideMenu === "function") window.justHideMenu();
+  
+    const d = ev.detail || {};
+    const e0 = _mkPseudoPointer(d, 0, "pointerdown", ev);
+    const e1 = _mkPseudoPointer(d, 1, "pointerdown", ev);
+    if (e0) onPointerDown(e0);
+    if (e1) onPointerDown(e1);
+  }
+
+  function _twoMove(ev) {
+    if (window.dzv.hide_tip) window.dzv.hide_tip();
+    if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+    if (typeof window.justHideMenu === "function") window.justHideMenu();
+	
+    const d = ev.detail || {};
+    const e0 = _mkPseudoPointer(d, 0, "pointermove", ev);
+    const e1 = _mkPseudoPointer(d, 1, "pointermove", ev);
+    if (e0) onPointerMove(e0);
+    if (e1) onPointerMove(e1);
+  }
+
+  function _twoEnd(ev) {
+    if (window.dzv.hide_tip) window.dzv.hide_tip();
+    if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+    if (typeof window.justHideMenu === "function") window.justHideMenu();
+	
+    const d = ev.detail || {};
+    // End both pointers (your pinch code should release state)
+    const e0 = _mkPseudoPointer(d, 0, "pointerup", ev);
+    const e1 = _mkPseudoPointer(d, 1, "pointerup", ev);
+    if (e0) onPointerUpOrCancel(e0);
+    if (e1) onPointerUpOrCancel(e1);
+  }
+
+  el.addEventListener("dzv:twofingerstart", _twoStart, { passive: false });
+  el.addEventListener("dzv:twofingermove",  _twoMove,  { passive: false });
+  el.addEventListener("dzv:twofingerend",   _twoEnd,   { passive: true });
+
+  state._pinchDispose = function () {
+    el.removeEventListener("dzv:twofingerstart", _twoStart, { passive: false });
+    el.removeEventListener("dzv:twofingermove",  _twoMove,  { passive: false });
+    el.removeEventListener("dzv:twofingerend",   _twoEnd,   { passive: true });
+  };
+})();
+  
 })();
 
     return {
@@ -23295,7 +23730,7 @@ if (window.dzv.show_zoom_controls)
 			}
 
 	        function showMenuAt(x, y) {
-			    if (window.dzv.animating) return;
+			    if (window.dzv.animating || window.dzv.too_soon) return;
 	            if (window.dzv.hide_tip) window.dzv.hide_tip();
 	            if (window.dzv.hide_highlight) window.dzv.hide_highlight();
 	            justHideMenu();
@@ -23337,7 +23772,12 @@ if (window.dzv.show_zoom_controls)
 	                document.addEventListener("mousedown", onDocMouseDown);
 	            }
 	        }
-	        window.dzv.show_menu = showMenuAt;
+	        window.dzv.show_menu = function(x, y)
+			{
+			 if (window.dzv.animating || window.dzv.too_soon) return;
+			 showMenuAt(x,y);
+			} 
+			
 	        window.dzv.fit_menu = fitMenu;
 	        // Menu button (three vertical dots), created fully programmatically (no CSS classes).
 	        (function() {
@@ -23599,7 +24039,7 @@ btn.innerHTML = '<img src="data:image/gif;base64,'
 	            }
 	        }
 	        scaleCheckbox.addEventListener("change", function() {
-			    if (window.dzv.animating) return;
+			    if (window.dzv.animating || window.dzv.too_soon) return;
 	            const targetWarped = scaleCheckbox.checked;
 	            const isWarped = !!window.dzv.isWarped && window.dzv.isWarped();
 	            if (targetWarped !== isWarped) {
@@ -23933,7 +24373,7 @@ btn.innerHTML = '<img src="data:image/gif;base64,'
 	        clientX,
 	        clientY
 	    }) => {
-		   if (window.dzv.animating) return;
+		   if (window.dzv.animating || window.dzv.too_soon) return;
 	        // focus mode / drilldown
 	        let onaxis = false;
 	        if (axis_area) {
@@ -23986,7 +24426,7 @@ btn.innerHTML = '<img src="data:image/gif;base64,'
 	        clientY
 	    }) => {
 	        // context menu / pin / whatever
-	        if (window.dzv.show_menu) {
+	        if (window.dzv.show_menu && !window.dzv.animating && !window.dzv.too_soon) {
 			    
 			   
 	            window.dzv.context_menu = null;
@@ -24332,6 +24772,7 @@ function init_circles()
  {
      window.dzv.dzvInitCircleMorphCacheOnce();
      window.dzv.animating = false;
+	 window.dzv.WheelBlock(false);
      let btn = document.querySelector("#dzv_menu_dots_btn");
 	if (btn)
 	  {
@@ -24356,6 +24797,7 @@ runWhenFullyLoaded(() => {
    else
     {
      window.dzv.animating = false;
+	 window.dzv.WheelBlock(false);
 	 let btn = document.querySelector("#dzv_menu_dots_btn");
 	 if (btn)
 	  {
@@ -24372,135 +24814,6 @@ runWhenFullyLoaded(() => {
 </script> 
 
 
-<script>
-// Global 2-finger "kill switch" that blocks ALL your scattered handlers
-// while 2 fingers are down, without touching any existing code.
-//
-// Place this once, anywhere after the DOM exists (end of your main JS is fine).
-// Call: window.dzvInstallTwoFingerBlocker({ rootEl: document.getElementById("dzv_gen") });
-
-// Global 2-finger "kill switch" that blocks ALL your scattered handlers
-// ONLY while 2 fingers are down, and reliably turns OFF on finger lift.
-//
-// Place once, after DOM exists (end of HTML or last script).
-// Install: window.dzvUninstallTwoFingerBlocker = dzvInstallTwoFingerBlocker({ rootEl: document.getElementById("dzv_gen") });
-
-
-// Two-finger global blocker that DOES NOT kill your pinch code on rootEl.
-// It blocks almost everything during 2-finger, but ALLOWS pointer events
-// that originate inside rootEl (composedPath contains rootEl), so your
-// earlier pinch implementation can keep running.
-//
-// Install once (last script):
-// window.dzvUninstallTwoFingerBlocker = dzvInstallTwoFingerBlocker({ rootEl: document.getElementById("dzv_gen") });
-
-(function () {
-  function dzvInstallTwoFingerBlocker(opts) {
-    const rootEl = (opts && opts.rootEl) ? opts.rootEl : null;
-    if (!rootEl) throw new Error("dzvInstallTwoFingerBlocker: missing rootEl");
-
-    try { rootEl.style.touchAction = "none"; } catch (e) {}
-
-    const active = new Map(); // pointerId -> pointerType
-    let blockerOn = false;
-
-    function countNonMouse() {
-      let n = 0;
-      for (const t of active.values()) if (t && t !== "mouse") n++;
-      return n;
-    }
-
-    function updateBlocker() {
-      blockerOn = (countNonMouse() >= 2);
-      // console.log("TwoFingerBlocker:", blockerOn ? "ON" : "OFF", "active:", countNonMouse());
-    }
-
-    function inRootPath(ev) {
-      try {
-        const p = ev.composedPath ? ev.composedPath() : null;
-        if (p && p.length) return p.indexOf(rootEl) >= 0;
-      } catch (e) {}
-      // fallback: best-effort containment check
-      const t = ev.target;
-      return !!(t && rootEl.contains && rootEl.contains(t));
-    }
-
-    // ---- Tracker (must always run) ----
-    function trackDown(ev) {
-      active.set(ev.pointerId, ev.pointerType || "touch");
-      updateBlocker();
-      if (blockerOn) {
-        try { rootEl.setPointerCapture(ev.pointerId); } catch (e) {}
-      }
-    }
-    function trackUp(ev) {
-      if (active.has(ev.pointerId)) active.delete(ev.pointerId);
-      updateBlocker();
-      try { rootEl.releasePointerCapture(ev.pointerId); } catch (e) {}
-    }
-
-    document.addEventListener("pointerdown", trackDown, { capture: true, passive: true });
-    document.addEventListener("pointerup", trackUp, { capture: true, passive: true });
-    document.addEventListener("pointercancel", trackUp, { capture: true, passive: true });
-
-    // ---- Blocker (capture) ----
-    function block(ev) {
-      if (!blockerOn) return;
-
-      const t = ev.type;
-
-      // Never block these, otherwise we can get stuck ON
-      if (t === "pointerup" || t === "pointercancel") return;
-
-      // Allow pointer events inside rootEl so your pinch code can run
-      // (pointerdown/move on the SVG/inside it).
-      if (t === "pointerdown" || t === "pointermove") {
-        if (inRootPath(ev)) return;
-      }
-
-      // Block everything else
-      try { ev.preventDefault(); } catch (e) {}
-      try { ev.stopPropagation(); } catch (e) {}
-    }
-
-    const BLOCK_EVENTS = [
-      // Pointer hover-ish / other
-      "pointermove", "pointerover", "pointerout", "pointerenter", "pointerleave",
-      "pointerdown", // will be conditionally allowed when inRootPath
-      // Mouse
-      "mousedown", "mousemove", "mouseup", "click", "dblclick", "contextmenu",
-      // Touch (Safari)
-      "touchstart", "touchmove", "touchend", "touchcancel",
-      // Wheel
-      "wheel",
-    ];
-
-    for (const t of BLOCK_EVENTS) {
-      document.addEventListener(t, block, { capture: true, passive: false });
-    }
-
-    function hardReset() { active.clear(); updateBlocker(); }
-    window.addEventListener("blur", hardReset, { passive: true });
-    document.addEventListener("visibilitychange", () => { if (document.hidden) hardReset(); }, { passive: true });
-
-    return function dzvUninstallTwoFingerBlocker() {
-      for (const t of BLOCK_EVENTS) document.removeEventListener(t, block, { capture: true });
-      document.removeEventListener("pointerdown", trackDown, { capture: true });
-      document.removeEventListener("pointerup", trackUp, { capture: true });
-      document.removeEventListener("pointercancel", trackUp, { capture: true });
-      window.removeEventListener("blur", hardReset, { passive: true });
-      active.clear();
-      blockerOn = false;
-    };
-  }
-
-  window.dzvInstallTwoFingerBlocker = dzvInstallTwoFingerBlocker;
-})();
-
-
-// Example install (do this once):
-window.dzvUninstallTwoFingerBlocker = window.dzvInstallTwoFingerBlocker({ rootEl: document.getElementById("dzv_gen") });
-</script>
 
 	<!-- ====== U.S. Wages Guide Overlay (injected) ====== -->
 	<style>
