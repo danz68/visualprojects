@@ -4435,8 +4435,6 @@ dzvWheelBlock(false);  // when ready; backlog gets eaten for 250ms
 
 
 
-
-
 (function () {
   function dzvInstallTwoFingerBlocker(opts) {
     const rootEl = (opts && opts.rootEl) ? opts.rootEl : null;
@@ -4615,43 +4613,50 @@ dzvWheelBlock(false);  // when ready; backlog gets eaten for 250ms
       } catch (e) {}
     }
 
-    // ---- RAF-throttled MOVE emission ----
-    let _rafMove = 0;
-    let _pendingMove = false;
-    let _pendingMoveNativeEv = null;
-    let _pendingMoveInRoot = false;
+    // ---- 2xRAF-throttled MOVE emission ----
+    // Goal: collapse many fast moves into 1 emit per frame, but with an extra RAF
+    // to avoid emitting a move right at a state boundary (pointerup/touchend timing).
+    let _raf1 = 0;
+    let _raf2 = 0;
+    let _moveWanted = false;
+    let _lastMoveEv = null;
+    let _lastMoveInRoot = false;
 
-    function _cancelPendingMove() {
-      _pendingMove = false;
-      _pendingMoveNativeEv = null;
-      _pendingMoveInRoot = false;
-      if (_rafMove) {
-        try { cancelAnimationFrame(_rafMove); } catch (e) {}
-        _rafMove = 0;
-      }
+    function _cancelMoveRafs() {
+      _moveWanted = false;
+      _lastMoveEv = null;
+      _lastMoveInRoot = false;
+      if (_raf1) { try { cancelAnimationFrame(_raf1); } catch (e) {} _raf1 = 0; }
+      if (_raf2) { try { cancelAnimationFrame(_raf2); } catch (e) {} _raf2 = 0; }
     }
 
-    function _scheduleMove(nativeEv) {
-      _pendingMove = true;
-      _pendingMoveNativeEv = nativeEv || null;
-      _pendingMoveInRoot = nativeEv ? inRootPath(nativeEv) : false;
+    function _scheduleMove2xRaf(ev) {
+      _moveWanted = true;
+      _lastMoveEv = ev || null;
+      _lastMoveInRoot = ev ? inRootPath(ev) : false;
 
-      if (_rafMove) return;
-      _rafMove = requestAnimationFrame(() => {
-        _rafMove = 0;
-        if (!_pendingMove) return;
+      if (_raf1) return;
+      _raf1 = requestAnimationFrame(() => {
+        _raf1 = 0;
+        if (_raf2) return;
 
-        const ev = _pendingMoveNativeEv;
-        const okInRoot = _pendingMoveInRoot;
+        _raf2 = requestAnimationFrame(() => {
+          _raf2 = 0;
 
-        _pendingMove = false;
-        _pendingMoveNativeEv = null;
-        _pendingMoveInRoot = false;
+          if (!_moveWanted) return;
 
-        if (!window.dzvTwoFingersDown) return;
-        if (!okInRoot) return;
+          const nativeEv = _lastMoveEv;
+          const okInRoot = _lastMoveInRoot;
 
-        _emit("dzv:twofingermove", ev);
+          _moveWanted = false;
+          _lastMoveEv = null;
+          _lastMoveInRoot = false;
+
+          if (!window.dzvTwoFingersDown) return;
+          if (!okInRoot) return;
+
+          _emit("dzv:twofingermove", nativeEv);
+        });
       });
     }
 
@@ -4666,13 +4671,13 @@ dzvWheelBlock(false);  // when ready; backlog gets eaten for 250ms
     function onTouchMove(ev) {
       _syncTouch(ev);
       if (!window.dzvTwoFingersDown) return;
-      _scheduleMove(ev);
+      _scheduleMove2xRaf(ev);
       _hardStop(ev);
     }
 
     function onTouchEndCancel(ev) {
       const wasTwo = window.dzvTwoFingersDown;
-      _cancelPendingMove();
+      _cancelMoveRafs();
       _syncTouch(ev);
       if (!wasTwo) return;
       if (inRootPath(ev)) _emit("dzv:twofingerend", ev);
@@ -4695,13 +4700,13 @@ dzvWheelBlock(false);  // when ready; backlog gets eaten for 250ms
     function onPointerMove(ev) {
       _syncPtr(ev);
       if (!window.dzvTwoFingersDown) return;
-      _scheduleMove(ev);
+      _scheduleMove2xRaf(ev);
       _hardStop(ev);
     }
 
     function onPointerUpCancel(ev) {
       const wasTwo = window.dzvTwoFingersDown;
-      _cancelPendingMove();
+      _cancelMoveRafs();
       _syncPtr(ev);
       if (!wasTwo) return;
       if (inRootPath(ev)) _emit("dzv:twofingerend", ev);
@@ -4740,7 +4745,7 @@ dzvWheelBlock(false);  // when ready; backlog gets eaten for 250ms
       ptrMap.clear();
       twoPtrIds = [null, null];
 
-      _cancelPendingMove();
+      _cancelMoveRafs();
     }
 
     window.addEventListener("blur", hardReset, { passive: true });
@@ -4766,8 +4771,6 @@ dzvWheelBlock(false);  // when ready; backlog gets eaten for 250ms
 
   window.dzvInstallTwoFingerBlocker = dzvInstallTwoFingerBlocker;
 })();
-
-
 
 
 // Example install (do this once):
@@ -14750,7 +14753,6 @@ const patchArea = svg0.querySelector('g#axes_1 g#patch_2 path');
 		window.dzv.dzv_set_lsc(miniSvg, miniPath, window.lgt, window.str, window.ctr);
 		
 		
-		
 	    miniGScaled.appendChild(miniPath);
 	    const miniGMarks = document.createElementNS("http://www.w3.org/2000/svg", "g");
 	    const miniGAxis = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -14805,15 +14807,15 @@ const patchArea = svg0.querySelector('g#axes_1 g#patch_2 path');
 	        "display:flex;align-items:center;justify-content:center;" +
 	        "cursor:pointer;user-select:none;z-index:100000;pointer-events:auto;visibility:hidden;";
 
-cycle_btn.innerHTML =
+		cycle_btn.innerHTML =
   
-	        '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" style="width:14px;height:14px;display:block;margin:5px auto;fill: rgba(120,120,120,0.95);">' +
-  '<path d="m 16.319512,24.914983 -4.7,-2.8 2.7,-4.8 1.7,1 -1.7,3.1 3,1.8 z m -11.3999998,-12.8 -1.7,-3.0000004 -2.9,1.7000004 -1,-1.7000004 4.7,-2.8 2.7,4.8000004 z" />'+
-  '<polygon  points="16.5,6 16.5,4 20,4 20,0.5 22,0.5 22,6 "  transform="translate(-0.7804878,1.1149826)" />'+
-  '<path d="m 14.619512,22.614983 -0.4,-2 c 4,-0.9 6.9,-4.5 6.9,-8.6 0,-0.6 -0.1,-1.3 -0.2,-1.9 l 2,-0.4000004 c 0.2,0.8000004 0.3,1.6000004 0.3,2.3000004 0,5.2 -3.6,9.6 -8.6,10.6 z"/>'+
-  '<path d="m 9.0195122,22.414983 c -4.5,-1.4 -7.6,-5.5 -7.6,-10.3 0,-1.3 0.2,-2.6000004 0.7,-3.8000004 l 1.9,0.7 c -0.4,1.0000004 -0.6,2.0000004 -0.6,3.1000004 0,3.9 2.5,7.2 6.1,8.4 z" />'+
-  '<path d="m 18.819512,6.1149826 c -1.7,-1.9 -4.1,-3 -6.6,-3 -2.1,0 -4.0999998,0.8 -5.6999998,2.1 l -1.3,-1.5 c 1.9,-1.7 4.4,-2.6 6.9999998,-2.6 3.1,0 6,1.3 8.1,3.6 z"/>'+
-	        '</svg>';
+	      '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" style="width:14px;height:14px;display:block;margin:5px auto;fill: rgba(120,120,120,0.95);">' +
+		  '<path d="m 16.319512,24.914983 -4.7,-2.8 2.7,-4.8 1.7,1 -1.7,3.1 3,1.8 z m -11.3999998,-12.8 -1.7,-3.0000004 -2.9,1.7000004 -1,-1.7000004 4.7,-2.8 2.7,4.8000004 z" />'+
+		  '<polygon  points="16.5,6 16.5,4 20,4 20,0.5 22,0.5 22,6 "  transform="translate(-0.7804878,1.1149826)" />'+
+		  '<path d="m 14.619512,22.614983 -0.4,-2 c 4,-0.9 6.9,-4.5 6.9,-8.6 0,-0.6 -0.1,-1.3 -0.2,-1.9 l 2,-0.4000004 c 0.2,0.8000004 0.3,1.6000004 0.3,2.3000004 0,5.2 -3.6,9.6 -8.6,10.6 z"/>'+
+		  '<path d="m 9.0195122,22.414983 c -4.5,-1.4 -7.6,-5.5 -7.6,-10.3 0,-1.3 0.2,-2.6000004 0.7,-3.8000004 l 1.9,0.7 c -0.4,1.0000004 -0.6,2.0000004 -0.6,3.1000004 0,3.9 2.5,7.2 6.1,8.4 z" />'+
+		  '<path d="m 18.819512,6.1149826 c -1.7,-1.9 -4.1,-3 -6.6,-3 -2.1,0 -4.0999998,0.8 -5.6999998,2.1 l -1.3,-1.5 c 1.9,-1.7 4.4,-2.6 6.9999998,-2.6 3.1,0 6,1.3 8.1,3.6 z"/>'+
+	      '</svg>';
 
 
 	    const miniDefs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
