@@ -13491,6 +13491,184 @@ function mapYThroughFocusWrapper(svg, y_svg_unfocused) {
     pt.y = y_svg_unfocused;
     return pt.matrixTransform(A).y;
 }
+
+function mapYThroughFocusWrapperOwner(svg, y_svg_unfocused, refElForY /* g that owns y's coord space */) {
+  const w = svg.querySelector('g#dzv-focus-wrapper');
+  if (!w) return y_svg_unfocused;
+
+  const ref = refElForY || svg;
+
+  const W = (w.getCTM && w.getCTM()) ? w.getCTM() : null;       // wrapper -> viewport
+  const S = (ref.getCTM && ref.getCTM()) ? ref.getCTM() : null; // (Y's coord space) -> viewport
+  if (!W || !S) return y_svg_unfocused;
+
+  // wrapper -> (Y's coord space)
+  let A;
+  try { A = S.inverse().multiply(W); }
+  catch (e) { return y_svg_unfocused; }
+
+  const pt = svg.createSVGPoint();
+  pt.x = 0;
+  pt.y = y_svg_unfocused;
+
+  return pt.matrixTransform(A).y;
+}
+
+// Map a point (x,y) expressed in `srcEl` user units into `dstEl` user units.
+function mapPointBetween(svg, srcEl, dstEl, x, y) {
+  const p = svg.createSVGPoint();
+  p.x = x; p.y = y;
+
+  const Msrc = srcEl.getScreenCTM && srcEl.getScreenCTM();
+  const Mdst = dstEl.getScreenCTM && dstEl.getScreenCTM();
+  if (!Msrc || !Mdst) return { x, y };
+
+  const ps = p.matrixTransform(Msrc);          // -> screen
+  const q  = ps.matrixTransform(Mdst.inverse()); // -> dst user
+  return { x: q.x, y: q.y };
+}
+
+// Your original intent: given an unfocused y in wrapper space,
+// return the corresponding y in label space (or SVG root space), compensating zoom.
+function mapYThroughFocusWrapper(svg, y_unfocused,  dstElForLabels=null) {
+  const w = svg.querySelector('g#dzv-focus-wrapper');
+  if (!w) return y_unfocused;
+
+  // dstElForLabels is the element that defines the coordinate system where you will set the label y.
+  const dst = dstElForLabels || svg;
+
+  const q = mapPointBetween(svg, w, dst, 0, y_unfocused);
+  return q.y;
+}
+
+function yDataToPatch2Y(patch2El, yc, ymin, ymax) {
+  const B = patch2El.getBBox(); // SVG user units
+  const t = (yc - ymin) / (ymax - ymin);
+  return B.y + (1 - t) * B.height;
+}
+function _ctmToRoot(svg, el) {
+  // el.getScreenCTM() gives el->screen; svg.getScreenCTM() gives svgUser->screen
+  // so inv(svgScreenCTM) * elScreenCTM gives elLocal -> svgUser (root user units)
+  const mEl  = el.getScreenCTM();
+  const mSvg = svg.getScreenCTM();
+  if (!mEl || !mSvg) return null;
+  return mSvg.inverse().multiply(mEl);
+}
+
+function yDataToFocusedSvgY_SAFE(svg, patch2El, focusWrapperEl, yc, ymin, ymax, xSvgForPoint = 0) {
+  try {
+    // Hard guards that otherwise throw with confusing messages
+    if (!svg || svg.nodeType !== 1) throw new Error("svg is not an element");
+    if (!patch2El || patch2El.nodeType !== 1) throw new Error("patch2El is not an element");
+    if (!focusWrapperEl || focusWrapperEl.nodeType !== 1) throw new Error("focusWrapperEl is not an element");
+
+    // getBBox() throws if element is not an SVGGraphicsElement or is in a bad state
+    const B = patch2El.getBBox();
+    const den = (ymax - ymin);
+    if (!isFinite(den) || den === 0) throw new Error("bad ymin/ymax (zero or non-finite range)");
+
+    const t = (yc - ymin) / den;
+    const yPatch = B.y + (1 - t) * B.height;
+
+    const mEl  = focusWrapperEl.getScreenCTM && focusWrapperEl.getScreenCTM();
+    const mSvg = svg.getScreenCTM && svg.getScreenCTM();
+
+    // These can be null if not in DOM, display:none, not rendered yet, etc.
+    if (!mEl || !mSvg) return yPatch;
+
+    // inverse() throws if matrix is not invertible (scale=0, NaNs, etc.)
+    const M = mSvg.inverse().multiply(mEl);
+
+    const p = new DOMPoint(xSvgForPoint, yPatch).matrixTransform(M);
+    return p.y;
+  } catch (e) {
+    console.error("yDataToFocusedSvgY_SAFE failed:", e, {
+      svg, patch2El, focusWrapperEl,
+      yc, ymin, ymax, xSvgForPoint
+    });
+    // fallback: unfocused mapping (still keeps app alive)
+    try {
+      const B = patch2El && patch2El.getBBox ? patch2El.getBBox() : null;
+      if (!B) return NaN;
+      const den = (ymax - ymin);
+      if (!isFinite(den) || den === 0) return NaN;
+      const t = (yc - ymin) / den;
+      return B.y + (1 - t) * B.height;
+    } catch (_) {
+      return NaN;
+    }
+  }
+}
+
+function xDataToPatch2X(patch2El, xc, xmin, xmax) {
+  const B = patch2El.getBBox(); // SVG user units
+  const den = (xmax - xmin);
+  if (!isFinite(den) || den === 0) return NaN;
+  const t = (xc - xmin) / den;
+  return B.x + t * B.width;
+}
+
+function xyDataToFocusedSvgXY_SAFE(svg, patch2El, focusWrapperEl, xc, yc, xmin, xmax, ymin, ymax) {
+  try {
+    if (!svg || svg.nodeType !== 1) throw new Error("svg is not an element");
+    if (!patch2El || patch2El.nodeType !== 1) throw new Error("patch2El is not an element");
+    if (!focusWrapperEl || focusWrapperEl.nodeType !== 1) throw new Error("focusWrapperEl is not an element");
+
+    const B = patch2El.getBBox();
+
+    const denX = (xmax - xmin);
+    const denY = (ymax - ymin);
+    if (!isFinite(denX) || denX === 0) throw new Error("bad xmin/xmax");
+    if (!isFinite(denY) || denY === 0) throw new Error("bad ymin/ymax");
+
+    // Matplotlib x: left->right, SVG x: left->right
+    const tx = (xc - xmin) / denX;
+    const xPatch = B.x + tx * B.width;
+
+    // Matplotlib y: bottom->top, SVG y: top->bottom (flip)
+    const ty = (yc - ymin) / denY;
+    const yPatch = B.y + (1 - ty) * B.height;
+
+    const mEl  = focusWrapperEl.getScreenCTM && focusWrapperEl.getScreenCTM();
+    const mSvg = svg.getScreenCTM && svg.getScreenCTM();
+    if (!mEl || !mSvg) return { x: xPatch, y: yPatch };
+
+    const M = mSvg.inverse().multiply(mEl);
+    const p = new DOMPoint(xPatch, yPatch).matrixTransform(M);
+    return { x: p.x, y: p.y };
+  } catch (e) {
+    console.error("xyDataToFocusedSvgXY_SAFE failed:", e, {
+      svg, patch2El, focusWrapperEl, xc, yc, xmin, xmax, ymin, ymax
+    });
+
+    // fallback to unfocused patch mapping
+    try {
+      const B = patch2El && patch2El.getBBox ? patch2El.getBBox() : null;
+      if (!B) return { x: NaN, y: NaN };
+
+      const denX = (xmax - xmin);
+      const denY = (ymax - ymin);
+      if (!isFinite(denX) || denX === 0 || !isFinite(denY) || denY === 0) return { x: NaN, y: NaN };
+
+      const tx = (xc - xmin) / denX;
+      const ty = (yc - ymin) / denY;
+
+      return {
+        x: B.x + tx * B.width,
+        y: B.y + (1 - ty) * B.height
+      };
+    } catch (_) {
+      return { x: NaN, y: NaN };
+    }
+  }
+}
+
+
+const svg0 = document.getElementById("dzv_gen");
+const yTop = parseFloat(svg0.getAttribute("ymin"));
+const yBot = parseFloat(svg0.getAttribute("ymax"));
+
+const patchArea = svg0.querySelector('g#axes_1 g#patch_2 path');
 		
 
 	    function fitMoveIntoPlot(tb, plot, padx, pady) {
@@ -13546,7 +13724,10 @@ function mapYThroughFocusWrapper(svg, y_svg_unfocused) {
 	    
 
 
-	    function tryPlaceOne(state, rec, items, plot, placedBoxes, mode, ss, prect, prect2, kx, ky) {
+	    function tryPlaceOne(state, rec, items, plot, placedBoxes, mode, ss, prect, prect2, ploti2) {
+		    let focus_wrapper;
+			if (mode === "focus") 
+					focus_wrapper = svg0.querySelector('#dzv-focus-wrapper');
 	        const v = rec.v;
 	        const t = rec.t;
 	        let midet = 0,
@@ -13566,12 +13747,37 @@ function mapYThroughFocusWrapper(svg, y_svg_unfocused) {
 	            }
 	        }
 	        const usd = pickUsdAnchor(v);
+			const usd_start = v.vstart;
+			const usd_end = v.vend;
+			
 
 	        let x0 = usdToX_current(usd, state.view, plot, state.dzv);
+			
+			
 	        const vio = state.svg.querySelector(v.select_meta_string);
 	        const y_svg_unfocused = mplY_to_svgY(svg, vio, plot);
-	        let y0 = mode === "focus" ? mapYThroughFocusWrapper(svg, y_svg_unfocused):y_svg_unfocused;
+	        
+			//let y0 = mode === "focus" ? mapYThroughFocusWrapperOwner(svg, y_svg_unfocused, svg.querySelector('#patch_2')):y_svg_unfocused;
+
+			const yAttr = (vio && vio.hasAttribute("yc_stack")) ? "yc_stack" : "yc";
+	        const y_mpl = parseFloat(vio.getAttribute(yAttr));
+
 			
+			//let y0 = (mode !== "focus") ? y_svg_unfocused : yDataToFocusedSvgY_SAFE(svg, patchArea, focus_wrapper, y_mpl, yTop, yBot);
+			const leftp = xyDataToFocusedSvgXY_SAFE(svg, patchArea, (mode === "focus") ? focus_wrapper :  patchArea, 
+			                usd_start, y_mpl, state.view.usd_min, state.view.usd_max, yTop, yBot);
+			const rightp = xyDataToFocusedSvgXY_SAFE(svg, patchArea, (mode === "focus") ? focus_wrapper :  patchArea, 
+			                usd_end, y_mpl, state.view.usd_min, state.view.usd_max, yTop, yBot);
+							
+			let y0 = leftp.y;
+							
+			/*
+			let y0 = (mode !== "focus") ? 
+					yDataToFocusedSvgY_SAFE(svg, patchArea, patchArea, y_mpl, yTop, yBot) : 
+					yDataToFocusedSvgY_SAFE(svg, patchArea, focus_wrapper, y_mpl, yTop, yBot);
+					*/
+
+		
 			
 	        const scl = (mode === "focus") ? (madet - v.workers) / (madet - midet) : 0;
 	        let fs0 = (mode !== "focus") ? state.axisFontPx : (v.level <= 1 ? state.axisFontPx : state.axisFontPx - (scl ** 5) * (state.axisFontPx - state.minFont));
@@ -13613,13 +13819,21 @@ function mapYThroughFocusWrapper(svg, y_svg_unfocused) {
 	            y: y0 - dy
 	        }, ];
 	        const minFs = state.minFont;
+			
+			if (y0 - dy < ploti2.y || y0 - dy > ploti2.y + ploti2.height || leftp.x >  ploti2.x + ploti2.width || rightp.x<ploti2.x)
+			  {
+			   //console.log("gone", ploti2.y, ploti2.y+ploti2.height, y0 - dy, t.textContent);
+			  }
+			else  
 	        for (let ci = 0; ci < candidates.length; ci++) {
 	            const c = candidates[ci];
 	            t.setAttribute("text-anchor", c.anchor);
 	            let fs = fs0;
 	            let mark = setTextStyle(state, t, v, fs, ss);
+				
 	            t.setAttribute("x", String(c.x));
 	            t.setAttribute("y", String(c.y));
+				
 				window.dzvTextClampAndApplyOne(svg, t, prect, prect2, padx, pady);
 
 	            let tb;
@@ -13645,6 +13859,10 @@ function mapYThroughFocusWrapper(svg, y_svg_unfocused) {
 	            ok = true;
 	            break;
 	        }
+			
+			//if (mode==="focus" && ok)
+			  // console.log("\n\n\n",y0 - dy, t.textContent);
+			
 	        if (!ok)
 	            t.setAttribute("visibility", "hidden");
 	        return ok;
@@ -13706,7 +13924,8 @@ function mapYThroughFocusWrapper(svg, y_svg_unfocused) {
 	        
 	        const clipId = "dzv-labels-clip";
 	        ensureClipFromPatch(svg, patchPath, clipId);
-	        const layer_labels = ensureLayer(axes, "dzv-labels", clipId);
+	        //const layer_labels = ensureLayer(axes, "dzv-labels", clipId);
+			const layer_labels = ensureLayer(svg, "dzv-labels", clipId);
 	        bringLayerFront(axes, layer_labels);
 	        const model = dzv.model;
 			
@@ -13896,7 +14115,7 @@ function mapYThroughFocusWrapper(svg, y_svg_unfocused) {
 	            const v = items[i];
 	            const rec = state.rec.get(v.id);
 	            if (!rec) continue;
-	            const ok = tryPlaceOne(state, rec, items, plot, placed, mode, ss, prect, prect2, kx, ky);
+	            const ok = tryPlaceOne(state, rec, items, plot, placed, mode, ss, prect, prect2, ploti2);
 	            if (ok) {
 	                used.add(v.id);
 	                placedCount++;
@@ -20580,7 +20799,7 @@ function applyLayout(items) {
       const hitId = _findAllowedAncestorId(t, overlayDiv);
       if (!hitId) return;
 
-      if (state.onAction) state.onAction(hitId, "", ev);
+      if (state.onAction) state.onAction(hitId);
       if (state.preventDefault) ev.preventDefault();
       if (state.stopPropagation) ev.stopPropagation();
     }
@@ -20644,8 +20863,240 @@ function applyLayout(items) {
         overlayDiv.style.cursor = "";
       }
     }
+	
+	// Wheel router: if the pointer is over one of your control IDs, call
+//   OnZoomPan(action, delta)
+// where action ∈ {"zoomx","zoomy","panx","pany"} and delta is the raw wheel delta (normalized only by deltaMode).
+//
+// You decide what delta means inside OnZoomPan (step, factor, pixels, etc).
+
+
     overlayDiv.addEventListener("pointermove", onPointerMoveCursor, { passive: true });
     overlayDiv.addEventListener("pointerleave", () => { overlayDiv.style.cursor = ""; }, { passive: true });
+	
+	function key4(a, b, c, d) {
+			  return `${a}\u001F${b}\u001F${c}\u001F${d}`; // \u001F = unlikely separator
+			}
+	
+	
+	function DefaultZoomPan(action, delta) {
+		// action: "zoomx"|"zoomy"|"panx"|"pany"
+		// delta: signed wheel delta (px-like)
+		// your logic here
+		//console.log(action, delta);
+		
+		const step_scale = 0.1;
+		const step_pan = 10;
+		const max_scale = 2;
+		const max_pan = 100;
+		const eps = 0.001;
+		
+
+		//if (action === "panx")
+		  //delta = -delta;
+		  
+		const before  = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
+		
+		if (action === "pany" && delta>0 && window.dzv.ypan < (1-eps) * max_pan) window.dzv.ypan += step_pan;
+		if (action === "pany" && delta<0 && window.dzv.ypan > 0)  window.dzv.ypan -= step_pan;
+
+		if (action === "panx" && delta>0 && window.dzv.xpan < (1-eps) * max_pan) window.dzv.xpan += step_pan;
+		if (action === "panx" && delta<0 && window.dzv.xpan > 0)  window.dzv.xpan -= step_pan;
+
+		if (action === "zoomy" && delta>0 && window.dzv.yscale < (1-eps) * max_scale) window.dzv.yscale += step_scale;
+		if (action === "zoomy" && delta<0 && window.dzv.yscale > 1)     window.dzv.yscale -= step_scale;
+
+		if (action === "zoomx" && delta>0 && window.dzv.xscale < (1-eps) * max_scale) window.dzv.xscale += step_scale;
+		if (action === "zoomx" && delta<0 && window.dzv.xscale > 1)     window.dzv.xscale -= step_scale;
+
+
+
+		window.dzv.xscale = Math.max(1, Math.min(max_scale, +window.dzv.xscale || 1));
+		window.dzv.yscale = Math.max(1, Math.min(max_scale, +window.dzv.yscale || 1));
+		
+		window.dzv.xscale = Math.floor((window.dzv.xscale+eps * step_scale)/step_scale)*step_scale;
+		window.dzv.yscale = Math.floor((window.dzv.yscale+eps * step_scale)/step_scale)*step_scale;
+		
+		
+		
+		window.dzv.xpan   = Math.max(0, Math.min(max_pan, +window.dzv.xpan || 0));
+		window.dzv.ypan   = Math.max(0, Math.min(max_pan, +window.dzv.ypan || 0));
+		
+		window.dzv.xpan = Math.floor((window.dzv.xpan+eps * step_pan)/step_pan)*step_pan;
+		window.dzv.ypan = Math.floor((window.dzv.ypan+eps * step_pan)/step_pan)*step_pan;
+
+		if (window.dzv.xscale === 1) window.dzv.xpan = 0;
+		if (window.dzv.yscale === 1) window.dzv.ypan = 0;
+		
+		if (action == "XY_Fit") {
+		  window.dzv.xscale = 1.0;
+		  window.dzv.yscale = 1.0;
+		  window.dzv.xpan = 0.0;
+		  window.dzv.ypan = 0.0;
+		}
+		
+
+		const after = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
+		
+		if (before !== after)
+			{
+				window.dzv.zoom();
+				if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
+				if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+			}
+		
+	  }
+
+	
+	
+    function DefaultOnAction(action){
+  
+    let delta = 0;
+	
+    if (action == "Y_UpPan") { action = "pany"; delta = 1;} 
+    if (action == "Y_DnPan") { action = "pany"; delta = -1;} 
+
+    if (action == "X_RtPan") { action = "panx"; delta = 1;} 
+    if (action == "X_LtPan") { action = "panx"; delta = -1;} 
+	
+    if (action == "Y_UpZoom") { action = "zoomy"; delta = 1;} 
+    if (action == "Y_DnZoom") { action = "zoomy"; delta = -1;} 
+
+    if (action == "X_UpZoom") { action = "zoomx"; delta = 1;} 
+    if (action == "X_DnZoom") { action = "zoomx"; delta = -1;} 
+
+    DefaultZoomPan(action, delta);
+  };
+  
+  state.onAction = DefaultOnAction;
+  
+// Wheel router that:
+// 1) If pointer is over any of the 8 controls (or their children), triggers that control's ACTION.
+// 2) Else, if pointer is inside the UNION-RECT of a PAIR (leftmost/rightmost/topmost/bottommost),
+//    triggers that PAIR's ACTION.
+// No delta flipping. No "positive ids". Delta is wheel delta (only normalized by deltaMode).
+//
+// Calls: OnZoomPan(action, delta)
+// action ∈ {"zoomx","zoomy","panx","pany"}
+
+function dzvInitWheelOnControls_UnionPairs(opts) {
+  const rootEl = opts && opts.rootEl;
+  const OnZoomPan = opts && opts.OnZoomPan;
+  const pad = (opts && opts.padPx) != null ? opts.padPx : 0;
+
+  if (!rootEl) throw new Error("dzvInitWheelOnControls_UnionPairs: missing rootEl");
+  if (typeof OnZoomPan !== "function") throw new Error("dzvInitWheelOnControls_UnionPairs: missing OnZoomPan(action, delta)");
+
+  const ID_TO_ACTION = {
+    "Y_UpPan":  "pany",
+    "Y_DnPan":  "pany",
+    "X_RtPan":  "panx",
+    "X_LtPan":  "panx",
+    "X_UpZoom": "zoomx",
+    "X_DnZoom": "zoomx",
+    "Y_UpZoom": "zoomy",
+    "Y_DnZoom": "zoomy",
+  };
+
+  // Union-pair zones that should also trigger when pointer is in-between.
+  // For each pair: [idA, idB, action]
+  const PAIRS = [
+    ["Y_UpPan",  "Y_DnPan",  "pany"],
+    ["X_RtPan",  "X_LtPan",  "panx"],
+    ["X_UpZoom", "X_DnZoom", "zoomx"],
+    ["Y_UpZoom", "Y_DnZoom", "zoomy"],
+  ];
+
+  function _wheelToPxLike(ev) {
+    let dx = ev.deltaX, dy = ev.deltaY;
+    if (ev.deltaMode === 1) { dx *= 16; dy *= 16; }
+    else if (ev.deltaMode === 2) { dx *= innerHeight; dy *= innerHeight; }
+    return { dx, dy };
+  }
+
+  function _fastIdUnderPointer(ev) {
+    const el0 = document.elementFromPoint(ev.clientX, ev.clientY);
+    if (!el0) return null;
+
+    let el = el0;
+    for (let i = 0; i < 12 && el; i++) {
+      const id = el.id || "";
+      if (id && (id in ID_TO_ACTION)) return id;
+      if (el === rootEl) break;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function _unionRect(r1, r2, padPx) {
+    const L = Math.min(r1.left,  r2.left)  - padPx;
+    const R = Math.max(r1.right, r2.right) + padPx;
+    const T = Math.min(r1.top,   r2.top)   - padPx;
+    const B = Math.max(r1.bottom,r2.bottom)+ padPx;
+    return { left: L, right: R, top: T, bottom: B };
+  }
+
+  function _inRect(x, y, r) {
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+
+  function _pairActionUnderPointer(ev) {
+    const x = ev.clientX, y = ev.clientY;
+
+    for (let i = 0; i < PAIRS.length; i++) {
+      const idA = PAIRS[i][0];
+      const idB = PAIRS[i][1];
+      const action = PAIRS[i][2];
+
+      const elA = document.getElementById(idA);
+      const elB = document.getElementById(idB);
+      if (!elA || !elB) continue;
+
+      const rA = elA.getBoundingClientRect();
+      const rB = elB.getBoundingClientRect();
+
+      const ru = _unionRect(rA, rB, pad);
+      if (_inRect(x, y, ru)) return action;
+    }
+    return null;
+  }
+
+  function _onWheel(ev) {
+    // 1) direct hit on a control id
+    const id = _fastIdUnderPointer(ev);
+    if (id) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const { dy } = _wheelToPxLike(ev);
+      OnZoomPan(ID_TO_ACTION[id], -dy);
+      return;
+    }
+
+    // 2) union-rect hit (gap between pair)
+    const action = _pairActionUnderPointer(ev);
+    if (action) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const { dy } = _wheelToPxLike(ev);
+      OnZoomPan(action, -dy);
+      return;
+    }
+
+    // else: do nothing; let normal page scroll happen
+  }
+  
+
+  rootEl.addEventListener("wheel", _onWheel, { passive: false });
+
+  return function dzvDisposeWheelOnControls_UnionPairs() {
+    rootEl.removeEventListener("wheel", _onWheel, { passive: false });
+  };
+}
+	dzvInitWheelOnControls_UnionPairs({
+	  rootEl: overlayDiv,
+	  OnZoomPan: DefaultZoomPan,
+	  });
+
 
     return {
       allowedSet,
@@ -20654,6 +21105,7 @@ function applyLayout(items) {
       setAnchorLB(x, y) { state.anchorLB.x = +x || 0; state.anchorLB.y = +y || 0; schedule(); },
       setSVG(html) { overlayDiv.innerHTML = String(html == null ? "" : html); _setupOverlayHitTest(); schedule(); },
       repositionNow() { if (!state.destroyed) positionNow(); },
+	  DefaultZoomPan,
       destroy() {
         if (state.destroyed) return;
         state.destroyed = true;
@@ -20765,52 +21217,6 @@ window.dzv.zoom_controls = dzvCreateSvgOverlay({
 </svg>
 
   `,
-  onAction: (action, payload, ev) => {
-  
-    const step_scale = 0.1;
-	const step_pan = 10;
-	const max_scale = 2;
-	const max_pan = 100;
-	const eps = 0.001;
-	
-    if (action == "Y_UpPan" && window.dzv.ypan < (1-eps) * max_pan) window.dzv.ypan += step_pan;
-    if (action == "Y_DnPan" && window.dzv.ypan > 0)  window.dzv.ypan -= step_pan;
-
-    if (action == "X_RtPan" && window.dzv.xpan < (1-eps) * max_pan) window.dzv.xpan += step_pan;
-    if (action == "X_LtPan" && window.dzv.xpan > 0)  window.dzv.xpan -= step_pan;
-
-    if (action == "Y_UpZoom" && window.dzv.yscale < (1-eps) * max_scale) window.dzv.yscale += step_scale;
-    if (action == "Y_DnZoom" && window.dzv.yscale > 1)     window.dzv.yscale -= step_scale;
-
-    if (action == "X_UpZoom" && window.dzv.xscale < (1-eps) * max_scale) window.dzv.xscale += step_scale;
-    if (action == "X_DnZoom" && window.dzv.xscale > 1)     window.dzv.xscale -= step_scale;
-
-
-
-    window.dzv.xscale = Math.max(1, Math.min(max_scale, +window.dzv.xscale || 1));
-    window.dzv.yscale = Math.max(1, Math.min(max_scale, +window.dzv.yscale || 1));
-	
-	
-    window.dzv.xpan   = Math.max(0, Math.min(max_pan, +window.dzv.xpan || 0));
-    window.dzv.ypan   = Math.max(0, Math.min(max_pan, +window.dzv.ypan || 0));
-	
-	window.dzv.xpan = Math.floor((window.dzv.xpan+eps * step_pan)/step_pan)*step_pan;
-	window.dzv.ypan = Math.floor((window.dzv.ypan+eps * step_pan)/step_pan)*step_pan;
-
-    if (window.dzv.xscale === 1) window.dzv.xpan = 0;
-    if (window.dzv.yscale === 1) window.dzv.ypan = 0;
-
-    if (action == "XY_Fit") {
-      window.dzv.xscale = 1.0;
-      window.dzv.yscale = 1.0;
-      window.dzv.xpan = 0.0;
-      window.dzv.ypan = 0.0;
-    }
-
-    window.dzv.zoom();
-    if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
-    if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
-  },
   zIndex: 9999
 });	
 
