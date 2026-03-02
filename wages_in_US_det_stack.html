@@ -15277,7 +15277,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    });
 	    rowMetaPre.addEventListener("pointerdown", (e) => {
 	        // Only if the actual hit is inside rowBand
-			if (window.dzv.morphing || window.dzv.animating || window.dzv.too_soon) return;
+			if (window.dzv.morphing || window.dzv.animating) return;
 	        if (!rowMetaPre.contains(e.target)) return;
 	        const isPrimaryClick = (e.pointerType === "mouse") ? (e.button === 0) : true;
 	        if (!isPrimaryClick) return;
@@ -15301,7 +15301,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    });
 	    rowTitle.addEventListener("pointerdown", (e) => {
 	        // Only if the actual hit is inside rowBand
-			if (window.dzv.morphing || window.dzv.animating || window.dzv.too_soon) return;
+			if (window.dzv.morphing || window.dzv.animating ) return;
 	        if (!rowTitle.contains(e.target)) return;
 	        const isPrimaryClick = (e.pointerType === "mouse") ? (e.button === 0) : true;
 	        if (!isPrimaryClick) return;
@@ -21372,7 +21372,7 @@ function applyLayout(items) {
       }
 
       function _onWheel(ev) {
-	    if (window.dzv.animating) return;
+        if (window.dzv.animating && !window.dzv.morphing) return;
         const id = _fastIdUnderPointer(ev);
         if (id) {
           ev.preventDefault();
@@ -21519,7 +21519,7 @@ function applyLayout(items) {
 
     function _onBaseSvgWheel(ev) {
       if (state.destroyed) return;
-	  if (window.dzv.animating) return;
+	  if (window.dzv.animating && !window.dzv.morphing) return;
 
       // Ignore if wheel is over overlay controls area
       try {
