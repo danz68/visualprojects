@@ -4859,9 +4859,118 @@ function applyScrollScaleClippedPercent(ref_chart, ref_axis, clip_chart, clip_ax
     "transform",
     `translate(${-xpad} 0) translate(${ox} 0) scale(${isx} 1) translate(${-ox} 0)`
   );
+  
+  if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
+  if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 
   return { xpan, ypan, xpad, ypad, xscale: sx, yscale: sy };
 }
+
+
+
+function applyScrollScaleClippedPercentAni(ref_chart, ref_axis, clip_chart, clip_axis) {
+  // DEFERRED COMMIT (2xRAF) built-in, coalesces bursts.
+  // - Callers can keep calling this function as before.
+  // - First call in a burst schedules the commit; later calls update refs and return quickly.
+  // - The actual heavy work runs once per burst on the 2nd RAF.
+
+  // Per-function static state (no globals, no new API)
+  if (!applyScrollScaleClippedPercent._dzv) {
+    applyScrollScaleClippedPercent._dzv = {
+      pending: false,
+      tok: 0,
+      lastArgs: null
+    };
+  }
+  const S = applyScrollScaleClippedPercent._dzv;
+
+  // Always keep the latest refs (in case caller passes different nodes)
+  S.lastArgs = { ref_chart, ref_axis, clip_chart, clip_axis };
+
+  if (S.pending) {
+    return null; // commit already scheduled
+  }
+
+  S.pending = true;
+  const tok0 = ++S.tok;
+
+  requestAnimationFrame(function () {
+    if (!S.pending || tok0 !== S.tok) return;
+    requestAnimationFrame(function () {
+      if (!S.pending || tok0 !== S.tok) return;
+      S.pending = false;
+
+      const A = S.lastArgs;
+      if (!A || !A.ref_chart || !A.ref_axis || !A.clip_chart || !A.clip_axis) return;
+
+      const sx = Math.max(1, +window.dzv.xscale || 1);
+      const sy = Math.max(1, +window.dzv.yscale || 1);
+
+      const xpan = Math.max(0, Math.min(100, +window.dzv.xpan || 0));
+      const ypan = Math.max(0, Math.min(100, +window.dzv.ypan || 0));
+
+      if (ref_vals[2] === 0) {
+        const bb = A.clip_chart.querySelector("rect").getBBox();
+        if (bb) {
+          ref_vals[0] = bb.x;
+          ref_vals[1] = bb.y;
+          ref_vals[2] = bb.width;
+          ref_vals[3] = bb.height;
+        }
+      }
+
+      const ox = ref_vals[0];
+      const oy = ref_vals[1];
+      const wx = ref_vals[2];
+      const hy = ref_vals[3];
+
+      let xpad = -(xpan / 100) * (wx * (sx - 1)) / sx;
+      let ypad = -(ypan / 100) * (hy * (sy - 1)) / sy;
+
+      window.dzv.xpanpx = xpad;
+      window.dzv.ypanpx = ypad;
+
+      A.ref_chart.setAttribute(
+        "transform",
+        `translate(${ox} ${oy}) scale(${sx} ${sy}) translate(${-ox} ${-oy}) translate(${xpad} ${ypad})`
+      );
+
+      A.ref_axis.setAttribute(
+        "transform",
+        `translate(${ox} 0) scale(${sx} 1) translate(${-ox} 0) translate(${xpad} 0)`
+      );
+
+      const isx = 1 / sx;
+      const isy = 1 / sy;
+
+      A.clip_chart.setAttribute(
+        "transform",
+        `translate(${-xpad} ${-ypad}) translate(${ox} ${oy}) scale(${isx} ${isy}) translate(${-ox} ${-oy})`
+      );
+
+      A.clip_axis.setAttribute(
+        "transform",
+        `translate(${-xpad} 0) translate(${ox} 0) scale(${isx} 1) translate(${-ox} 0)`
+      );
+	  
+	  if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
+      if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+
+      // return value is inherently async now; keep side-effects as the "result"
+    });
+  });
+
+  return null;
+}
+
+// Optional: allow callers to cancel a pending commit (safe no-op if none pending)
+applyScrollScaleClippedPercent.cancelPending = function () {
+  const S = applyScrollScaleClippedPercent._dzv;
+  if (!S) return false;
+  S.pending = false;
+  S.tok++;
+  return true;
+};
 
 
 
@@ -4876,6 +4985,11 @@ window.dzv.zoom = function () {
   const axis_clip  = svg && svg.querySelector ? svg.querySelector("#pd1d08ca1bd") : null;
 
   if (!chart || !axis || !chart_clip || !axis_clip) return;
+  
+  if (window.dzv.hide_tip) window.dzv.hide_tip();
+  if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+  if (typeof window.justHideMenu === "function") window.justHideMenu();
+	  
   return applyScrollScaleClippedPercent(chart, axis, chart_clip, axis_clip);
 };
 
@@ -21265,8 +21379,7 @@ function applyLayout(items) {
 
       if (before !== after) {
         window.dzv.zoom();
-        if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
-        if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+
       }
     }
 
@@ -21424,7 +21537,8 @@ function applyLayout(items) {
       try {
         const p2 = state.baseSvgEl.querySelector('g#figure_1 > g#axes_1 > g#patch_2');
         if (!p2 || !p2.getBBox) return null;
-        const B = p2.getBBox();
+		
+        const B = DZV.getPlotBox(p2);//p2.getBBox();
         if (!isFinite(B.x) || !isFinite(B.y) || !isFinite(B.width) || !isFinite(B.height)) return null;
         if (!(B.width > 0) || !(B.height > 0)) return null;
         return B;
@@ -21512,8 +21626,7 @@ function applyLayout(items) {
 
       if (before !== after) {
         window.dzv.zoom();
-        if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
-        if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+
       }
     }
 
@@ -21577,7 +21690,7 @@ function applyLayout(items) {
     try {
       const p2 = state.baseSvgEl.querySelector('g#figure_1 > g#axes_1 > g#patch_2');
       if (!p2 || !p2.getBBox) return null;
-      const B = p2.getBBox();
+      const B = DZV.getPlotBox(p2);//p2.getBBox();
       if (!isFinite(B.x) || !isFinite(B.y) || !isFinite(B.width) || !isFinite(B.height)) return null;
       if (!(B.width > 0) || !(B.height > 0)) return null;
       return B;
@@ -21608,8 +21721,7 @@ function applyLayout(items) {
 
     if (before !== after) {
       window.dzv.zoom();
-      if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
-      if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+
       return true;
     }
     return false;
@@ -21768,21 +21880,7 @@ function applyLayout(items) {
 
   try { state.baseSvgEl.style.touchAction = "none"; } catch (e) {}
   
-  
-/*
-  state.baseSvgEl.addEventListener("pointerdown", onPointerDown, { passive: false });
-  state.baseSvgEl.addEventListener("pointermove", onPointerMove, { passive: false });
-  state.baseSvgEl.addEventListener("pointerup", onPointerUpOrCancel, { passive: true });
-  state.baseSvgEl.addEventListener("pointercancel", onPointerUpOrCancel, { passive: true });
 
-  state._pinchDispose = function () {
-    state.baseSvgEl.removeEventListener("pointerdown", onPointerDown, { passive: false });
-    state.baseSvgEl.removeEventListener("pointermove", onPointerMove, { passive: false });
-    state.baseSvgEl.removeEventListener("pointerup", onPointerUpOrCancel, { passive: true });
-    state.baseSvgEl.removeEventListener("pointercancel", onPointerUpOrCancel, { passive: true });
-  };
-  */
-  
 // Replace your pointer listeners with this adapter for dzv:twofinger*
 (function () {
   const el = state.baseSvgEl;
@@ -21870,22 +21968,18 @@ function applyLayout(items) {
   const OWNER = "dzv-mouse-pan";
   const max_pan = 100;
 
-  // If you want dblclick to survive, we must NOT suppress click generation.
-  // Solution: "lazy pan": only start real panning (capture + preventDefault + animating)
-  // after the pointer moved more than a tiny threshold.
+  // Keep dblclick alive: don't capture / preventDefault until we actually drag.
   const DRAG_THRESHOLD_PX = 4;
 
   // Cursor styling
-  const CURSOR_IDLE = "";         // keep whatever you already have
-  const CURSOR_ARMED = "grab";    // after pointerdown but before drag threshold
-  const CURSOR_DRAG = "grabbing"; // while actually panning
+  const CURSOR_ARMED = "grab";      // after pointerdown, before drag threshold
+  const CURSOR_DRAG  = "grabbing";  // while dragging
 
   if (!window.dzv) return;
 
   const baseSvgEl =
     (typeof state !== "undefined" && state && state.baseSvgEl) ? state.baseSvgEl :
     document.getElementById("dzv_gen");
-
   if (!baseSvgEl) return;
 
   // Shared cooperative lock (safe if already installed)
@@ -21920,7 +22014,7 @@ function applyLayout(items) {
   function _getPatch2BBoxSafe(p2) {
     try {
       if (!p2 || !p2.getBBox) return null;
-      const B = p2.getBBox();
+      const B = DZV.getPlotBox(p2);//p2.getBBox();
       if (!isFinite(B.x) || !isFinite(B.y) || !isFinite(B.width) || !isFinite(B.height)) return null;
       if (!(B.width > 0) || !(B.height > 0)) return null;
       return B;
@@ -21951,8 +22045,7 @@ function applyLayout(items) {
 
     if (before !== after) {
       window.dzv.zoom();
-      if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
-      if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+
       return true;
     }
     return false;
@@ -21981,9 +22074,7 @@ function applyLayout(items) {
     for (let i = 0; i < list.length; i++) {
       const el = list[i];
       if (!el || el.nodeType !== 1) continue;
-
       if (baseSvgEl && baseSvgEl.contains && !baseSvgEl.contains(el)) continue;
-
       if (el.matches && el.matches(sel)) return true;
       if (el.closest && el.closest(sel)) return true;
     }
@@ -21992,22 +22083,16 @@ function applyLayout(items) {
 
   function _eligible(ev) {
     if (!ev) return false;
-
     if (ev.pointerType !== "mouse") return false;
-    if (ev.button !== 0) return false; // left
-
+    if (ev.button !== 0) return false;
+	if (window.dzv.xscale * window.dzv.xscale <1.0001) return false;
     if (!ev.ctrlKey && _hasForbiddenUnderCursor(ev)) return false;
-	
-	if (window.dzv.xscale * window.dzv.yscale < 1.0001) return false;
-	
-
     if (ev.metaKey || ev.altKey) return false;
     if (window.dzv.animating) return false;
-
     return true;
   }
 
-  // Cursor helpers (restore previous cursor exactly)
+  // Cursor handling (simple and robust)
   let _prevCursor = null;
   function _cursorSet(v) {
     try {
@@ -22015,21 +22100,30 @@ function applyLayout(items) {
       baseSvgEl.style.cursor = v;
     } catch (e) {}
   }
-  function _cursorRestore() {
-    try {
-      baseSvgEl.style.cursor = (_prevCursor == null) ? "" : _prevCursor;
-    } catch (e) {}
+  function _cursorClear() {
+    try { baseSvgEl.style.cursor = ""; } catch (e) {}
     _prevCursor = null;
   }
 
+  // Absolute-from-start anchor
   let active = false;
   let dragging = false;
   let ptrId = null;
 
-  // Absolute-from-start anchor
-  let startPX0 = 0, startPY0 = 0;     // pan% at pointerdown
-  let startSvg = null;                // pointerdown in baseSvg user coords
-  let downCX = 0, downCY = 0;         // client px at pointerdown
+  let startPX0 = 0, startPY0 = 0;
+  let startSvg = null;
+  let downCX = 0, downCY = 0;
+
+  // 2xRAF scheduler state
+  let _rafPending = false;
+  let _rafToken = 0;
+  let _pendingEv = null;
+
+  function _killPendingMove() {
+    _rafPending = false;
+    _rafToken++;
+    _pendingEv = null;
+  }
 
   function _begin(ev) {
     startPX0 = +window.dzv.xpan || 0;
@@ -22065,13 +22159,11 @@ function applyLayout(items) {
 
     try { window.dzvGesture.unlock(OWNER, pid); } catch (e) {}
 
-    _rafPending = false;
-    _rafToken++;
-    _pendingEv = null;
-
+    _killPendingMove();
     startSvg = null;
 
-    _cursorRestore();
+    // Hard clear cursor so it never gets stuck across mouse/touch switches.
+    _cursorClear();
   }
 
   function _moveCore(ev) {
@@ -22085,7 +22177,7 @@ function applyLayout(items) {
       ptrId = null;
       window.dzv.animating = false;
       startSvg = null;
-      _cursorRestore();
+      _cursorClear();
       return;
     }
 
@@ -22109,6 +22201,7 @@ function applyLayout(items) {
     const dxSvg = (curSvg.x - startSvg.x);
     const dySvg = (curSvg.y - startSvg.y);
 
+    // Same rule as your pinch code: pan in user units scaled by current zoom.
     const dxU = dxSvg / sx1;
     const dyU = dySvg / sy1;
 
@@ -22116,14 +22209,8 @@ function applyLayout(items) {
     top1  -= dyU;
 
     const pan1 = _leftTopToPanPct(left1, top1, W, H, sx1, sy1);
-
     _applyPanScale(sx1, sy1, pan1.px, pan1.py);
   }
-
-  // 2xRAF scheduler
-  let _rafPending = false;
-  let _rafToken = 0;
-  let _pendingEv = null;
 
   function _scheduleMove(ev) {
     _pendingEv = ev;
@@ -22147,7 +22234,7 @@ function applyLayout(items) {
     if (!_eligible(ev)) return;
     if (!window.dzvGesture.tryLock(OWNER, "pan", ev.pointerId)) return;
 
-    // Do NOT preventDefault here (keeps click/dblclick alive if user doesn't drag)
+    // No preventDefault here (keeps click/dblclick if no drag).
     _begin(ev);
   }
 
@@ -22163,9 +22250,7 @@ function applyLayout(items) {
       dragging = true;
       window.dzv.animating = true;
 
-      if (window.dzv.hide_tip) window.dzv.hide_tip();
-      if (window.dzv.hide_highlight) window.dzv.hide_highlight();
-      if (typeof window.justHideMenu === "function") window.justHideMenu();
+      
 
       try { baseSvgEl.setPointerCapture(ev.pointerId); } catch (e) {}
 
@@ -22176,11 +22261,26 @@ function applyLayout(items) {
     _scheduleMove(ev);
   }
 
+  // Generic "any non-mouse interaction started" cursor clear (no dzv:twofinger coupling)
+  function _anyPointerDownCapture(ev) {
+    try {
+      if (!ev) return;
+      if (ev.pointerType && ev.pointerType !== "mouse") _cursorClear();
+    } catch (e) {}
+  }
+  function _touchStartCapture() { _cursorClear(); }
+  function _blurOrVis() { _cursorClear(); }
+
   baseSvgEl.addEventListener("pointerdown", onPointerDown, { passive: false });
   baseSvgEl.addEventListener("pointermove", onPointerMove, { passive: false });
   baseSvgEl.addEventListener("pointerup", _end, { passive: true });
   baseSvgEl.addEventListener("pointercancel", _end, { passive: true });
   baseSvgEl.addEventListener("lostpointercapture", _end, { passive: true });
+
+  window.addEventListener("pointerdown", _anyPointerDownCapture, { passive: true, capture: true });
+  window.addEventListener("touchstart", _touchStartCapture, { passive: true, capture: true });
+  window.addEventListener("blur", _blurOrVis, { passive: true, capture: true });
+  document.addEventListener("visibilitychange", _blurOrVis, { passive: true, capture: true });
 
   if (typeof state !== "undefined" && state) {
     state._mousePanDispose = function () {
@@ -22189,19 +22289,27 @@ function applyLayout(items) {
       baseSvgEl.removeEventListener("pointerup", _end, { passive: true });
       baseSvgEl.removeEventListener("pointercancel", _end, { passive: true });
       baseSvgEl.removeEventListener("lostpointercapture", _end, { passive: true });
+
+      window.removeEventListener("pointerdown", _anyPointerDownCapture, { capture: true });
+      window.removeEventListener("touchstart", _touchStartCapture, { capture: true });
+      window.removeEventListener("blur", _blurOrVis, { capture: true });
+      document.removeEventListener("visibilitychange", _blurOrVis, { capture: true });
+
       try { window.dzvGesture.unlock(OWNER, ptrId); } catch (e) {}
+
       active = false;
       dragging = false;
       ptrId = null;
+
       window.dzv.animating = false;
-      _rafPending = false;
-      _rafToken++;
-      _pendingEv = null;
+      _killPendingMove();
       startSvg = null;
-      _cursorRestore();
+
+      _cursorClear();
     };
   }
 })();
+
 
 
     return {
@@ -22253,8 +22361,7 @@ window.dzv.create_zoom_controls = function (how) {
       window.dzv.ypan = 0.0;
       window.dzv.zoom();
 
-      if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
-      if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+
     }
     return;
   }
@@ -22269,13 +22376,12 @@ window.dzv.create_zoom_controls = function (how) {
     <g id="g27" transform="translate(4.13 4.123)">
       <g id="Y_UpPan">
         <path id="path2-2-1" d="M125.539 50.063h-22.285a3.714 3.714 0 0 0-3.714 3.714v22.285a3.714 3.714 0 0 0 3.714 3.714h22.285a3.714 3.714 0 0 0 3.714-3.714V53.777a3.714 3.714 0 0 0-3.714-3.714z" style="fill:#fff;fill-opacity:1;fill-rule:evenodd;stroke:#8d8d8d;stroke-width:1.7;stroke-dasharray:none;stroke-opacity:1" transform="translate(-14.521 44.475)scale(.368)"/>
-        <path id="path3-4-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.677" d="m115.013 89.373 6.323-6.324" style="stroke:#8d8d8d;stroke-width:3.335;stroke-dasharray:none;stroke-opacity:1" transform="translate(-17.078 36.63)scale(.368)"/>
-        <path id="path3-4-2" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.677" d="m121.336 83.05 6.323 6.323" style="stroke:#8d8d8d;stroke-width:3.335;stroke-dasharray:none;stroke-opacity:1" transform="translate(-17.078 36.63)scale(.368)"/>
+        <path id="path3-4-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.677" d="M115.013 89.373 L121.336 83.05 L127.659 89.373" style="stroke:#8d8d8d;stroke-width:3.335;stroke-dasharray:none;stroke-opacity:1;fill:none;" transform="translate(-17.078 36.63)scale(.368)"/>
+        
       </g>
       <g id="Y_DnPan">
         <path id="path2-2-2" d="M136.387 93.19h-22.285a3.714 3.714 0 0 0-3.715 3.714v22.285a3.714 3.714 0 0 0 3.715 3.714h22.285a3.714 3.714 0 0 0 3.714-3.714V96.904a3.714 3.714 0 0 0-3.714-3.714z" style="fill:#fff;fill-opacity:1;fill-rule:evenodd;stroke:#8d8d8d;stroke-width:1.7;stroke-dasharray:none;stroke-opacity:1" transform="translate(-18.518 43.101)scale(.368)"/>
-        <path id="path3-4-7-1" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.677" d="m115.013 89.373 6.323-6.324" style="stroke:#8d8d8d;stroke-width:3.335;stroke-dasharray:none;stroke-opacity:1" transform="translate(72.33 114.672)scale(-.368)"/>
-        <path id="path3-4-2-2" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.677" d="m121.336 83.05 6.323 6.323" style="stroke:#8d8d8d;stroke-width:3.335;stroke-dasharray:none;stroke-opacity:1" transform="translate(72.33 114.672)scale(-.368)"/>
+        <path id="path3-4-7-1" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.677" d="M115.013 89.373 L121.336 83.05 L127.659 89.373"style="stroke:#8d8d8d;stroke-width:3.335;stroke-dasharray:none;stroke-opacity:1;fill:none;" transform="translate(72.33 114.672)scale(-.368)"/>
       </g>
       <g id="X_UpZoom">
         <path id="path2-6" d="M31.732 27.896H23.52c-.756 0-1.368.612-1.368 1.368v8.21c0 .757.612 1.37 1.368 1.37h8.21c.756 0 1.37-.613 1.37-1.37v-8.21c0-.756-.614-1.368-1.37-1.368z" style="fill:#fff;fill-opacity:1;fill-rule:evenodd;stroke:#8d8d8d;stroke-width:.626342;stroke-dasharray:none;stroke-opacity:1" transform="rotate(90 25.83 97.917)"/>
@@ -22302,15 +22408,13 @@ window.dzv.create_zoom_controls = function (how) {
       <g id="X_RtPan">
         <path id="path2-2-1-3" d="M64.531 103.82v-8.211c0-.756-.612-1.369-1.368-1.369h-8.21c-.757 0-1.37.613-1.37 1.369v8.21c0 .756.613 1.369 1.37 1.369h8.21c.756 0 1.368-.613 1.368-1.369z" style="fill:#fff;fill-opacity:1;fill-rule:evenodd;stroke:#8d8d8d;stroke-width:.626343;stroke-dasharray:none;stroke-opacity:1"/>
         <g id="g17" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.677" style="stroke:#8d8d8d;stroke-opacity:1" transform="rotate(90 24.686 96.773)">
-          <path id="path3-4-7-9" d="m115.013 89.373 6.323-6.324" style="stroke:#8d8d8d;stroke-width:2.71417;stroke-dasharray:none;stroke-opacity:1" transform="translate(-17.078 30.638)scale(.368)"/>
-          <path id="path3-4-2-7" d="m121.336 83.05 6.323 6.323" style="stroke:#8d8d8d;stroke-width:2.71417;stroke-dasharray:none;stroke-opacity:1" transform="translate(-17.078 30.638)scale(.368)"/>
+          <path id="path3-4-7-9" d="M115.013 89.373 L121.336 83.05 L127.659 89.373" style="fill:none;stroke:#8d8d8d;stroke-width:2.71417;stroke-dasharray:none;stroke-opacity:1" transform="translate(-17.078 30.638)scale(.368)"/>
         </g>
       </g>
       <g id="X_LtPan">
         <path id="path2-2-2-1" d="M50.015 103.82v-8.211c0-.756-.612-1.369-1.368-1.369h-8.21c-.757 0-1.37.613-1.37 1.369v8.21c0 .756.613 1.369 1.37 1.369h8.21c.756 0 1.368-.613 1.368-1.369z" style="fill:#fff;fill-opacity:1;fill-rule:evenodd;stroke:#8d8d8d;stroke-width:.626343;stroke-dasharray:none;stroke-opacity:1"/>
         <g id="g16" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.677" style="stroke:#8d8d8d;stroke-opacity:1" transform="rotate(90 24.686 96.773)">
-          <path id="path3-4-7-1-6" d="m115.013 89.373 6.323-6.324" style="stroke:#8d8d8d;stroke-width:2.71425;stroke-dasharray:none;stroke-opacity:1" transform="translate(72.33 108.679)scale(-.368)"/>
-          <path id="path3-4-2-2-0" d="m121.336 83.05 6.323 6.323" style="stroke:#8d8d8d;stroke-width:2.71425;stroke-dasharray:none;stroke-opacity:1" transform="translate(72.33 108.679)scale(-.368)"/>
+          <path id="path3-4-7-1-6" d="M115.013 89.373 L121.336 83.05 L127.659 89.373" style="fill:none;stroke:#8d8d8d;stroke-width:2.71425;stroke-dasharray:none;stroke-opacity:1" transform="translate(72.33 108.679)scale(-.368)"/>
         </g>
       </g>
       <g id="XY_Fit">
