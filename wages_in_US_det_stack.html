@@ -4394,7 +4394,6 @@
 	</div>
 
 <script>
-
 // Global gate
 
  window.dzv = window.dzv || {};
@@ -21373,6 +21372,7 @@ function applyLayout(items) {
 
       function _onWheel(ev) {
         if (window.dzv.animating && !window.dzv.morphing) return;
+		
         const id = _fastIdUnderPointer(ev);
         if (id) {
           ev.preventDefault();
@@ -21520,6 +21520,7 @@ function applyLayout(items) {
     function _onBaseSvgWheel(ev) {
       if (state.destroyed) return;
 	  if (window.dzv.animating && !window.dzv.morphing) return;
+	  if (!ev.ctrlKey) return;
 
       // Ignore if wheel is over overlay controls area
       try {
@@ -21863,6 +21864,345 @@ function applyLayout(items) {
 })();
   
 })();
+
+
+(function initMousePanOnly_PATCHRECT() {
+  const OWNER = "dzv-mouse-pan";
+  const max_pan = 100;
+
+  // If you want dblclick to survive, we must NOT suppress click generation.
+  // Solution: "lazy pan": only start real panning (capture + preventDefault + animating)
+  // after the pointer moved more than a tiny threshold.
+  const DRAG_THRESHOLD_PX = 4;
+
+  // Cursor styling
+  const CURSOR_IDLE = "";         // keep whatever you already have
+  const CURSOR_ARMED = "grab";    // after pointerdown but before drag threshold
+  const CURSOR_DRAG = "grabbing"; // while actually panning
+
+  if (!window.dzv) return;
+
+  const baseSvgEl =
+    (typeof state !== "undefined" && state && state.baseSvgEl) ? state.baseSvgEl :
+    document.getElementById("dzv_gen");
+
+  if (!baseSvgEl) return;
+
+  // Shared cooperative lock (safe if already installed)
+  (function () {
+    const G = (window.dzvGesture = window.dzvGesture || {});
+    if (!G._lock) G._lock = null;
+    if (!G.tryLock) G.tryLock = function (owner, kind, pointerId) {
+      const cur = G._lock;
+      if (cur) {
+        if (cur.owner === owner && cur.pointerId === pointerId) return true;
+        return false;
+      }
+      G._lock = { owner: String(owner || "anon"), kind: String(kind || "gesture"), pointerId: pointerId ?? null, ts: Date.now() };
+      return true;
+    };
+    if (!G.unlock) G.unlock = function (owner, pointerId) {
+      const cur = G._lock;
+      if (!cur) return false;
+      if (cur.owner !== String(owner || "anon")) return false;
+      if (pointerId != null && cur.pointerId !== pointerId) return false;
+      G._lock = null;
+      return true;
+    };
+    if (!G.lockInfo) G.lockInfo = function () { return G._lock ? { ...G._lock } : null; };
+  })();
+
+  function _getPatch2El() {
+    try { return baseSvgEl.querySelector('g#figure_1 > g#axes_1 > g#patch_2'); }
+    catch (e) { return null; }
+  }
+
+  function _getPatch2BBoxSafe(p2) {
+    try {
+      if (!p2 || !p2.getBBox) return null;
+      const B = p2.getBBox();
+      if (!isFinite(B.x) || !isFinite(B.y) || !isFinite(B.width) || !isFinite(B.height)) return null;
+      if (!(B.width > 0) || !(B.height > 0)) return null;
+      return B;
+    } catch (e) { return null; }
+  }
+
+  function _clientToSvgUser(svgEl, clientX, clientY) {
+    const m = svgEl.getScreenCTM && svgEl.getScreenCTM();
+    if (!m) return null;
+    try { return new DOMPoint(clientX, clientY).matrixTransform(m.inverse()); }
+    catch (e) { return null; }
+  }
+
+  function _applyPanScale(sx1, sy1, px1, py1) {
+    px1 = Math.max(0, Math.min(max_pan, px1));
+    py1 = Math.max(0, Math.min(max_pan, py1));
+    if (sx1 === 1) px1 = 0;
+    if (sy1 === 1) py1 = 0;
+
+    const before = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
+
+    window.dzv.xscale = sx1;
+    window.dzv.yscale = sy1;
+    window.dzv.xpan = px1;
+    window.dzv.ypan = py1;
+
+    const after = key4(window.dzv.xpan, window.dzv.ypan, window.dzv.xscale, window.dzv.yscale);
+
+    if (before !== after) {
+      window.dzv.zoom();
+      if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
+      if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+      return true;
+    }
+    return false;
+  }
+
+  function _leftTopToPanPct(left, top, W, H, sx, sy) {
+    const extraW = W - (W / sx);
+    const extraH = H - (H / sy);
+    const px = (extraW > 0) ? (100 * left / extraW) : 0;
+    const py = (extraH > 0) ? (100 * top  / extraH) : 0;
+    return { px, py };
+  }
+
+  function _panPctToLeftTop(px, py, W, H, sx, sy) {
+    const extraW = W - (W / sx);
+    const extraH = H - (H / sy);
+    const left = (extraW > 0) ? (px / 100) * extraW : 0;
+    const top  = (extraH > 0) ? (py / 100) * extraH : 0;
+    return { left, top };
+  }
+
+  function _hasForbiddenUnderCursor(ev) {
+    const sel = 'g.s_e[id$=" - area"], g.s_e[id$=" - edge"], text.s_e[id$=" - label"]';
+    const list = document.elementsFromPoint(ev.clientX, ev.clientY);
+
+    for (let i = 0; i < list.length; i++) {
+      const el = list[i];
+      if (!el || el.nodeType !== 1) continue;
+
+      if (baseSvgEl && baseSvgEl.contains && !baseSvgEl.contains(el)) continue;
+
+      if (el.matches && el.matches(sel)) return true;
+      if (el.closest && el.closest(sel)) return true;
+    }
+    return false;
+  }
+
+  function _eligible(ev) {
+    if (!ev) return false;
+
+    if (ev.pointerType !== "mouse") return false;
+    if (ev.button !== 0) return false; // left
+
+    if (!ev.ctrlKey && _hasForbiddenUnderCursor(ev)) return false;
+	
+	if (window.dzv.xscale * window.dzv.yscale < 1.0001) return false;
+	
+
+    if (ev.metaKey || ev.altKey) return false;
+    if (window.dzv.animating) return false;
+
+    return true;
+  }
+
+  // Cursor helpers (restore previous cursor exactly)
+  let _prevCursor = null;
+  function _cursorSet(v) {
+    try {
+      if (_prevCursor == null) _prevCursor = baseSvgEl.style.cursor || "";
+      baseSvgEl.style.cursor = v;
+    } catch (e) {}
+  }
+  function _cursorRestore() {
+    try {
+      baseSvgEl.style.cursor = (_prevCursor == null) ? "" : _prevCursor;
+    } catch (e) {}
+    _prevCursor = null;
+  }
+
+  let active = false;
+  let dragging = false;
+  let ptrId = null;
+
+  // Absolute-from-start anchor
+  let startPX0 = 0, startPY0 = 0;     // pan% at pointerdown
+  let startSvg = null;                // pointerdown in baseSvg user coords
+  let downCX = 0, downCY = 0;         // client px at pointerdown
+
+  function _begin(ev) {
+    startPX0 = +window.dzv.xpan || 0;
+    startPY0 = +window.dzv.ypan || 0;
+
+    downCX = ev.clientX;
+    downCY = ev.clientY;
+
+    startSvg = _clientToSvgUser(baseSvgEl, ev.clientX, ev.clientY);
+
+    active = true;
+    dragging = false;
+    ptrId = ev.pointerId;
+
+    _cursorSet(CURSOR_ARMED);
+  }
+
+  function _end(ev) {
+    if (!active) return;
+    if (ev && ev.pointerId !== ptrId) return;
+
+    const pid = ptrId;
+    const wasDragging = dragging;
+
+    active = false;
+    dragging = false;
+    ptrId = null;
+
+    if (wasDragging) {
+      try { baseSvgEl.releasePointerCapture(pid); } catch (e) {}
+      window.dzv.animating = false;
+    }
+
+    try { window.dzvGesture.unlock(OWNER, pid); } catch (e) {}
+
+    _rafPending = false;
+    _rafToken++;
+    _pendingEv = null;
+
+    startSvg = null;
+
+    _cursorRestore();
+  }
+
+  function _moveCore(ev) {
+    if (!active) return;
+    if (!ev || ev.pointerId !== ptrId) return;
+
+    const info = window.dzvGesture && window.dzvGesture.lockInfo && window.dzvGesture.lockInfo();
+    if (!info || info.owner !== OWNER || info.pointerId !== ptrId) {
+      active = false;
+      dragging = false;
+      ptrId = null;
+      window.dzv.animating = false;
+      startSvg = null;
+      _cursorRestore();
+      return;
+    }
+
+    const p2 = _getPatch2El();
+    const B = _getPatch2BBoxSafe(p2);
+    if (!p2 || !B) return;
+    if (!startSvg) return;
+
+    const curSvg = _clientToSvgUser(baseSvgEl, ev.clientX, ev.clientY);
+    if (!curSvg) return;
+
+    const sx1 = +window.dzv.xscale || 1;
+    const sy1 = +window.dzv.yscale || 1;
+
+    const W = B.width, H = B.height;
+
+    const baseLT0 = _panPctToLeftTop(startPX0, startPY0, W, H, sx1, sy1);
+    let left1 = baseLT0.left;
+    let top1  = baseLT0.top;
+
+    const dxSvg = (curSvg.x - startSvg.x);
+    const dySvg = (curSvg.y - startSvg.y);
+
+    const dxU = dxSvg / sx1;
+    const dyU = dySvg / sy1;
+
+    left1 -= dxU;
+    top1  -= dyU;
+
+    const pan1 = _leftTopToPanPct(left1, top1, W, H, sx1, sy1);
+
+    _applyPanScale(sx1, sy1, pan1.px, pan1.py);
+  }
+
+  // 2xRAF scheduler
+  let _rafPending = false;
+  let _rafToken = 0;
+  let _pendingEv = null;
+
+  function _scheduleMove(ev) {
+    _pendingEv = ev;
+    if (_rafPending) return;
+    _rafPending = true;
+
+    const token0 = ++_rafToken;
+    requestAnimationFrame(function () {
+      if (!_rafPending || token0 !== _rafToken) return;
+      requestAnimationFrame(function () {
+        if (!_rafPending || token0 !== _rafToken) return;
+        _rafPending = false;
+        const e = _pendingEv;
+        _pendingEv = null;
+        _moveCore(e);
+      });
+    });
+  }
+
+  function onPointerDown(ev) {
+    if (!_eligible(ev)) return;
+    if (!window.dzvGesture.tryLock(OWNER, "pan", ev.pointerId)) return;
+
+    // Do NOT preventDefault here (keeps click/dblclick alive if user doesn't drag)
+    _begin(ev);
+  }
+
+  function onPointerMove(ev) {
+    if (!active) return;
+    if (!ev || ev.pointerId !== ptrId) return;
+
+    if (!dragging) {
+      const dx = ev.clientX - downCX;
+      const dy = ev.clientY - downCY;
+      if ((dx*dx + dy*dy) < (DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX)) return;
+
+      dragging = true;
+      window.dzv.animating = true;
+
+      if (window.dzv.hide_tip) window.dzv.hide_tip();
+      if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+      if (typeof window.justHideMenu === "function") window.justHideMenu();
+
+      try { baseSvgEl.setPointerCapture(ev.pointerId); } catch (e) {}
+
+      _cursorSet(CURSOR_DRAG);
+    }
+
+    try { ev.preventDefault(); } catch (e) {}
+    _scheduleMove(ev);
+  }
+
+  baseSvgEl.addEventListener("pointerdown", onPointerDown, { passive: false });
+  baseSvgEl.addEventListener("pointermove", onPointerMove, { passive: false });
+  baseSvgEl.addEventListener("pointerup", _end, { passive: true });
+  baseSvgEl.addEventListener("pointercancel", _end, { passive: true });
+  baseSvgEl.addEventListener("lostpointercapture", _end, { passive: true });
+
+  if (typeof state !== "undefined" && state) {
+    state._mousePanDispose = function () {
+      baseSvgEl.removeEventListener("pointerdown", onPointerDown, { passive: false });
+      baseSvgEl.removeEventListener("pointermove", onPointerMove, { passive: false });
+      baseSvgEl.removeEventListener("pointerup", _end, { passive: true });
+      baseSvgEl.removeEventListener("pointercancel", _end, { passive: true });
+      baseSvgEl.removeEventListener("lostpointercapture", _end, { passive: true });
+      try { window.dzvGesture.unlock(OWNER, ptrId); } catch (e) {}
+      active = false;
+      dragging = false;
+      ptrId = null;
+      window.dzv.animating = false;
+      _rafPending = false;
+      _rafToken++;
+      _pendingEv = null;
+      startSvg = null;
+      _cursorRestore();
+    };
+  }
+})();
+
 
     return {
       allowedSet,
