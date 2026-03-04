@@ -4507,7 +4507,118 @@ function dzvSecureMinStrokeWidth(opts) {
 //dzvSecureMinStrokeWidth({root:document.getElementById("dzv_gen"), targetMin:0.5, maxConsider:1.201});
 
 window.dzv = window.dzv || {};
-window.dzv.minimum_paint = dzvInstallMinPaintHeightBarGuard({root:document.getElementById("dzv_gen"), maxStrokeWidth : 1.5, minHeightPx:1.0, burstFrames:2});
+
+// Calibrate the minimum screen-space height (in CSS px) at which iOS (or any browser)
+// actually produces at least one non-transparent pixel for a small curved shape.
+// Uses an offscreen canvas only. No DOM, no SVG, no layout.
+//
+// Returns: { minPx, dpr, stepPx, maxPx, found, samples }
+//
+// Usage:
+//   const cal = dzvCalibrateMinRenderablePx({ startPx: 0.25, stepPx: 0.25, maxPx: 6 });
+//   // use cal.minPx as your minHeightPx
+
+function dzvCalibrateMinRenderablePx(opts) {
+  opts = opts || {};
+  const startPx = (typeof opts.startPx === "number") ? opts.startPx : 0.25;
+  const stepPx  = (typeof opts.stepPx  === "number") ? opts.stepPx  : 0.25;
+  const maxPx   = (typeof opts.maxPx   === "number") ? opts.maxPx   : 8.0;
+
+  // keep small but enough area to detect
+  const boxPx   = (typeof opts.boxPx   === "number") ? opts.boxPx   : 48;   // CSS px
+  const wPx     = (typeof opts.widthPx === "number") ? opts.widthPx : 24;   // ellipse width in CSS px
+
+  const dpr = (typeof opts.dpr === "number") ? opts.dpr : (window.devicePixelRatio || 1);
+
+  // Create offscreen canvas
+  const c = document.createElement("canvas");
+  c.width  = Math.max(4, Math.round(boxPx * dpr));
+  c.height = Math.max(4, Math.round(boxPx * dpr));
+
+  const ctx = c.getContext("2d", { alpha: true, willReadFrequently: true });
+  if (!ctx) {
+    return { minPx: NaN, dpr, stepPx, maxPx, found: false, samples: 0 };
+  }
+
+  // Work in CSS px coordinates
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  function _anyNonTransparentPixel() {
+    // read full buffer (small canvas)
+    const img = ctx.getImageData(0, 0, c.width, c.height).data;
+    for (let i = 3; i < img.length; i += 4) {
+      if (img[i] !== 0) return true; // alpha channel
+    }
+    return false;
+  }
+
+  function _drawEllipse(heightPx) {
+    // Clear to transparent
+    ctx.clearRect(0, 0, boxPx, boxPx);
+
+    // Draw opaque filled ellipse
+    const cx = boxPx * 0.5;
+    const cy = boxPx * 0.5;
+    const rx = Math.max(0.01, wPx * 0.5);
+    const ry = Math.max(0.01, heightPx * 0.5);
+
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,1)";
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  let h = startPx;
+  let found = false;
+  let samples = 0;
+
+  // Iterate until we get at least one pixel
+  // Keep numeric stability with a bounded iteration count
+  const maxIter = Math.max(1, Math.ceil((maxPx - startPx) / Math.max(stepPx, 1e-6)) + 2);
+
+  for (let k = 0; k < maxIter; k++) {
+    if (h > maxPx + 1e-9) break;
+
+    _drawEllipse(h);
+    samples++;
+
+    if (_anyNonTransparentPixel()) {
+      found = true;
+      break;
+    }
+
+    h += stepPx;
+  }
+
+  return {
+    minPx: found ? h : maxPx,
+    dpr,
+    stepPx,
+    maxPx,
+    found,
+    samples
+  };
+}
+
+
+// Returns the minimum on-screen height (CSS px) at which the test ellipse
+// actually produces non-transparent pixels when the *SVG is rasterized*.
+// This is the closest practical "painted pixel" test you can do in-browser.
+//
+// Usage:
+//   const minPx = await dzvCalibrateMinRenderableSvgPxRaster(document.getElementById("dzv_gen"));
+//   window.dzvMinRenderablePx = minPx;
+
+// One function. No await needed at call site.
+// It runs async internally and calls onDone(minPx) when ready.
+// It also caches the value on window.dzvMinRenderablePx.
+
+//const device_cap = dzvCalibrateMinRenderablePx();
+
+
+
 // iOS thin-geometry rescue that does NOT touch the original <use> at all
 // (no transform, no stroke-width, no filter changes on the original).
 //
@@ -4531,232 +4642,6 @@ window.dzv.minimum_paint = dzvInstallMinPaintHeightBarGuard({root:document.getEl
 // The rect is a "bar" fill (not stroke) because iOS can also cull thin strokes.
 // The bar uses the original’s computed stroke color as fill (best proxy when filters exist),
 // and inherits all ancestor filters automatically. Pointer events disabled.
-
-
-function dzvInstallMinPaintHeightBarGuardOld(opts) {
-  opts = opts || {};
-  const root = opts.root || document;
-
-  const maxStrokeWidth = (typeof opts.maxStrokeWidth === "number") ? opts.maxStrokeWidth : 1.25;
-  const minHeightPx = (typeof opts.minHeightPx === "number") ? opts.minHeightPx : 1.1;
-
-  // run this many frames after a trigger, then stop
-  const burstFrames = (typeof opts.burstFrames === "number") ? opts.burstFrames : 2;
-
-  const reId = /^\d{2}-\d{4}\s*-\s*area$/;
-
-  const ATTR_BAR = "data-dzv-thin-bar";
-  const ATTR_KEY = "data-dzv-thin-bar-key";
-
-  function _parseNum(s) {
-    if (s == null) return NaN;
-    const m = String(s).trim().match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)/);
-    return m ? parseFloat(m[1]) : NaN;
-  }
-
-  function _getRect(el) {
-    try { return el.getBoundingClientRect(); } catch (e) { return null; }
-  }
-
-  function _getBBox(el) {
-    try { return el.getBBox(); } catch (e) { return null; }
-  }
-
-  function _getScreenCTM(el) {
-    try { return el.getScreenCTM && el.getScreenCTM(); } catch (e) {}
-    return null;
-  }
-
-  function _pxPerUserY(el) {
-    const ctm = _getScreenCTM(el);
-    if (!ctm) return 0;
-    return Math.hypot(ctm.c, ctm.d);
-  }
-
-  function _ensureBarAfterUse(u) {
-    const p = u.parentNode;
-    if (!p) return null;
-
-    if (!u.__dzvThinBarKey) u.__dzvThinBarKey = "k" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-
-    const ns = u.nextSibling;
-    if (ns && ns.nodeType === 1 && ns.getAttribute && ns.getAttribute(ATTR_BAR) === "1" && ns.getAttribute(ATTR_KEY) === u.__dzvThinBarKey) {
-      return ns;
-    }
-
-    const bar = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    bar.setAttribute(ATTR_BAR, "1");
-    bar.setAttribute(ATTR_KEY, u.__dzvThinBarKey);
-    bar.setAttribute("pointer-events", "none");
-    bar.style.pointerEvents = "none";
-    bar.style.display = "none";
-
-    if (u.nextSibling) p.insertBefore(bar, u.nextSibling);
-    else p.appendChild(bar);
-
-    return bar;
-  }
-
-  function _syncBarPaintFromUse(u, bar) {
-    let fill = "";
-    let alpha = 1.0;
-
-    try {
-      const cs = getComputedStyle(u);
-      fill = (cs.fill && cs.fill !== "none") ? cs.fill : "";
-      const op = parseFloat(cs.opacity); if (Number.isFinite(op)) alpha *= op;
-      const so = parseFloat(cs.strokeOpacity); if (Number.isFinite(so)) alpha *= so;
-    } catch (e) {}
-
-    if (!fill) fill = "rgba(0,0,0,1)";
-
-    bar.setAttribute("fill", fill);
-    bar.setAttribute("stroke", "none");
-	
-	if (window.dzv.focusing)
-	bar.style.opacity = "0";
-	else
-    bar.style.opacity = String(alpha);
-
-    const f = u.getAttribute("filter");
-    if (f == null) bar.removeAttribute("filter"); else bar.setAttribute("filter", f);
-
-    const o = u.getAttribute("opacity");
-    if (o == null) bar.removeAttribute("opacity"); else bar.setAttribute("opacity", o);
-  }
-
-  let items = []; // {u, bar}
-
-  function refresh() {
-    items = [];
-
-    // narrow selector early: only g.s_e with id ending in " - area"
-    const gs = root.querySelectorAll('g.s_e[id$=" - area"]');
-    for (let i = 0; i < gs.length; i++) {
-      const g = gs[i];
-
-      // class must be exactly "s_e"
-      if ((g.getAttribute("class") || "") !== "s_e") continue;
-
-      const gid = g.getAttribute("id") || "";
-      if (!reId.test(gid)) continue;
-
-      const ulist = g.querySelectorAll("use");
-      for (let j = 0; j < ulist.length; j++) {
-        const u = ulist[j];
-
-        const sw = _parseNum(u.style ? u.style.strokeWidth : "");
-        if (!Number.isFinite(sw) || sw > maxStrokeWidth) continue;
-
-        const bar = _ensureBarAfterUse(u);
-        if (!bar) continue;
-
-        items.push({ u, bar });
-      }
-    }
-
-    trigger(); // run a burst after refresh
-    return items.length;
-  }
-
-  function _applyOnce() {
-    for (let i = 0; i < items.length; i++) {
-      const u = items[i].u;
-      const bar = items[i].bar;
-
-      const r = _getRect(u);
-      if (!r) { bar.style.display = "none"; continue; }
-
-      const hPx = r.height;
-      if (!(hPx > 0) || hPx >= minHeightPx) { bar.style.display = "none"; continue; }
-
-      const sy = _pxPerUserY(u);
-      if (!(sy > 0)) { bar.style.display = "none"; continue; }
-
-      const needUserH = minHeightPx / sy;
-
-      const bb = _getBBox(u);
-      if (!bb) { bar.style.display = "none"; continue; }
-
-      const x = bb.x;
-      const y = (bb.y + 0.5 * bb.height) - 0.5 * needUserH;
-
-      bar.setAttribute("x", String(x));
-      bar.setAttribute("y", String(y));
-      bar.setAttribute("width", String(Math.max(bb.width, 0)));
-      bar.setAttribute("height", String(needUserH));
-
-      const xf = u.getAttribute("transform");
-      if (xf == null) bar.removeAttribute("transform"); else bar.setAttribute("transform", xf);
-
-      _syncBarPaintFromUse(u, bar);
-      bar.style.display = "";
-    }
-  }
-
-  // burst scheduler (no forever loop)
-  let raf = 0;
-  let burstLeft = 0;
-  let running = true;
-
-  function _tick() {
-    raf = 0;
-    if (!running) return;
-
-    _applyOnce();
-
-    burstLeft--;
-    if (burstLeft > 0) raf = requestAnimationFrame(_tick);
-  }
-
-  function trigger() {
-    if (!running) return;
-    burstLeft = burstFrames;
-    if (!raf) raf = requestAnimationFrame(_tick);
-  }
-
-  // lightweight triggers
-  function _onResize() { trigger(); }
-  function _onScroll() { trigger(); }
-
-  let mo = null;
-
-  function start() {
-    if (!running) running = true;
-    window.addEventListener("resize", _onResize, { passive: true });
-    window.addEventListener("scroll", _onScroll, { passive: true });
-
-    //mo = new MutationObserver(function () { trigger(); });
-    //mo.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["transform", "style", "d"] });
-
-    trigger();
-  }
-
-  function stop() {
-    if (!running) return;
-    running = false;
-
-    if (raf) cancelAnimationFrame(raf);
-    raf = 0;
-    burstLeft = 0;
-
-    window.removeEventListener("resize", _onResize);
-    window.removeEventListener("scroll", _onScroll);
-    if (mo) { try { mo.disconnect(); } catch (e) {} }
-    mo = null;
-
-    for (let i = 0; i < items.length; i++) {
-      const bar = items[i].bar;
-      if (bar && bar.parentNode) bar.parentNode.removeChild(bar);
-    }
-    items = [];
-  }
-
-  refresh();
-  start();
-
-  return { refresh, start, stop, trigger };
-}
 
 
 function dzvInstallMinPaintHeightBarGuard(opts) {
@@ -5052,8 +4937,210 @@ function dzvInstallMinPaintHeightBarGuard(opts) {
   return { refresh, start, stop, trigger };
 }
 
+function dzvCalibrateMinRenderableSvgPxRaster(svgEl, startPx, stepPx, maxPx) {
+  startPx = (typeof startPx === "number") ? startPx : 0.25;
+  stepPx  = (typeof stepPx  === "number") ? stepPx  : 0.25;
+  maxPx   = (typeof maxPx   === "number") ? maxPx   : 8.0;
 
+  const NS = "http://www.w3.org/2000/svg";
+  const dpr = window.devicePixelRatio || 1;
 
+  function raf2(cb) { requestAnimationFrame(() => requestAnimationFrame(cb)); }
+
+  function pxPerUserY(el) {
+    const m = el.getScreenCTM && el.getScreenCTM();
+    if (!m) return 0;
+    return Math.hypot(m.c, m.d);
+  }
+  function pxPerUserX(el) {
+    const m = el.getScreenCTM && el.getScreenCTM();
+    if (!m) return 0;
+    return Math.hypot(m.a, m.b);
+  }
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+  function svgToCanvasAndProbeAlpha(svgText, svgRect, cxCss, cyCss, probeHalfPx, cb) {
+    const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+
+    // Prefer createImageBitmap, fallback to <img>
+    if (window.createImageBitmap) {
+      createImageBitmap(blob).then((bmp) => {
+        try {
+          const c = document.createElement("canvas");
+          c.width  = Math.max(1, Math.round(svgRect.width  * dpr));
+          c.height = Math.max(1, Math.round(svgRect.height * dpr));
+          const ctx = c.getContext("2d", { alpha: true, willReadFrequently: true });
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, svgRect.width, svgRect.height);
+          ctx.drawImage(bmp, 0, 0, svgRect.width, svgRect.height);
+
+          const x0 = clamp(Math.round((cxCss - probeHalfPx) * dpr), 0, c.width - 1);
+          const y0 = clamp(Math.round((cyCss - probeHalfPx) * dpr), 0, c.height - 1);
+          const x1 = clamp(Math.round((cxCss + probeHalfPx) * dpr), 0, c.width - 1);
+          const y1 = clamp(Math.round((cyCss + probeHalfPx) * dpr), 0, c.height - 1);
+          const w = Math.max(1, x1 - x0 + 1);
+          const h = Math.max(1, y1 - y0 + 1);
+
+          const data = ctx.getImageData(x0, y0, w, h).data;
+          for (let i = 3; i < data.length; i += 4) {
+            if (data[i] !== 0) { cb(true); return; }
+          }
+          cb(false);
+        } finally {
+          try { bmp.close && bmp.close(); } catch (e) {}
+        }
+      }).catch(() => {
+        // fall back
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.decoding = "async";
+        img.onload = function () {
+          try {
+            const c = document.createElement("canvas");
+            c.width  = Math.max(1, Math.round(svgRect.width  * dpr));
+            c.height = Math.max(1, Math.round(svgRect.height * dpr));
+            const ctx = c.getContext("2d", { alpha: true, willReadFrequently: true });
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, svgRect.width, svgRect.height);
+            ctx.drawImage(img, 0, 0, svgRect.width, svgRect.height);
+
+            const x0 = clamp(Math.round((cxCss - probeHalfPx) * dpr), 0, c.width - 1);
+            const y0 = clamp(Math.round((cyCss - probeHalfPx) * dpr), 0, c.height - 1);
+            const x1 = clamp(Math.round((cxCss + probeHalfPx) * dpr), 0, c.width - 1);
+            const y1 = clamp(Math.round((cyCss + probeHalfPx) * dpr), 0, c.height - 1);
+            const w = Math.max(1, x1 - x0 + 1);
+            const h = Math.max(1, y1 - y0 + 1);
+
+            const data = ctx.getImageData(x0, y0, w, h).data;
+            for (let i = 3; i < data.length; i += 4) {
+              if (data[i] !== 0) { cb(true); return; }
+            }
+            cb(false);
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        };
+        img.onerror = function () {
+          try { URL.revokeObjectURL(url); } catch (e) {}
+          cb(false);
+        };
+        img.src = url;
+      });
+      return;
+    }
+
+    // Old fallback only
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = function () {
+      try {
+        const c = document.createElement("canvas");
+        c.width  = Math.max(1, Math.round(svgRect.width  * dpr));
+        c.height = Math.max(1, Math.round(svgRect.height * dpr));
+        const ctx = c.getContext("2d", { alpha: true, willReadFrequently: true });
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, svgRect.width, svgRect.height);
+        ctx.drawImage(img, 0, 0, svgRect.width, svgRect.height);
+
+        const x0 = clamp(Math.round((cxCss - probeHalfPx) * dpr), 0, c.width - 1);
+        const y0 = clamp(Math.round((cyCss - probeHalfPx) * dpr), 0, c.height - 1);
+        const x1 = clamp(Math.round((cxCss + probeHalfPx) * dpr), 0, c.width - 1);
+        const y1 = clamp(Math.round((cyCss + probeHalfPx) * dpr), 0, c.height - 1);
+        const w = Math.max(1, x1 - x0 + 1);
+        const h = Math.max(1, y1 - y0 + 1);
+
+        const data = ctx.getImageData(x0, y0, w, h).data;
+        for (let i = 3; i < data.length; i += 4) {
+          if (data[i] !== 0) { cb(true); return; }
+        }
+        cb(false);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    };
+    img.onerror = function () {
+      try { URL.revokeObjectURL(url); } catch (e) {}
+      cb(false);
+    };
+    img.src = url;
+  }
+
+  // Inject test ellipse into live SVG
+  const g = document.createElementNS(NS, "g");
+  g.setAttribute("data-dzv-calib", "1");
+
+  const ell = document.createElementNS(NS, "ellipse");
+  ell.setAttribute("fill", "rgba(0,0,0,1)");
+  ell.setAttribute("stroke", "none");
+
+  const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
+  const cxUser = vb ? (vb.x + vb.width * 0.2) : 0;
+  const cyUser = vb ? (vb.y + vb.height * 0.2) : 0;
+  ell.setAttribute("cx", String(cxUser));
+  ell.setAttribute("cy", String(cyUser));
+
+  g.appendChild(ell);
+  svgEl.appendChild(g);
+
+  let h = startPx;
+  const widthPx = 24;
+  const probeHalfPx = 2;
+
+  function cleanup() {
+    try { if (g && g.parentNode) g.parentNode.removeChild(g); } catch (e) {}
+  }
+
+  function done(v) {
+    window.dzvMinRenderablePx = v;
+	//console.log(window.dzvMinRenderablePx);
+    window.dzv.minimum_paint = dzvInstallMinPaintHeightBarGuard({root:document.getElementById("dzv_gen"), maxStrokeWidth : 1.5, minHeightPx:
+    Math.max(window.dzvMinRenderablePx,1), burstFrames:2});
+  }
+
+  function step() {
+    raf2(() => {
+      const sy = pxPerUserY(ell);
+      const sx = pxPerUserX(ell);
+
+      if (sy > 0 && sx > 0) {
+        const ry = (0.5 * h) / sy;
+        const rx = (0.5 * widthPx) / sx;
+        ell.setAttribute("ry", String(Math.max(1e-9, ry)));
+        ell.setAttribute("rx", String(Math.max(1e-9, rx)));
+      }
+
+      raf2(() => {
+        const svgRect = svgEl.getBoundingClientRect();
+        const ellRect = ell.getBoundingClientRect();
+
+        if (!(svgRect.width > 0) || !(svgRect.height > 0)) {
+          h += stepPx;
+          if (h > maxPx + 1e-9) { cleanup(); done(maxPx); return; }
+          step();
+          return;
+        }
+
+        const cxCss = (ellRect.left + 0.5 * ellRect.width) - svgRect.left;
+        const cyCss = (ellRect.top  + 0.5 * ellRect.height) - svgRect.top;
+
+        const ser = new XMLSerializer();
+        const svgText = ser.serializeToString(svgEl);
+
+        svgToCanvasAndProbeAlpha(svgText, svgRect, cxCss, cyCss, probeHalfPx, (ok) => {
+          if (ok) { cleanup(); done(h); return; }
+          h += stepPx;
+          if (h > maxPx + 1e-9) { cleanup(); done(maxPx); return; }
+          step();
+        });
+      });
+    });
+  }
+
+  step();
+}
+
+dzvCalibrateMinRenderableSvgPxRaster(document.getElementById("dzv_gen"));
 
 let wheelBlocked = true;       // start blocked during loader
 let wheelDrainUntil = 0;       // time until which we discard backlog
