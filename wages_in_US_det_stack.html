@@ -4504,9 +4504,556 @@ function dzvSecureMinStrokeWidth(opts) {
   return { changed, minOld, maxOld, items };
 }
 
-dzvSecureMinStrokeWidth({root:document.getElementById("dzv_gen"), targetMin:1.0, maxConsider:1.201});
+//dzvSecureMinStrokeWidth({root:document.getElementById("dzv_gen"), targetMin:0.5, maxConsider:1.201});
 
- window.dzv = window.dzv || {};
+window.dzv = window.dzv || {};
+window.dzv.minimum_paint = dzvInstallMinPaintHeightBarGuard({root:document.getElementById("dzv_gen"), maxStrokeWidth : 1.5, minHeightPx:1.0, burstFrames:2});
+// iOS thin-geometry rescue that does NOT touch the original <use> at all
+// (no transform, no stroke-width, no filter changes on the original).
+//
+// Instead, it injects a companion <rect> (NOT a <use>) right AFTER each target <use>,
+// inside the SAME parent <g>. That preserves your z-order chain, clip-path, opacity,
+// filters up the ancestor chain, etc. The rect is only shown when the original’s
+// PAINTED height is too small.
+//
+// Crucially: because the companion is a <rect>, it does NOT enlarge your "<use> selection"
+// and will not poison focus geometry if your focus/envelope logic iterates <use> elements.
+//
+// Selection (exactly your rule):
+//   g.id matches "##-#### - area" AND g.class contains "s_e"
+//   inside: <use> where use.style.strokeWidth <= maxStrokeWidth (default 1.25)
+//
+// Behavior each frame:
+//   - measure orig.getBoundingClientRect().height (screen px)
+//   - if < minHeightPx: show the rect and size it to minHeightPx (in USER UNITS)
+//   - else: hide the rect
+//
+// The rect is a "bar" fill (not stroke) because iOS can also cull thin strokes.
+// The bar uses the original’s computed stroke color as fill (best proxy when filters exist),
+// and inherits all ancestor filters automatically. Pointer events disabled.
+
+
+function dzvInstallMinPaintHeightBarGuardOld(opts) {
+  opts = opts || {};
+  const root = opts.root || document;
+
+  const maxStrokeWidth = (typeof opts.maxStrokeWidth === "number") ? opts.maxStrokeWidth : 1.25;
+  const minHeightPx = (typeof opts.minHeightPx === "number") ? opts.minHeightPx : 1.1;
+
+  // run this many frames after a trigger, then stop
+  const burstFrames = (typeof opts.burstFrames === "number") ? opts.burstFrames : 2;
+
+  const reId = /^\d{2}-\d{4}\s*-\s*area$/;
+
+  const ATTR_BAR = "data-dzv-thin-bar";
+  const ATTR_KEY = "data-dzv-thin-bar-key";
+
+  function _parseNum(s) {
+    if (s == null) return NaN;
+    const m = String(s).trim().match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)/);
+    return m ? parseFloat(m[1]) : NaN;
+  }
+
+  function _getRect(el) {
+    try { return el.getBoundingClientRect(); } catch (e) { return null; }
+  }
+
+  function _getBBox(el) {
+    try { return el.getBBox(); } catch (e) { return null; }
+  }
+
+  function _getScreenCTM(el) {
+    try { return el.getScreenCTM && el.getScreenCTM(); } catch (e) {}
+    return null;
+  }
+
+  function _pxPerUserY(el) {
+    const ctm = _getScreenCTM(el);
+    if (!ctm) return 0;
+    return Math.hypot(ctm.c, ctm.d);
+  }
+
+  function _ensureBarAfterUse(u) {
+    const p = u.parentNode;
+    if (!p) return null;
+
+    if (!u.__dzvThinBarKey) u.__dzvThinBarKey = "k" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+    const ns = u.nextSibling;
+    if (ns && ns.nodeType === 1 && ns.getAttribute && ns.getAttribute(ATTR_BAR) === "1" && ns.getAttribute(ATTR_KEY) === u.__dzvThinBarKey) {
+      return ns;
+    }
+
+    const bar = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    bar.setAttribute(ATTR_BAR, "1");
+    bar.setAttribute(ATTR_KEY, u.__dzvThinBarKey);
+    bar.setAttribute("pointer-events", "none");
+    bar.style.pointerEvents = "none";
+    bar.style.display = "none";
+
+    if (u.nextSibling) p.insertBefore(bar, u.nextSibling);
+    else p.appendChild(bar);
+
+    return bar;
+  }
+
+  function _syncBarPaintFromUse(u, bar) {
+    let fill = "";
+    let alpha = 1.0;
+
+    try {
+      const cs = getComputedStyle(u);
+      fill = (cs.fill && cs.fill !== "none") ? cs.fill : "";
+      const op = parseFloat(cs.opacity); if (Number.isFinite(op)) alpha *= op;
+      const so = parseFloat(cs.strokeOpacity); if (Number.isFinite(so)) alpha *= so;
+    } catch (e) {}
+
+    if (!fill) fill = "rgba(0,0,0,1)";
+
+    bar.setAttribute("fill", fill);
+    bar.setAttribute("stroke", "none");
+	
+	if (window.dzv.focusing)
+	bar.style.opacity = "0";
+	else
+    bar.style.opacity = String(alpha);
+
+    const f = u.getAttribute("filter");
+    if (f == null) bar.removeAttribute("filter"); else bar.setAttribute("filter", f);
+
+    const o = u.getAttribute("opacity");
+    if (o == null) bar.removeAttribute("opacity"); else bar.setAttribute("opacity", o);
+  }
+
+  let items = []; // {u, bar}
+
+  function refresh() {
+    items = [];
+
+    // narrow selector early: only g.s_e with id ending in " - area"
+    const gs = root.querySelectorAll('g.s_e[id$=" - area"]');
+    for (let i = 0; i < gs.length; i++) {
+      const g = gs[i];
+
+      // class must be exactly "s_e"
+      if ((g.getAttribute("class") || "") !== "s_e") continue;
+
+      const gid = g.getAttribute("id") || "";
+      if (!reId.test(gid)) continue;
+
+      const ulist = g.querySelectorAll("use");
+      for (let j = 0; j < ulist.length; j++) {
+        const u = ulist[j];
+
+        const sw = _parseNum(u.style ? u.style.strokeWidth : "");
+        if (!Number.isFinite(sw) || sw > maxStrokeWidth) continue;
+
+        const bar = _ensureBarAfterUse(u);
+        if (!bar) continue;
+
+        items.push({ u, bar });
+      }
+    }
+
+    trigger(); // run a burst after refresh
+    return items.length;
+  }
+
+  function _applyOnce() {
+    for (let i = 0; i < items.length; i++) {
+      const u = items[i].u;
+      const bar = items[i].bar;
+
+      const r = _getRect(u);
+      if (!r) { bar.style.display = "none"; continue; }
+
+      const hPx = r.height;
+      if (!(hPx > 0) || hPx >= minHeightPx) { bar.style.display = "none"; continue; }
+
+      const sy = _pxPerUserY(u);
+      if (!(sy > 0)) { bar.style.display = "none"; continue; }
+
+      const needUserH = minHeightPx / sy;
+
+      const bb = _getBBox(u);
+      if (!bb) { bar.style.display = "none"; continue; }
+
+      const x = bb.x;
+      const y = (bb.y + 0.5 * bb.height) - 0.5 * needUserH;
+
+      bar.setAttribute("x", String(x));
+      bar.setAttribute("y", String(y));
+      bar.setAttribute("width", String(Math.max(bb.width, 0)));
+      bar.setAttribute("height", String(needUserH));
+
+      const xf = u.getAttribute("transform");
+      if (xf == null) bar.removeAttribute("transform"); else bar.setAttribute("transform", xf);
+
+      _syncBarPaintFromUse(u, bar);
+      bar.style.display = "";
+    }
+  }
+
+  // burst scheduler (no forever loop)
+  let raf = 0;
+  let burstLeft = 0;
+  let running = true;
+
+  function _tick() {
+    raf = 0;
+    if (!running) return;
+
+    _applyOnce();
+
+    burstLeft--;
+    if (burstLeft > 0) raf = requestAnimationFrame(_tick);
+  }
+
+  function trigger() {
+    if (!running) return;
+    burstLeft = burstFrames;
+    if (!raf) raf = requestAnimationFrame(_tick);
+  }
+
+  // lightweight triggers
+  function _onResize() { trigger(); }
+  function _onScroll() { trigger(); }
+
+  let mo = null;
+
+  function start() {
+    if (!running) running = true;
+    window.addEventListener("resize", _onResize, { passive: true });
+    window.addEventListener("scroll", _onScroll, { passive: true });
+
+    //mo = new MutationObserver(function () { trigger(); });
+    //mo.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["transform", "style", "d"] });
+
+    trigger();
+  }
+
+  function stop() {
+    if (!running) return;
+    running = false;
+
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    burstLeft = 0;
+
+    window.removeEventListener("resize", _onResize);
+    window.removeEventListener("scroll", _onScroll);
+    if (mo) { try { mo.disconnect(); } catch (e) {} }
+    mo = null;
+
+    for (let i = 0; i < items.length; i++) {
+      const bar = items[i].bar;
+      if (bar && bar.parentNode) bar.parentNode.removeChild(bar);
+    }
+    items = [];
+  }
+
+  refresh();
+  start();
+
+  return { refresh, start, stop, trigger };
+}
+
+
+function dzvInstallMinPaintHeightBarGuard(opts) {
+  opts = opts || {};
+  const root = opts.root || document;
+
+  const maxStrokeWidth = (typeof opts.maxStrokeWidth === "number") ? opts.maxStrokeWidth : 1.25;
+  const minHeightPx = (typeof opts.minHeightPx === "number") ? opts.minHeightPx : 1.0;
+
+  // run N frames after a trigger, then sleep (NO continuous tick)
+  const burstFrames = (typeof opts.burstFrames === "number") ? opts.burstFrames : 6;
+
+  // EXACT id pattern: "##-#### - area"
+  const reId = /^\d{2}-\d{4}\s*-\s*area$/;
+
+  const ATTR_BAR = "data-dzv-thin-bar";
+  const ATTR_KEY = "data-dzv-thin-bar-key";
+
+  // swap state on original <use>
+  const ATTR_BASE_OP = "data-dzv-bg-base-opacity";
+  const ATTR_BASE_PE = "data-dzv-bg-base-pe";
+
+  function _parseNum(s) {
+    if (s == null) return NaN;
+    const m = String(s).trim().match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)/);
+    return m ? parseFloat(m[1]) : NaN;
+  }
+
+  function _getRect(el) {
+    try { return el.getBoundingClientRect(); } catch (e) { return null; }
+  }
+
+  function _getBBox(el) {
+    try { return el.getBBox(); } catch (e) { return null; }
+  }
+
+  function _getScreenCTM(el) {
+    try { return el.getScreenCTM && el.getScreenCTM(); } catch (e) {}
+    return null;
+  }
+
+  function _pxPerUserY(el) {
+    const ctm = _getScreenCTM(el);
+    if (!ctm) return 0;
+    return Math.hypot(ctm.c, ctm.d);
+  }
+
+  function _ensureBaseSwap(u) {
+    if (!u.hasAttribute(ATTR_BASE_OP)) u.setAttribute(ATTR_BASE_OP, u.getAttribute("opacity") || "");
+    if (!u.hasAttribute(ATTR_BASE_PE)) u.setAttribute(ATTR_BASE_PE, u.getAttribute("pointer-events") || "");
+  }
+
+  function _restoreAttr(el, name, baseVal) {
+    if (baseVal == null || baseVal === "") el.removeAttribute(name);
+    else el.setAttribute(name, baseVal);
+  }
+
+  // bar OFF => original ON
+  function _showOriginalHideBar(u, bar) {
+    _ensureBaseSwap(u);
+    _restoreAttr(u, "opacity", u.getAttribute(ATTR_BASE_OP));
+    _restoreAttr(u, "pointer-events", u.getAttribute(ATTR_BASE_PE));
+    if (bar) bar.style.display = "none";
+  }
+
+  // bar ON => original OFF visually, but hittable
+  function _hideOriginalShowBar(u, bar) {
+    _ensureBaseSwap(u);
+    u.setAttribute("opacity", "0");
+    u.setAttribute("pointer-events", "all");
+    if (bar) {
+      bar.style.display = "";
+      bar.setAttribute("pointer-events", "none");
+      bar.style.pointerEvents = "none";
+    }
+  }
+
+  function _cleanupOriginal(u) {
+    if (!u) return;
+    _restoreAttr(u, "opacity", u.getAttribute(ATTR_BASE_OP));
+    _restoreAttr(u, "pointer-events", u.getAttribute(ATTR_BASE_PE));
+    u.removeAttribute(ATTR_BASE_OP);
+    u.removeAttribute(ATTR_BASE_PE);
+  }
+
+  function _ensureBarAfterUse(u) {
+    const p = u.parentNode;
+    if (!p) return null;
+
+    if (!u.__dzvThinBarKey) u.__dzvThinBarKey = "k" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+    const ns = u.nextSibling;
+    if (ns && ns.nodeType === 1 && ns.getAttribute && ns.getAttribute(ATTR_BAR) === "1" && ns.getAttribute(ATTR_KEY) === u.__dzvThinBarKey) {
+      return ns;
+    }
+
+    const bar = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    bar.setAttribute(ATTR_BAR, "1");
+    bar.setAttribute(ATTR_KEY, u.__dzvThinBarKey);
+    bar.setAttribute("pointer-events", "none");
+    bar.style.pointerEvents = "none";
+    bar.style.display = "none";
+
+    if (u.nextSibling) p.insertBefore(bar, u.nextSibling);
+    else p.appendChild(bar);
+
+    return bar;
+  }
+
+  function _syncBarPaintFromUse(u, bar) {
+    let fill = "";
+    let alpha = 1.0;
+
+    try {
+      const cs = getComputedStyle(u);
+      fill = (cs.fill && cs.fill !== "none") ? cs.fill : "";
+      const op = parseFloat(cs.opacity); if (Number.isFinite(op)) alpha *= op;
+      const so = parseFloat(cs.strokeOpacity); if (Number.isFinite(so)) alpha *= so;
+    } catch (e) {}
+
+    if (!fill) fill = "rgba(0,0,0,1)";
+
+    bar.setAttribute("fill", fill);
+    bar.setAttribute("stroke", "none");
+    bar.style.opacity = String(alpha);
+
+    // mirror per-element filter/opacity if present on the <use> itself
+    const f = u.getAttribute("filter");
+    if (f == null) bar.removeAttribute("filter"); else bar.setAttribute("filter", f);
+
+    const o = u.getAttribute("opacity");
+    if (o == null) bar.removeAttribute("opacity"); else bar.setAttribute("opacity", o);
+  }
+
+  // cache targets: {u, bar}
+  let items = [];
+
+
+  function sync_ub(u, bar)
+    {
+	  const r = _getRect(u);
+      if (!r) { _showOriginalHideBar(u, bar); return; }
+
+      const hPx = r.height;
+
+      if (!(hPx > 0) || hPx >= minHeightPx) {
+        _showOriginalHideBar(u, bar);
+        return;
+      }
+
+      const sy = _pxPerUserY(u);
+      if (!(sy > 0)) { _showOriginalHideBar(u, bar); return; }
+
+      const needUserH = minHeightPx / sy;
+
+      const bb = _getBBox(u);
+      if (!bb) { _showOriginalHideBar(u, bar); return; }
+
+      // Place bar centered on original bbox (USER units)
+      const x = bb.x;
+      const y = (bb.y + 0.5 * bb.height) - 0.5 * needUserH;
+
+      bar.setAttribute("x", String(x));
+      bar.setAttribute("y", String(y));
+      bar.setAttribute("width", String(Math.max(bb.width, 0)));
+      bar.setAttribute("height", String(needUserH));
+
+      // Follow per-use motion
+      const xf = u.getAttribute("transform");
+      if (xf == null) bar.removeAttribute("transform"); else bar.setAttribute("transform", xf);
+
+      _syncBarPaintFromUse(u, bar);
+
+      // SWAP: bar ON, original OFF (but hittable)
+      _hideOriginalShowBar(u, bar);
+	}
+	
+  function refresh() {
+    items = [];
+
+    // narrower selector early: id ends with " - area"
+    const gs = root.querySelectorAll('g.s_e[id$=" - area"]');
+    for (let i = 0; i < gs.length; i++) {
+      const g = gs[i];
+
+      // class must be exactly "s_e"
+      if ((g.getAttribute("class") || "") !== "s_e") continue;
+
+      const gid = g.getAttribute("id") || "";
+      if (!reId.test(gid)) continue;
+
+      const ulist = g.querySelectorAll("use");
+      for (let j = 0; j < ulist.length; j++) {
+        const u = ulist[j];
+
+        // per your rule: style.strokeWidth
+        const sw = _parseNum(u.style ? u.style.strokeWidth : "");
+        if (!Number.isFinite(sw) || sw > maxStrokeWidth) continue;
+
+        const bar = _ensureBarAfterUse(u);
+        if (!bar) continue;
+		
+        items.push({ u, bar });
+      }
+    }
+
+    trigger();
+    return items.length;
+  }
+
+
+  function _applyOnce() {
+    for (let i = 0; i < items.length; i++) {
+      const u = items[i].u;
+      const bar = items[i].bar;
+      sync_ub(u, bar);
+      
+    }
+  }
+
+  // burst scheduler (no forever tick)
+  let raf = 0;
+  let burstLeft = 0;
+  let running = true;
+
+  function _tick() {
+    raf = 0;
+    if (!running) return;
+
+    _applyOnce();
+
+    burstLeft--;
+    if (burstLeft > 0) raf = requestAnimationFrame(_tick);
+  }
+
+  function trigger() {
+    if (!running) return;
+    burstLeft = burstFrames;
+	if (!raf) _tick();
+    //if (!raf) raf = requestAnimationFrame(_tick);
+  }
+
+  // lightweight triggers
+  function _onResize() { trigger(); }
+  function _onScroll() { trigger(); }
+
+  let mo = null;
+
+  function start() {
+    if (!running) running = true;
+
+    window.addEventListener("resize", _onResize, { passive: true });
+    window.addEventListener("scroll", _onScroll, { passive: true });
+
+    /*
+    mo = new MutationObserver(function () { trigger(); });
+    mo.observe(root, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["transform", "style", "d", "opacity", "filter"]
+    });
+	*/
+
+    trigger();
+  }
+
+  function stop() {
+    if (!running) return;
+    running = false;
+
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    burstLeft = 0;
+
+    window.removeEventListener("resize", _onResize);
+    window.removeEventListener("scroll", _onScroll);
+    if (mo) { try { mo.disconnect(); } catch (e) {} }
+    mo = null;
+
+    // restore originals and remove bars
+    for (let i = 0; i < items.length; i++) {
+      _cleanupOriginal(items[i].u);
+      const bar = items[i].bar;
+      if (bar && bar.parentNode) bar.parentNode.removeChild(bar);
+    }
+    items = [];
+  }
+
+  refresh();
+  start();
+
+  return { refresh, start, stop, trigger };
+}
+
+
+
 
 let wheelBlocked = true;       // start blocked during loader
 let wheelDrainUntil = 0;       // time until which we discard backlog
@@ -4909,7 +5456,7 @@ window.dzv.ypanpx = 0.0;
 
 
 
-
+const prev_vals = [0, 0];
 const ref_vals = [0, 0, 0, 0];
 function applyScrollScaleClippedPercent(ref_chart, ref_axis, clip_chart, clip_axis) {
   const sx = Math.max(1, +window.dzv.xscale || 1);
@@ -4970,117 +5517,20 @@ function applyScrollScaleClippedPercent(ref_chart, ref_axis, clip_chart, clip_ax
     `translate(${-xpad} 0) translate(${ox} 0) scale(${isx} 1) translate(${-ox} 0)`
   );
   
+  
+  if (prev_vals[0] !== window.dzv.xscale || prev_vals[1] !== window.dzv.yscale)
+   {
+    if (window.dzv.minimum_paint) window.dzv.minimum_paint.trigger();
+    prev_vals[0] = window.dzv.xscale;
+	prev_vals[1] = window.dzv.yscale;
+   } 
+  
   if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
   if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 
   return { xpan, ypan, xpad, ypad, xscale: sx, yscale: sy };
 }
 
-
-
-function applyScrollScaleClippedPercentAni(ref_chart, ref_axis, clip_chart, clip_axis) {
-  // DEFERRED COMMIT (2xRAF) built-in, coalesces bursts.
-  // - Callers can keep calling this function as before.
-  // - First call in a burst schedules the commit; later calls update refs and return quickly.
-  // - The actual heavy work runs once per burst on the 2nd RAF.
-
-  // Per-function static state (no globals, no new API)
-  if (!applyScrollScaleClippedPercent._dzv) {
-    applyScrollScaleClippedPercent._dzv = {
-      pending: false,
-      tok: 0,
-      lastArgs: null
-    };
-  }
-  const S = applyScrollScaleClippedPercent._dzv;
-
-  // Always keep the latest refs (in case caller passes different nodes)
-  S.lastArgs = { ref_chart, ref_axis, clip_chart, clip_axis };
-
-  if (S.pending) {
-    return null; // commit already scheduled
-  }
-
-  S.pending = true;
-  const tok0 = ++S.tok;
-
-  requestAnimationFrame(function () {
-    if (!S.pending || tok0 !== S.tok) return;
-    requestAnimationFrame(function () {
-      if (!S.pending || tok0 !== S.tok) return;
-      S.pending = false;
-
-      const A = S.lastArgs;
-      if (!A || !A.ref_chart || !A.ref_axis || !A.clip_chart || !A.clip_axis) return;
-
-      const sx = Math.max(1, +window.dzv.xscale || 1);
-      const sy = Math.max(1, +window.dzv.yscale || 1);
-
-      const xpan = Math.max(0, Math.min(100, +window.dzv.xpan || 0));
-      const ypan = Math.max(0, Math.min(100, +window.dzv.ypan || 0));
-
-      if (ref_vals[2] === 0) {
-        const bb = A.clip_chart.querySelector("rect").getBBox();
-        if (bb) {
-          ref_vals[0] = bb.x;
-          ref_vals[1] = bb.y;
-          ref_vals[2] = bb.width;
-          ref_vals[3] = bb.height;
-        }
-      }
-
-      const ox = ref_vals[0];
-      const oy = ref_vals[1];
-      const wx = ref_vals[2];
-      const hy = ref_vals[3];
-
-      let xpad = -(xpan / 100) * (wx * (sx - 1)) / sx;
-      let ypad = -(ypan / 100) * (hy * (sy - 1)) / sy;
-
-      window.dzv.xpanpx = xpad;
-      window.dzv.ypanpx = ypad;
-
-      A.ref_chart.setAttribute(
-        "transform",
-        `translate(${ox} ${oy}) scale(${sx} ${sy}) translate(${-ox} ${-oy}) translate(${xpad} ${ypad})`
-      );
-
-      A.ref_axis.setAttribute(
-        "transform",
-        `translate(${ox} 0) scale(${sx} 1) translate(${-ox} 0) translate(${xpad} 0)`
-      );
-
-      const isx = 1 / sx;
-      const isy = 1 / sy;
-
-      A.clip_chart.setAttribute(
-        "transform",
-        `translate(${-xpad} ${-ypad}) translate(${ox} ${oy}) scale(${isx} ${isy}) translate(${-ox} ${-oy})`
-      );
-
-      A.clip_axis.setAttribute(
-        "transform",
-        `translate(${-xpad} 0) translate(${ox} 0) scale(${isx} 1) translate(${-ox} 0)`
-      );
-	  
-	  if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
-      if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
-
-      // return value is inherently async now; keep side-effects as the "result"
-    });
-  });
-
-  return null;
-}
-
-// Optional: allow callers to cancel a pending commit (safe no-op if none pending)
-applyScrollScaleClippedPercent.cancelPending = function () {
-  const S = applyScrollScaleClippedPercent._dzv;
-  if (!S) return false;
-  S.pending = false;
-  S.tok++;
-  return true;
-};
 
 
 
@@ -11806,6 +12256,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
         if (window.dzv.hide_highlight) window.dzv.hide_highlight();
         if (typeof window.justHideMenu === "function") window.justHideMenu();
 	    window.dzv.morphing = true;
+		
 		const blk = document.getElementById("dzv_anim_blocker");
 		if (blk) blk.style.display = "none";
 
@@ -12404,6 +12855,8 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
   if (window.dzv.hide_highlight) window.dzv.hide_highlight();
   if (typeof window.justHideMenu === "function") window.justHideMenu();
   window.dzv.animating = true;
+  if ( window.dzv.minimum_paint) {window.dzv.minimum_paint.stop();}
+  
   window.dzv.morphing = false;
 
   const global_id = '00-0000';
@@ -13147,6 +13600,7 @@ function d_from_array_or_ellipse(arr,closed = true) {
     if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
 
     window.dzv.animating = false;
+	if ( window.dzv.minimum_paint) { window.dzv.minimum_paint.refresh(); window.dzv.minimum_paint.start();}
 
     if (_pauseBtn && _pauseBtn.btn) _pauseBtn.btn.style.display = "none";
 	if (_stopBtn && _stopBtn.btn) _stopBtn.btn.style.display = "none";
@@ -19175,6 +19629,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (window.dzv.scale_warp) window.dzv.scale_warp(tTarget);
 	        if (window.dzv.swap_axis_warp) window.dzv.swap_axis_warp();
 	        window.dzv.now_warping = false;
+			if ( window.dzv.minimum_paint) { window.dzv.minimum_paint.refresh(); window.dzv.minimum_paint.start();}
+
 	    }
 	    // Cached mode needs visible sets for speed
 	    let [setp, sett] = useCachedFrames ? dzvVisibleSets(svg, false) : [null, null];
@@ -19274,6 +19730,9 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (tt < 0) tt = 0;
 	        if (tt > 1) tt = 1;
 	        if (u < 1) {
+			    
+				
+			
 	            window.dzv.now_warping = true;
 	            if (useCachedFrames) {
 	                const fi = applyCachedFrame(tt, setp, sett);
@@ -19294,6 +19753,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        // time ran out or ended: do symmetric mirrored tail + mandatory recompute
 	        mirroredTailAndCommit();
 	    }
+		if ( window.dzv.minimum_paint) window.dzv.minimum_paint.stop();
 	    requestAnimationFrame(tick);
 	}
 	// status helpers (you already had these earlier)
@@ -19701,6 +20161,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (window.dzv.hide_tip) window.dzv.hide_tip();
 	        if (window.dzv.hide_highlight) window.dzv.hide_highlight();
 	        window.dzv.focusing = true;
+			if ( window.dzv.minimum_paint) window.dzv.minimum_paint.stop();
 	        stopAnim();
 	        clearFocusInstant();
 	        const wrapper = ensureWrapper();
@@ -19809,6 +20270,9 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                    "transform", `matrix(1 0 0 ${s.syTarget} 0 ${targetYc - s.syTarget * baseCenterY})`
 	                );
 	                window.dzv.focusing = false;
+					
+					if ( window.dzv.minimum_paint) { window.dzv.minimum_paint.refresh(); window.dzv.minimum_paint.start();}
+					
 	                if (window.dzv.hide_tip) window.dzv.hide_tip();
 	                if (window.dzv.hide_highlight) window.dzv.hide_highlight();
 	                if (window.dzv.was_stack_track && window.dzv.stackTrack) {
@@ -19910,6 +20374,9 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                if (window.dzv.hide_highlight) window.dzv.hide_highlight();
 	                if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 	                window.dzv.focusing = false;
+					
+					if ( window.dzv.minimum_paint) { window.dzv.minimum_paint.refresh(); window.dzv.minimum_paint.start();}
+		
 	            }
 	        };
 	        state.raf = requestAnimationFrame(tick);
@@ -22201,7 +22668,7 @@ function applyLayout(items) {
     if (!ev) return false;
     if (ev.pointerType !== "mouse") return false;
     if (ev.button !== 0) return false;
-	if (window.dzv.xscale * window.dzv.xscale <1.0001) return false;
+	if (window.dzv.xscale * window.dzv.yscale <1.0001) return false;
     if (!ev.ctrlKey && _hasForbiddenUnderCursor(ev)) return false;
     if (ev.metaKey || ev.altKey) return false;
     if (window.dzv.animating) return false;
