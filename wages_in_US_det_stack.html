@@ -4396,6 +4396,116 @@
 <script>
 // Global gate
 
+function dzvSecureMinStrokeWidth(opts) {
+  opts = opts || {};
+  const root = opts.root || document;
+  const maxConsider = (typeof opts.maxConsider === "number") ? opts.maxConsider : 1.25;
+  const targetMin = (typeof opts.targetMin === "number") ? opts.targetMin : 0.5;
+
+  const reId = /^\d{2}-\d{4}\s*-\s*area$/;
+
+  function _hasClass(el, cls) {
+    const c = el.getAttribute("class") || "";
+    return (" " + c + " ").indexOf(" " + cls + " ") >= 0;
+  }
+
+  function _parseNumAndUnit(s) {
+    // Accept "0.6", "0.6px", "0.6pt", etc.
+    if (s == null) return null;
+    const t = String(s).trim();
+    if (!t) return null;
+    const m = t.match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)(.*)$/);
+    if (!m) return null;
+    const num = parseFloat(m[1]);
+    if (!Number.isFinite(num)) return null;
+    const unit = m[2] || "";
+    return { num, unit };
+  }
+
+  // 1) Collect candidates
+  const hits = []; // {g, useEl, swOldNum, unit, swOldStr}
+  const gs = root.querySelectorAll("g.s_e[id]");
+  for (let i = 0; i < gs.length; i++) {
+    const g = gs[i];
+    const id = g.getAttribute("id") || "";
+    if (!reId.test(id)) continue;
+
+    const uses = g.querySelectorAll("use");
+    for (let j = 0; j < uses.length; j++) {
+      const u = uses[j];
+
+      // Per your request: style.strokeWidth
+      const swStr = u.style ? u.style.strokeWidth : "";
+      const parsed = _parseNumAndUnit(swStr);
+      if (!parsed) continue;
+
+      if (parsed.num <= maxConsider) {
+        hits.push({
+          g,
+          useEl: u,
+          swOldNum: parsed.num,
+          unit: parsed.unit,
+          swOldStr: swStr
+        });
+      }
+    }
+  }
+
+  // Nothing to do
+  if (!hits.length) return { changed: 0, minOld: NaN, maxOld: NaN, items: [] };
+
+  // 2) Compute min/max among <= maxConsider
+  let minOld = Infinity, maxOld = -Infinity;
+  for (let k = 0; k < hits.length; k++) {
+    const v = hits[k].swOldNum;
+    if (v < minOld) minOld = v;
+    if (v > maxOld) maxOld = v;
+  }
+
+  // 3) Linear map: minOld -> targetMin, maxOld -> maxOld (unchanged)
+  // new = targetMin + (old-minOld) * (maxOld-targetMin)/(maxOld-minOld)
+  const items = [];
+  let changed = 0;
+
+  if (!(maxOld > minOld)) {
+    // All equal, set them all to maxOld (no change), unless you want min forced
+    for (let k = 0; k < hits.length; k++) {
+      items.push({
+        id: hits[k].g.getAttribute("id") || "",
+        old: hits[k].swOldNum,
+        new: hits[k].swOldNum
+      });
+    }
+    return { changed: 0, minOld, maxOld, items };
+  }
+
+  const a = (maxOld - targetMin) / (maxOld - minOld);
+
+  for (let k = 0; k < hits.length; k++) {
+    const h = hits[k];
+    const oldv = h.swOldNum;
+    const newv = targetMin + (oldv - minOld) * a;
+
+    // Keep the same unit suffix that was present in style.strokeWidth
+    const newStr = String(newv) + (h.unit || "");
+
+    if (h.useEl.style.strokeWidth !== newStr) {
+      h.useEl.style.strokeWidth = newStr;
+      changed++;
+    }
+
+    items.push({
+      id: h.g.getAttribute("id") || "",
+      old: oldv,
+      new: newv
+    });
+  }
+
+  return { changed, minOld, maxOld, items };
+}
+
+dzvSecureMinStrokeWidth({root:document.getElementById("dzv_gen"), targetMin:0.75, maxConsider:1.201});
+
  window.dzv = window.dzv || {};
 
 let wheelBlocked = true;       // start blocked during loader
@@ -12274,6 +12384,12 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
     const tspans = Array.from(textEl.querySelectorAll("tspan"));
     window.dzvTextAnisoApplyOne(textEl);
     if (tspans) for (let i = 0; i < tspans.length; i++) window.dzvTextAnisoApplyOne(tspans[i]);
+	const patchPath = svg.querySelector("g#patch_2 path");
+	const patchPath2 = svg.querySelector("g#patch_22 path");
+	const prect = patchPath.getBoundingClientRect();
+	const prect2 = patchPath2.getBoundingClientRect();
+	window.dzvTextClampAndApplyOne(svg, textEl, prect, prect2, 0, 0);
+	
     return ret;
   }
 
