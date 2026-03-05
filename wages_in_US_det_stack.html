@@ -74,6 +74,8 @@
 		transform-origin: 0 0;
 		transform-box: view-box;
 		visibility: hidden;
+		-webkit-transform: translateZ(0); /* Force GPU acceleration */
+        -webkit-backface-visibility: hidden; /* Prevent flickering */
 	}
 
 	#dzv_gen text {
@@ -20154,7 +20156,9 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        return recs;
 	    }
 	    // ---- CLIP SWITCH (uses cached v.clip_major; restores previous clip-path exactly) ----
+		let restored_clip = false;
 	    function snapshotAndApplyFamilyMajorClip(familyIds) {
+		    restored_clip = false;
 	        const recs = [];
 	        // { el:<use>, prevClipPath:string|null }
 	        for (let i = 0; i < familyIds.length; i++) {
@@ -20193,8 +20197,10 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        }
 	        return recs;
 	    }
-
+		
 	    function restoreClip(recs) {
+		    if (restored_clip) return;
+			   restored_clip = true;
 	        for (let i = recs.length - 1; i >= 0; i--) {
 	            const r = recs[i];
 	            if (!r || !r.el) continue;
@@ -20425,6 +20431,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (window.dzv.hide_tip) window.dzv.hide_tip();
 	        if (window.dzv.hide_highlight) window.dzv.hide_highlight();
 	        window.dzv.focusing = true;
+			if ( window.dzv.minimum_paint) window.dzv.minimum_paint.stop();
 	        stopAnim();
 	        const wrapper = ensureWrapper();
 	        const vb = getVB();
@@ -20433,6 +20440,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        const syFrom = s0.syTarget;
 	        const baseCenterY = s0.baseCenterY;
 	        // animate out: unscale + fade others back in
+			restoreClip(s0.clipRecs || []);
 	        const t0 = performance.now();
 	        const tick = (now) => {
 	            const dt = now - t0;
@@ -23580,7 +23588,7 @@ if (window.dzv.show_zoom_controls)
 	        }
 	        // initial layout
 	        applyLayoutForT(0, "all");
-	        svg.style.visibility = "visible";
+	        //svg.style.visibility = "visible";
 	        // ---------------------------------------------------------------------------
 	        // 7. ANIMATION CONTROL (FIXED)
 	        // ---------------------------------------------------------------------------
@@ -25941,6 +25949,7 @@ function init_circles()
 runWhenFullyLoaded(() => {
   // your function here
    if (window.dzv && typeof window.dzv.recomputeAndApply === "function") window.dzv.recomputeAndApply(true);
+   svg.style.visibility = "visible";
    
    if (window.stack_tracking)
    {
