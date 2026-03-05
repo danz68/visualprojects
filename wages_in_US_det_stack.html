@@ -4398,6 +4398,8 @@
 <script>
 // Global gate
 
+
+
 function dzvSecureMinStrokeWidth(opts) {
   opts = opts || {};
   const root = opts.root || document;
@@ -4506,7 +4508,7 @@ function dzvSecureMinStrokeWidth(opts) {
   return { changed, minOld, maxOld, items };
 }
 
-//dzvSecureMinStrokeWidth({root:document.getElementById("dzv_gen"), targetMin:0.5, maxConsider:1.201});
+dzvSecureMinStrokeWidth({root:document.getElementById("dzv_gen"), targetMin:0.5, maxConsider:1.201});
 
 window.dzv = window.dzv || {};
 
@@ -4650,7 +4652,7 @@ function dzvInstallMinPaintHeightBarGuard(opts) {
   opts = opts || {};
   const root = opts.root || document;
 
-  const maxStrokeWidth = (typeof opts.maxStrokeWidth === "number") ? opts.maxStrokeWidth : 1.25;
+  const maxStrokeWidth = (typeof opts.maxStrokeWidth === "number") ? opts.maxStrokeWidth : 1.5;
   const minHeightPx = (typeof opts.minHeightPx === "number") ? opts.minHeightPx : 1.0;
 
   // run N frames after a trigger, then sleep (NO continuous tick)
@@ -4783,7 +4785,9 @@ function dzvInstallMinPaintHeightBarGuard(opts) {
 
 
   function sync_ub(u, bar)
+    
     {
+	  u.setAttribute("shape-rendering", "geometricPrecision");
 	  const r = _getRect(u);
       if (!r) { _showOriginalHideBar(u, bar); return; }
 
@@ -5096,8 +5100,8 @@ function dzvCalibrateMinRenderableSvgPxRaster(svgEl, startPx, stepPx, maxPx) {
   function done(v) {
     window.dzvMinRenderablePx = v;
 	//console.log(window.dzvMinRenderablePx);
-    window.dzv.minimum_paint = dzvInstallMinPaintHeightBarGuard({root:document.getElementById("dzv_gen"), maxStrokeWidth : 1.5, minHeightPx:
-    Math.max(window.dzvMinRenderablePx,1), burstFrames:2});
+	const mpx = Math.max(window.dzvMinRenderablePx,1);
+    window.dzv.minimum_paint = dzvInstallMinPaintHeightBarGuard({root:document.getElementById("dzv_gen"), maxStrokeWidth : 1.5, minHeightPx:mpx, burstFrames:2});
   }
 
   function step() {
