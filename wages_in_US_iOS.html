@@ -4399,7 +4399,43 @@
 <script>
 // Global gate
 
+(function () {
+  const meta = document.getElementById("dzv_gen").querySelector('g#dzv-geom-metadata');
+  if (!meta) return;
 
+  const carvedIdRe = /^dzv-(\d\d-\d\d\d\d) - carved$/;
+
+  function normalizeD(d) {
+    return String(d || "").replace(/\s+/g, " ").trim();
+  }
+
+  function getFirstAbsoluteMove(d) {
+    d = String(d || "");
+    const m = d.match(/^\s*(M\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?(?:[\s,]+)[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)/);
+    return m ? m[1].replace(/\s+/g, " ").trim() : null;
+  }
+
+  const paths = meta.querySelectorAll("path[id]");
+
+  for (let i = 0; i < paths.length; i++) {
+    const carved = paths[i];
+    const carvedId = carved.getAttribute("id") || "";
+    const mm = carvedId.match(carvedIdRe);
+    if (!mm) continue;
+
+    const dCarved = normalizeD(carved.getAttribute("d"));
+    if (dCarved !== "M 0 0") continue;
+
+    const baseId = mm[1];
+    const full = meta.querySelector(`path[id="dzv-${baseId} - full"]`);
+    if (!full) continue;
+
+    const firstM = getFirstAbsoluteMove(full.getAttribute("d"));
+    if (!firstM) continue;
+
+    carved.setAttribute("d", firstM);
+  }
+})();
 
 function dzvSecureMinStrokeWidth(opts) {
   opts = opts || {};
@@ -15773,7 +15809,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            if (window.dzvFocusMajor) {
 	                unlock();
 	                window.dzv.majorFocus.clearFocus();
-	                window.dzvFocusMajor = null;
+	                //window.dzvFocusMajor = null;
 	            } else {
 	                const mjr = state.meta.parent.id;
 	                if (mjr === '00' || mjr === '00-0000') {} else {
@@ -15797,7 +15833,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            if (window.dzvFocusMajor) {
 	                unlock();
 	                window.dzv.majorFocus.clearFocus();
-	                window.dzvFocusMajor = null;
+	                //window.dzvFocusMajor = null;
 	            } else {
 	                const mjr = state.meta.baseId;
 	                if (mjr === '00' || mjr === '00-0000') {} else {
@@ -19601,7 +19637,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    const model = dzvRoot.model;
 	    if (!model || !model.map_violins) throw new Error("dzvInitMajorFocus: missing dzv.model (run dzvBuildModel first)");
 	    const cfg = {
-	        hitSelector: opts.hitSelector ?? 'g.s_e[id$=" - area"], g.s_e[id$=" - edge"], text.s_e[id$=" - label"]',
+	        hitSelector: opts.hitSelector ?? 'g.s_e[id$=" - area"], g.s_e[id$=" - edge"]', // text.s_e[id$=" - label"]',
 	        durationMs: opts.durationMs ?? 420,
 	        ease: opts.ease ?? ((t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)),
 	        padFrac: opts.padFrac ?? 0.95,
@@ -20004,8 +20040,10 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            if (!isInFamily) {
 	                applyHidden(el);
 	                hiddenEls.add(el);
+					
 	            } else {
 	                applyVisible(el, prev.pointerEvents);
+					
 	            }
 	        }
 	        // Compute base bbox center (for stable scale-about)
@@ -20013,8 +20051,10 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        let bb0;
 	        try {
 	            bb0 = DZV.getPlotBox(wrapper);//wrapper.getBBox();
+				
 	        } catch {
 	            bb0 = null;
+				
 	        }
 	        if (!bb0 || !(bb0.height > 0)) bb0 = {
 	            y: targetYc - 0.5,
@@ -20069,9 +20109,10 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            const sy = 1 + (s.syTarget - 1) * e;
 	            const yC = baseCenterY + (targetYc - baseCenterY) * e;
 	            setWrapperTransformCentered(wrapper, sy, yC, baseCenterY);
-				if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+				
 	            if (t < 1) {
 	                state.raf = requestAnimationFrame(tick);
+					if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 	            } else {
 	                state.raf = 0;
 	                //finalizeHidden(s.hiddenPrev, s.hiddenEls);
@@ -20104,6 +20145,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            window.dzv.was_stack_track = true;
 	            window.dzv.stackTrack.exit();
 	        }
+			
+			window.dzvFocusMajor=null;
 	        stopAnim();
 	        const s = state.session;
 	        const wrapper = state.wrapper || svg.querySelector(gById(cfg.wrapperId));
@@ -20136,6 +20179,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        }
 	        state.activeMajor = "";
 	        state.session = null;
+			
 	    }
 
 	    function clearFocus() {
@@ -20158,7 +20202,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        // animate out: unscale + fade others back in
 			//restoreClip(s0.clipRecs || []);
 			
-			//window.dzvFocusMajor = state.activeMajor.substring(0, 2);
+
 	        const t0 = performance.now();
 			let once = false;
 	        const tick = (now) => {
@@ -20179,9 +20223,9 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            const sy = syFrom + (1 - syFrom) * e;
 	            const yC = targetYc + (baseCenterY - targetYc) * e;
 	            setWrapperTransformCentered(wrapper, sy, yC, baseCenterY);
-				//console.log(window.dzvFocusMajor);
-				//console.log(state.activeMajor);
-				//if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+				
+				//window.dzvFocusMajor = state.activeMajor;
+				if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 				if (t>0.5 && !once)
 				 {
 				  once = true;
@@ -20191,7 +20235,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                state.raf = requestAnimationFrame(tick);
 	            } else {
 	                state.raf = 0;
-					//window.dzvFocusMajor="";
+					
 	                clearFocusInstant();
 	                if (window.dzv.hide_tip) window.dzv.hide_tip();
 	                if (window.dzv.hide_highlight) window.dzv.hide_highlight();
@@ -24441,7 +24485,7 @@ if (window.dzv.show_zoom_controls)
 	            if (activeMajor) {
 	                //if (window.dzvFocusRestore) window.dzvFocusRestore();
 	                window.dzv.majorFocus.clearFocus();
-	                window.dzvFocusMajor = null;
+	                //window.dzvFocusMajor = null;
 	                hideMenu();
 	            } else {
 	                const maj = window.dzv.context_menu;
@@ -25272,7 +25316,7 @@ btn.innerHTML = '<img src="data:image/gif;base64,'
 	        if (!onaxis) {
 	            if (window.dzvFocusMajor) {
 	                window.dzv.majorFocus.clearFocus();
-	                window.dzvFocusMajor = null;
+	                //window.dzvFocusMajor = null;
 	            } else {
 	                let major = null;
 	                let node = hitEl;
