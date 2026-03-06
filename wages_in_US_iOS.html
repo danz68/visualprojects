@@ -4512,15 +4512,14 @@ function dzvSecureMinStrokeWidth(opts) {
 dzvSecureMinStrokeWidth({root:document.getElementById("dzv_gen"), targetMin:0.5, maxConsider:1.201});
 
 window.dzv = window.dzv || {};
-if (false)
+
+
 (function () {
   const NS = "http://www.w3.org/2000/svg";
   const XLINK_NS = "http://www.w3.org/1999/xlink";
 
   const ATTR_HIDDEN  = "data-dzv-use-mirror-hidden";
   const ATTR_OUTSIDE = "data-dzv-use-outside-opacity";
-  const ATTR_WRAP    = "data-dzv-use-mirror-wrap";
-  const ATTR_SHIFT   = "data-dzv-use-mirror-shift";
   const ATTR_PATH    = "data-dzv-use-mirror-path";
   const ATTR_GEN     = "data-dzv-use-mirror-gen";
 
@@ -4533,8 +4532,6 @@ if (false)
     "width",
     "height",
     "transform",
-    "opacity",
-	//"filter",
     ATTR_HIDDEN.toLowerCase(),
     ATTR_OUTSIDE.toLowerCase(),
     ATTR_GEN.toLowerCase()
@@ -4578,350 +4575,6 @@ if (false)
     if (!target) return null;
 
     return lowerTag(target) === "path" ? target : null;
-  }
-
-
-  function readOutsideOpacity(useEl) {
-    const st = useEl.style ? useEl.style.opacity : "";
-    if (st != null && st !== "") return String(st);
-    const at = useEl.getAttribute("opacity");
-    if (at != null && at !== "") return String(at);
-    return "";
-  }
-
-  function getUseCoord(useEl, prop) {
-    try {
-      const v = useEl[prop];
-      if (v && v.baseVal && typeof v.baseVal.value === "number" && isFinite(v.baseVal.value)) {
-        return v.baseVal.value;
-      }
-    } catch (e) {}
-    const raw = useEl.getAttribute(prop);
-    const num = raw == null || raw === "" ? 0 : parseFloat(raw);
-    return isFinite(num) ? num : 0;
-  }
-
-  function clearAttrs(el, keepSet) {
-    const rm = [];
-    for (let i = 0; i < el.attributes.length; i++) {
-      const n = el.attributes[i].name;
-      if (!keepSet.has(n)) rm.push(n);
-    }
-    for (let i = 0; i < rm.length; i++) el.removeAttribute(rm[i]);
-  }
-
-  function ensureMirrorNodes(useEl) {
-    const ctl = controllers.get(useEl);
-    if (ctl && ctl.nodes) return ctl.nodes;
-
-
-    const path = document.createElementNS(NS, "path");
-    path.setAttribute(ATTR_PATH, "1");
-    path.setAttribute(ATTR_GEN, "1");
-    path.style.pointerEvents = "none";
-
-	if (useEl.parentNode) useEl.parentNode.insertBefore(path, useEl.nextSibling);
-
-    return { path };
-  }
-
-  function keepMirrorAfterUse(useEl, path) {
-    const p = useEl.parentNode;
-    if (!p) return;
-    if (path.parentNode !== p || useEl.nextSibling !== path) {
-      p.insertBefore(path, useEl.nextSibling);
-    }
-  }
-
-  function syncMirrorTransforms(useEl, targetPath, nodes) {
-    
-
-    if (targetPath) {
-      const tt = targetPath.getAttribute("transform");
-      if (tt) nodes.path.setAttribute("transform", tt);
-      else nodes.path.removeAttribute("transform");
-    } else {
-      nodes.path.removeAttribute("transform");
-    }
-  }
-
-  function syncMirrorGeometry(targetPath, pathEl) {
-    if (!targetPath) {
-      pathEl.setAttribute("d", "");
-      pathEl.removeAttribute("pathLength");
-      return;
-    }
-
-    pathEl.setAttribute("d", targetPath.getAttribute("d") || "");
-
-    const pl = targetPath.getAttribute("pathLength");
-    if (pl != null) pathEl.setAttribute("pathLength", pl);
-    else pathEl.removeAttribute("pathLength");
-	
-	
-  }
-
-  function syncUseAttrsToMirrorPath(useEl, pathEl, outsideOpacity) {
-    clearAttrs(pathEl, new Set([ATTR_PATH, ATTR_GEN]));
-
-    for (let i = 0; i < useEl.attributes.length; i++) {
-      const a = useEl.attributes[i];
-      const name = a.name;
-      const lname = name.toLowerCase();
-
-      if (SKIP_USE_ATTRS.has(lname)) continue;
-
-      if (lname === "style") {
-        const s = a.value;//removeOpacityFromStyleText(a.value);
-        if (s) pathEl.setAttribute("style", s);
-        continue;
-      }
-
-      pathEl.setAttribute(name, a.value);
-    }
-	
-
-    pathEl.style.pointerEvents = "none";
-
-  }
-
-  function installOne(useEl) {
-    if (!useEl || lowerTag(useEl) !== "use") {
-      throw new Error("dzvInstallUsePathMirror: expected a <use> element");
-    }
-
-    const prev = controllers.get(useEl);
-    if (prev) return prev.api;
-
-    ensureHideRule();
-
-    const state = {
-      useEl: useEl,
-      nodes: ensureMirrorNodes(useEl),
-      useObs: null,
-      targetObs: null,
-      targetEl: null,
-      syncing: false
-    };
-
-    function bindUseObserver() {
-      if (state.useObs) state.useObs.disconnect();
-      state.useObs = new MutationObserver(function () {
-        syncNow();
-      });
-      state.useObs.observe(useEl, {
-        attributes: true,
-        childList: false,
-        subtree: false
-      });
-    }
-
-    function bindTargetObserver(targetEl) {
-      if (state.targetObs) {
-        state.targetObs.disconnect();
-        state.targetObs = null;
-      }
-      state.targetEl = targetEl || null;
-      if (!state.targetEl) return;
-
-      state.targetObs = new MutationObserver(function () {
-        syncNow();
-      });
-      state.targetObs.observe(state.targetEl, {
-        attributes: true,
-        attributeFilter: ["d", "transform", "pathLength"]
-      });
-    }
-
-    function syncNow() {
-      if (state.syncing) return;
-      state.syncing = true;
-
-      if (state.useObs) state.useObs.disconnect();
-
-      try {
-        keepMirrorAfterUse(useEl, state.nodes.path);
-
-        const outsideOpacity = readOutsideOpacity(useEl);
-        useEl.setAttribute(ATTR_OUTSIDE, outsideOpacity);
-
-        const targetPath = resolveTargetPath(useEl);
-        if (targetPath !== state.targetEl) bindTargetObserver(targetPath);
-
-        syncUseAttrsToMirrorPath(useEl, state.nodes.path, outsideOpacity);
-        syncMirrorGeometry(targetPath, state.nodes.path);
-        syncMirrorTransforms(useEl, targetPath, state.nodes);
-
-        useEl.setAttribute(ATTR_HIDDEN, "1");
-      } finally {
-        bindUseObserver();
-        state.syncing = false;
-      }
-    }
-
-    const api = {
-      sync: syncNow,
-      showUse: function () {
-        if (state.useObs) state.useObs.disconnect();
-        try {
-          useEl.removeAttribute(ATTR_HIDDEN);
-        } finally {
-          bindUseObserver();
-        }
-      },
-      hideUse: function () {
-        if (state.useObs) state.useObs.disconnect();
-        try {
-          useEl.setAttribute(ATTR_HIDDEN, "1");
-        } finally {
-          bindUseObserver();
-        }
-      },
-      destroy: function () {
-        if (state.useObs) {
-          state.useObs.disconnect();
-          state.useObs = null;
-        }
-        if (state.targetObs) {
-          state.targetObs.disconnect();
-          state.targetObs = null;
-        }
-
-        useEl.removeAttribute(ATTR_HIDDEN);
-        useEl.removeAttribute(ATTR_OUTSIDE);
-
-        if (state.nodes.path && state.nodes.path.parentNode) {
-          state.nodes.path.parentNode.removeChild(state.nodes.path);
-        }
-
-        controllers.delete(useEl);
-      },
-      getMirrorPath: function () {
-        return state.nodes.path;
-      },
-      getMirrorWrap: function () {
-        return state.nodes.wrap;
-      },
-      getTargetPath: function () {
-        return state.targetEl;
-      }
-    };
-
-    controllers.set(useEl, { api: api, nodes: state.nodes, state: state });
-
-    bindUseObserver();
-    syncNow();
-
-    return api;
-  }
-
-  function installMany(input) {
-    let arr = [];
-
-    if (typeof input === "string") {
-      arr = Array.from(document.querySelectorAll(input));
-    } else if (input && typeof input.length === "number" && !input.nodeType) {
-      arr = Array.from(input);
-    } else if (input && input.nodeType === 1) {
-      arr = [input];
-    }
-
-    return arr.map(function (el) {
-      return installOne(el);
-    });
-  }
-
-  window.dzvInstallUsePathMirror = installOne;
-  window.dzvInstallUsePathMirrors = installMany;
-})();
-
-
-
-(function () {
-  const NS = "http://www.w3.org/2000/svg";
-  const XLINK_NS = "http://www.w3.org/1999/xlink";
-
-  const ATTR_HIDDEN  = "data-dzv-use-mirror-hidden";
-  const ATTR_OUTSIDE = "data-dzv-use-outside-opacity";
-  const ATTR_WRAP    = "data-dzv-use-mirror-wrap";
-  const ATTR_SHIFT   = "data-dzv-use-mirror-shift";
-  const ATTR_PATH    = "data-dzv-use-mirror-path";
-  const ATTR_GEN     = "data-dzv-use-mirror-gen";
-
-  const SKIP_USE_ATTRS = new Set([
-    "id",
-    "href",
-    "xlink:href",
-    "x",
-    "y",
-    "width",
-    "height",
-    "transform",
-    "opacity",
-    //"filter",
-    ATTR_HIDDEN.toLowerCase(),
-    ATTR_OUTSIDE.toLowerCase(),
-    ATTR_GEN.toLowerCase()
-  ]);
-
-  const controllers = new WeakMap();
-
-  function ensureHideRule() {
-    if (document.getElementById("dzv-use-mirror-hide-rule")) return;
-    const st = document.createElement("style");
-    st.id = "dzv-use-mirror-hide-rule";
-    st.textContent = 'use[' + ATTR_HIDDEN + '="1"]{opacity:0 !important;}';
-    document.head.appendChild(st);
-  }
-
-  function lowerTag(el) {
-    return ((el && el.tagName) ? String(el.tagName) : "").toLowerCase();
-  }
-
-  function getHrefValue(useEl) {
-    return (
-      useEl.getAttribute("href") ||
-      useEl.getAttributeNS(XLINK_NS, "href") ||
-      useEl.getAttribute("xlink:href") ||
-      ""
-    );
-  }
-
-  function resolveTargetPath(useEl) {
-    const href = getHrefValue(useEl);
-    if (!href || href.charAt(0) !== "#") return null;
-
-    const id = href.slice(1);
-    const ownerSvg = useEl.ownerSVGElement || null;
-
-    let target = null;
-    if (ownerSvg && typeof ownerSvg.getElementById === "function") {
-      target = ownerSvg.getElementById(id);
-    }
-    if (!target) target = document.getElementById(id);
-    if (!target) return null;
-
-    return lowerTag(target) === "path" ? target : null;
-  }
-
-  function readOutsideOpacity(useEl) {
-    const st = useEl.style ? useEl.style.opacity : "";
-    if (st != null && st !== "") return String(st);
-    const at = useEl.getAttribute("opacity");
-    if (at != null && at !== "") return String(at);
-    return "";
-  }
-
-  function getUseCoord(useEl, prop) {
-    try {
-      const v = useEl[prop];
-      if (v && v.baseVal && typeof v.baseVal.value === "number" && isFinite(v.baseVal.value)) {
-        return v.baseVal.value;
-      }
-    } catch (e) {}
-    const raw = useEl.getAttribute(prop);
-    const num = raw == null || raw === "" ? 0 : parseFloat(raw);
-    return isFinite(num) ? num : 0;
   }
 
   function setAttrIfDifferent(el, name, value) {
@@ -4931,6 +4584,19 @@ if (false)
 
   function removeAttrIfPresent(el, name) {
     if (el.hasAttribute(name)) el.removeAttribute(name);
+  }
+
+  function getUseCoord(useEl, prop) {
+    try {
+      const v = useEl[prop];
+      if (v && v.baseVal && typeof v.baseVal.value === "number" && isFinite(v.baseVal.value)) {
+        return v.baseVal.value;
+      }
+    } catch (e) {}
+    const raw = useEl.getAttribute(prop);
+    if (raw == null || raw === "") return 0;
+    const num = parseFloat(raw);
+    return isFinite(num) ? num : 0;
   }
 
   function ensureMirrorNodes(useEl) {
@@ -4955,14 +4621,28 @@ if (false)
     }
   }
 
-  function syncMirrorTransforms(useEl, targetPath, nodes) {
+  function buildCombinedTransform(useEl, targetPath) {
+    const parts = [];
+
+    const x = getUseCoord(useEl, "x");
+    const y = getUseCoord(useEl, "y");
+    if (x || y) parts.push("translate(" + x + " " + y + ")");
+
+    const useTransform = useEl.getAttribute("transform");
+    if (useTransform) parts.push(useTransform);
+
     if (targetPath) {
-      const tt = targetPath.getAttribute("transform");
-      if (tt != null) setAttrIfDifferent(nodes.path, "transform", tt);
-      else removeAttrIfPresent(nodes.path, "transform");
-    } else {
-      removeAttrIfPresent(nodes.path, "transform");
+      const targetTransform = targetPath.getAttribute("transform");
+      if (targetTransform) parts.push(targetTransform);
     }
+
+    return parts.join(" ").trim();
+  }
+
+  function syncMirrorTransform(useEl, targetPath, pathEl) {
+    const t = buildCombinedTransform(useEl, targetPath);
+    if (t) setAttrIfDifferent(pathEl, "transform", t);
+    else removeAttrIfPresent(pathEl, "transform");
   }
 
   function syncMirrorGeometry(targetPath, pathEl) {
@@ -4981,7 +4661,7 @@ if (false)
     }
   }
 
-  function syncUseAttrsToMirrorPath(useEl, pathEl, outsideOpacity) {
+  function syncUseAttrsToMirrorPath(useEl, pathEl) {
     const desired = new Map();
 
     for (let i = 0; i < useEl.attributes.length; i++) {
@@ -4990,12 +4670,6 @@ if (false)
       const lname = name.toLowerCase();
 
       if (SKIP_USE_ATTRS.has(lname)) continue;
-
-      if (lname === "style") {
-        desired.set("style", a.value);
-        continue;
-      }
-
       desired.set(name, a.value);
     }
 
@@ -5011,7 +4685,6 @@ if (false)
     for (let i = 0; i < pathEl.attributes.length; i++) {
       const a = pathEl.attributes[i];
       const name = a.name;
-
       if (keepOnPath.has(name)) continue;
       if (!desired.has(name)) toRemove.push(name);
     }
@@ -5088,17 +4761,12 @@ if (false)
       try {
         keepMirrorAfterUse(useEl, state.nodes.path);
 
-        const outsideOpacity = readOutsideOpacity(useEl);
-        if (useEl.getAttribute(ATTR_OUTSIDE) !== outsideOpacity) {
-          useEl.setAttribute(ATTR_OUTSIDE, outsideOpacity);
-        }
-
         const targetPath = resolveTargetPath(useEl);
         if (targetPath !== state.targetEl) bindTargetObserver(targetPath);
 
-        syncUseAttrsToMirrorPath(useEl, state.nodes.path, outsideOpacity);
+        syncUseAttrsToMirrorPath(useEl, state.nodes.path);
         syncMirrorGeometry(targetPath, state.nodes.path);
-        syncMirrorTransforms(useEl, targetPath, state.nodes);
+        syncMirrorTransform(useEl, targetPath, state.nodes.path);
 
         if (useEl.getAttribute(ATTR_HIDDEN) !== "1") {
           useEl.setAttribute(ATTR_HIDDEN, "1");
@@ -5152,7 +4820,7 @@ if (false)
         return state.nodes.path;
       },
       getMirrorWrap: function () {
-        return state.nodes.wrap;
+        return null;
       },
       getTargetPath: function () {
         return state.targetEl;
@@ -5186,7 +4854,9 @@ if (false)
   window.dzvInstallUsePathMirror = installOne;
   window.dzvInstallUsePathMirrors = installMany;
 })();
-dzvInstallUsePathMirrors(document.getElementById("dzv_gen").querySelectorAll("g.s_e[use]"));
+
+
+dzvInstallUsePathMirrors(document.getElementById("dzv_gen").querySelectorAll("g.s_e use"));
 
 
 let wheelBlocked = true;       // start blocked during loader
