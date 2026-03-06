@@ -76,6 +76,7 @@
 		visibility: hidden;
 		-webkit-transform: translateZ(0); /* Force GPU acceleration */
         -webkit-backface-visibility: hidden; /* Prevent flickering */
+		will-change: transform;
 	}
 
 	#dzv_gen text {
@@ -4512,713 +4513,339 @@ dzvSecureMinStrokeWidth({root:document.getElementById("dzv_gen"), targetMin:0.5,
 
 window.dzv = window.dzv || {};
 
-// Calibrate the minimum screen-space height (in CSS px) at which iOS (or any browser)
-// actually produces at least one non-transparent pixel for a small curved shape.
-// Uses an offscreen canvas only. No DOM, no SVG, no layout.
-//
-// Returns: { minPx, dpr, stepPx, maxPx, found, samples }
-//
-// Usage:
-//   const cal = dzvCalibrateMinRenderablePx({ startPx: 0.25, stepPx: 0.25, maxPx: 6 });
-//   // use cal.minPx as your minHeightPx
-
-function dzvCalibrateMinRenderablePx(opts) {
-  opts = opts || {};
-  const startPx = (typeof opts.startPx === "number") ? opts.startPx : 0.25;
-  const stepPx  = (typeof opts.stepPx  === "number") ? opts.stepPx  : 0.25;
-  const maxPx   = (typeof opts.maxPx   === "number") ? opts.maxPx   : 8.0;
-
-  // keep small but enough area to detect
-  const boxPx   = (typeof opts.boxPx   === "number") ? opts.boxPx   : 48;   // CSS px
-  const wPx     = (typeof opts.widthPx === "number") ? opts.widthPx : 24;   // ellipse width in CSS px
-
-  const dpr = (typeof opts.dpr === "number") ? opts.dpr : (window.devicePixelRatio || 1);
-
-  // Create offscreen canvas
-  const c = document.createElement("canvas");
-  c.width  = Math.max(4, Math.round(boxPx * dpr));
-  c.height = Math.max(4, Math.round(boxPx * dpr));
-
-  const ctx = c.getContext("2d", { alpha: true, willReadFrequently: true });
-  if (!ctx) {
-    return { minPx: NaN, dpr, stepPx, maxPx, found: false, samples: 0 };
-  }
-
-  // Work in CSS px coordinates
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  function _anyNonTransparentPixel() {
-    // read full buffer (small canvas)
-    const img = ctx.getImageData(0, 0, c.width, c.height).data;
-    for (let i = 3; i < img.length; i += 4) {
-      if (img[i] !== 0) return true; // alpha channel
-    }
-    return false;
-  }
-
-  function _drawEllipse(heightPx) {
-    // Clear to transparent
-    ctx.clearRect(0, 0, boxPx, boxPx);
-
-    // Draw opaque filled ellipse
-    const cx = boxPx * 0.5;
-    const cy = boxPx * 0.5;
-    const rx = Math.max(0.01, wPx * 0.5);
-    const ry = Math.max(0.01, heightPx * 0.5);
-
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,1)";
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  let h = startPx;
-  let found = false;
-  let samples = 0;
-
-  // Iterate until we get at least one pixel
-  // Keep numeric stability with a bounded iteration count
-  const maxIter = Math.max(1, Math.ceil((maxPx - startPx) / Math.max(stepPx, 1e-6)) + 2);
-
-  for (let k = 0; k < maxIter; k++) {
-    if (h > maxPx + 1e-9) break;
-
-    _drawEllipse(h);
-    samples++;
-
-    if (_anyNonTransparentPixel()) {
-      found = true;
-      break;
-    }
-
-    h += stepPx;
-  }
-
-  return {
-    minPx: found ? h : maxPx,
-    dpr,
-    stepPx,
-    maxPx,
-    found,
-    samples
-  };
-}
-
-
-// Returns the minimum on-screen height (CSS px) at which the test ellipse
-// actually produces non-transparent pixels when the *SVG is rasterized*.
-// This is the closest practical "painted pixel" test you can do in-browser.
-//
-// Usage:
-//   const minPx = await dzvCalibrateMinRenderableSvgPxRaster(document.getElementById("dzv_gen"));
-//   window.dzvMinRenderablePx = minPx;
-
-// One function. No await needed at call site.
-// It runs async internally and calls onDone(minPx) when ready.
-// It also caches the value on window.dzvMinRenderablePx.
-
-//const device_cap = dzvCalibrateMinRenderablePx();
-
-
-
-// iOS thin-geometry rescue that does NOT touch the original <use> at all
-// (no transform, no stroke-width, no filter changes on the original).
-//
-// Instead, it injects a companion <rect> (NOT a <use>) right AFTER each target <use>,
-// inside the SAME parent <g>. That preserves your z-order chain, clip-path, opacity,
-// filters up the ancestor chain, etc. The rect is only shown when the original’s
-// PAINTED height is too small.
-//
-// Crucially: because the companion is a <rect>, it does NOT enlarge your "<use> selection"
-// and will not poison focus geometry if your focus/envelope logic iterates <use> elements.
-//
-// Selection (exactly your rule):
-//   g.id matches "##-#### - area" AND g.class contains "s_e"
-//   inside: <use> where use.style.strokeWidth <= maxStrokeWidth (default 1.25)
-//
-// Behavior each frame:
-//   - measure orig.getBoundingClientRect().height (screen px)
-//   - if < minHeightPx: show the rect and size it to minHeightPx (in USER UNITS)
-//   - else: hide the rect
-//
-// The rect is a "bar" fill (not stroke) because iOS can also cull thin strokes.
-// The bar uses the original’s computed stroke color as fill (best proxy when filters exist),
-// and inherits all ancestor filters automatically. Pointer events disabled.
-
-
-function dzvInstallMinPaintHeightBarGuard(opts) {
-  opts = opts || {};
-  const root = opts.root || document;
-
-  const maxStrokeWidth = (typeof opts.maxStrokeWidth === "number") ? opts.maxStrokeWidth : 1.5;
-  const minHeightPx = (typeof opts.minHeightPx === "number") ? opts.minHeightPx : 1.0;
-
-  // run N frames after a trigger, then sleep (NO continuous tick)
-  const burstFrames = (typeof opts.burstFrames === "number") ? opts.burstFrames : 6;
-
-  // EXACT id pattern: "##-#### - area"
-  const reId = /^\d{2}-\d{4}\s*-\s*area$/;
-
-  const ATTR_BAR = "data-dzv-thin-bar";
-  const ATTR_KEY = "data-dzv-thin-bar-key";
-
-  // swap state on original <use>
-  const ATTR_BASE_OP = "data-dzv-bg-base-opacity";
-  const ATTR_BASE_PE = "data-dzv-bg-base-pe";
-
-  function _parseNum(s) {
-    if (s == null) return NaN;
-    const m = String(s).trim().match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)/);
-    return m ? parseFloat(m[1]) : NaN;
-  }
-
-  function _getRect(el) {
-    try { return el.getBoundingClientRect(); } catch (e) { return null; }
-  }
-
-  function _getBBox(el) {
-    try { return el.getBBox(); } catch (e) { return null; }
-  }
-
-  function _getScreenCTM(el) {
-    try { return el.getScreenCTM && el.getScreenCTM(); } catch (e) {}
-    return null;
-  }
-
-  function _pxPerUserY(el) {
-    const ctm = _getScreenCTM(el);
-    if (!ctm) return 0;
-    return Math.hypot(ctm.c, ctm.d);
-  }
-
-  function _ensureBaseSwap(u) {
-    if (!u.hasAttribute(ATTR_BASE_OP)) u.setAttribute(ATTR_BASE_OP, u.getAttribute("opacity") || "");
-    if (!u.hasAttribute(ATTR_BASE_PE)) u.setAttribute(ATTR_BASE_PE, u.getAttribute("pointer-events") || "");
-  }
-
-  function _restoreAttr(el, name, baseVal) {
-    if (baseVal == null || baseVal === "") el.removeAttribute(name);
-    else el.setAttribute(name, baseVal);
-  }
-
-  // bar OFF => original ON
-  function _showOriginalHideBar(u, bar) {
-    _ensureBaseSwap(u);
-    _restoreAttr(u, "opacity", u.getAttribute(ATTR_BASE_OP));
-    _restoreAttr(u, "pointer-events", u.getAttribute(ATTR_BASE_PE));
-    if (bar) bar.style.display = "none";
-  }
-
-  // bar ON => original OFF visually, but hittable
-  function _hideOriginalShowBar(u, bar) {
-    _ensureBaseSwap(u);
-    u.setAttribute("opacity", "0");
-    u.setAttribute("pointer-events", "all");
-    if (bar) {
-      bar.style.display = "";
-      bar.setAttribute("pointer-events", "none");
-      bar.style.pointerEvents = "none";
-    }
-  }
-
-  function _cleanupOriginal(u) {
-    if (!u) return;
-    _restoreAttr(u, "opacity", u.getAttribute(ATTR_BASE_OP));
-    _restoreAttr(u, "pointer-events", u.getAttribute(ATTR_BASE_PE));
-    u.removeAttribute(ATTR_BASE_OP);
-    u.removeAttribute(ATTR_BASE_PE);
-  }
-
-  function _ensureBarAfterUse(u) {
-    const p = u.parentNode;
-    if (!p) return null;
-
-    if (!u.__dzvThinBarKey) u.__dzvThinBarKey = "k" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-
-    const ns = u.nextSibling;
-    if (ns && ns.nodeType === 1 && ns.getAttribute && ns.getAttribute(ATTR_BAR) === "1" && ns.getAttribute(ATTR_KEY) === u.__dzvThinBarKey) {
-      return ns;
-    }
-
-    const bar = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    bar.setAttribute(ATTR_BAR, "1");
-    bar.setAttribute(ATTR_KEY, u.__dzvThinBarKey);
-    bar.setAttribute("pointer-events", "none");
-    bar.style.pointerEvents = "none";
-    bar.style.display = "none";
-
-    if (u.nextSibling) p.insertBefore(bar, u.nextSibling);
-    else p.appendChild(bar);
-
-    return bar;
-  }
-
-  function _syncBarPaintFromUse(u, bar) {
-    let fill = "";
-    let alpha = 1.0;
-
-    try {
-      const cs = getComputedStyle(u);
-      fill = (cs.fill && cs.fill !== "none") ? cs.fill : "";
-      const op = parseFloat(cs.opacity); if (Number.isFinite(op)) alpha *= op;
-      const so = parseFloat(cs.strokeOpacity); if (Number.isFinite(so)) alpha *= so;
-    } catch (e) {}
-
-    if (!fill) fill = "rgba(0,0,0,1)";
-
-    bar.setAttribute("fill", fill);
-    bar.setAttribute("stroke", "none");
-    bar.style.opacity = String(alpha);
-
-    // mirror per-element filter/opacity if present on the <use> itself
-    const f = u.getAttribute("filter");
-    if (f == null) bar.removeAttribute("filter"); else bar.setAttribute("filter", f);
-
-    const o = u.getAttribute("opacity");
-    if (o == null) bar.removeAttribute("opacity"); else bar.setAttribute("opacity", o);
-  }
-
-  // cache targets: {u, bar}
-  let items = [];
-
-
-  function sync_ub(u, bar)
-    
-    {
-	  u.setAttribute("shape-rendering", "geometricPrecision");
-	  const r = _getRect(u);
-      if (!r) { _showOriginalHideBar(u, bar); return; }
-
-      const hPx = r.height;
-
-      if (!(hPx > 0) || hPx >= minHeightPx) {
-        _showOriginalHideBar(u, bar);
-        return;
-      }
-
-      const sy = _pxPerUserY(u);
-      if (!(sy > 0)) { _showOriginalHideBar(u, bar); return; }
-
-      const needUserH = minHeightPx / sy;
-
-      const bb = _getBBox(u);
-      if (!bb) { _showOriginalHideBar(u, bar); return; }
-
-      // Place bar centered on original bbox (USER units)
-      const x = bb.x;
-      const y = (bb.y + 0.5 * bb.height) - 0.5 * needUserH;
-
-      bar.setAttribute("x", String(x));
-      bar.setAttribute("y", String(y));
-      bar.setAttribute("width", String(Math.max(bb.width, 0)));
-      bar.setAttribute("height", String(needUserH));
-
-      // Follow per-use motion
-      const xf = u.getAttribute("transform");
-      if (xf == null) bar.removeAttribute("transform"); else bar.setAttribute("transform", xf);
-
-      _syncBarPaintFromUse(u, bar);
-
-      // SWAP: bar ON, original OFF (but hittable)
-      _hideOriginalShowBar(u, bar);
-	}
-	
-  function refresh() {
-    items = [];
-
-    // narrower selector early: id ends with " - area"
-    const gs = root.querySelectorAll('g.s_e[id$=" - area"]');
-    for (let i = 0; i < gs.length; i++) {
-      const g = gs[i];
-
-      // class must be exactly "s_e"
-      if ((g.getAttribute("class") || "") !== "s_e") continue;
-
-      const gid = g.getAttribute("id") || "";
-      if (!reId.test(gid)) continue;
-
-      const ulist = g.querySelectorAll("use");
-      for (let j = 0; j < ulist.length; j++) {
-        const u = ulist[j];
-
-        // per your rule: style.strokeWidth
-        const sw = _parseNum(u.style ? u.style.strokeWidth : "");
-        if (!Number.isFinite(sw) || sw > maxStrokeWidth) continue;
-
-        const bar = _ensureBarAfterUse(u);
-        if (!bar) continue;
-		
-        items.push({ u, bar });
-      }
-    }
-
-    trigger();
-    return items.length;
-  }
-
-
-  function _applyOnce() {
-    for (let i = 0; i < items.length; i++) {
-      const u = items[i].u;
-      const bar = items[i].bar;
-      sync_ub(u, bar);
-      
-    }
-  }
-
-  // burst scheduler (no forever tick)
-  let raf = 0;
-  let burstLeft = 0;
-  let running = true;
-
-  function _tick() {
-    raf = 0;
-    if (!running) return;
-
-    _applyOnce();
-
-    burstLeft--;
-    if (burstLeft > 0) raf = requestAnimationFrame(_tick);
-  }
-
-  function trigger() {
-    if (!running) return;
-    burstLeft = burstFrames;
-	if (!raf) _tick();
-    //if (!raf) raf = requestAnimationFrame(_tick);
-  }
-
-  // lightweight triggers
-  function _onResize() { trigger(); }
-  function _onScroll() { trigger(); }
-
-  let mo = null;
-
-  function start() {
-    if (!running) running = true;
-
-    window.addEventListener("resize", _onResize, { passive: true });
-    window.addEventListener("scroll", _onScroll, { passive: true });
-
-    /*
-    mo = new MutationObserver(function () { trigger(); });
-    mo.observe(root, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ["transform", "style", "d", "opacity", "filter"]
-    });
-	*/
-
-    trigger();
-  }
-
-  function stop() {
-    if (!running) return;
-    running = false;
-
-    if (raf) cancelAnimationFrame(raf);
-    raf = 0;
-    burstLeft = 0;
-
-    window.removeEventListener("resize", _onResize);
-    window.removeEventListener("scroll", _onScroll);
-    if (mo) { try { mo.disconnect(); } catch (e) {} }
-    mo = null;
-
-    // restore originals and remove bars
-    for (let i = 0; i < items.length; i++) {
-      _cleanupOriginal(items[i].u);
-      const bar = items[i].bar;
-      if (bar && bar.parentNode) bar.parentNode.removeChild(bar);
-    }
-    items = [];
-  }
-
-  refresh();
-  start();
-
-  return { refresh, start, stop, trigger };
-}
-
-
-/* DZV: refresh <use> instances to keep them synced with referenced <path d> updates */
 (function () {
+  const NS = "http://www.w3.org/2000/svg";
   const XLINK_NS = "http://www.w3.org/1999/xlink";
-  let _pending = false;
-  let _flip = 0;
 
-  function _collectUses(svgEl) {
+  const ATTR_HIDDEN  = "data-dzv-use-mirror-hidden";
+  const ATTR_OUTSIDE = "data-dzv-use-outside-opacity";
+  const ATTR_WRAP    = "data-dzv-use-mirror-wrap";
+  const ATTR_SHIFT   = "data-dzv-use-mirror-shift";
+  const ATTR_PATH    = "data-dzv-use-mirror-path";
+  const ATTR_GEN     = "data-dzv-use-mirror-gen";
+
+  const SKIP_USE_ATTRS = new Set([
+    "id",
+    "href",
+    "xlink:href",
+    "x",
+    "y",
+    "width",
+    "height",
+    "transform",
+    "opacity",
+	//"filter",
+    ATTR_HIDDEN.toLowerCase(),
+    ATTR_OUTSIDE.toLowerCase(),
+    ATTR_GEN.toLowerCase()
+  ]);
+
+  const controllers = new WeakMap();
+
+  function ensureHideRule() {
+    if (document.getElementById("dzv-use-mirror-hide-rule")) return;
+    const st = document.createElement("style");
+    st.id = "dzv-use-mirror-hide-rule";
+    st.textContent = 'use[' + ATTR_HIDDEN + '="1"]{opacity:0 !important;}';
+    document.head.appendChild(st);
+  }
+
+  function lowerTag(el) {
+    return ((el && el.tagName) ? String(el.tagName) : "").toLowerCase();
+  }
+
+  function getHrefValue(useEl) {
+    return (
+      useEl.getAttribute("href") ||
+      useEl.getAttributeNS(XLINK_NS, "href") ||
+      useEl.getAttribute("xlink:href") ||
+      ""
+    );
+  }
+
+  function resolveTargetPath(useEl) {
+    const href = getHrefValue(useEl);
+    if (!href || href.charAt(0) !== "#") return null;
+
+    const id = href.slice(1);
+    const ownerSvg = useEl.ownerSVGElement || null;
+
+    let target = null;
+    if (ownerSvg && typeof ownerSvg.getElementById === "function") {
+      target = ownerSvg.getElementById(id);
+    }
+    if (!target) target = document.getElementById(id);
+    if (!target) return null;
+
+    return lowerTag(target) === "path" ? target : null;
+  }
+
+  function removeOpacityFromStyleText(styleText) {
+    if (!styleText) return "";
+    let s = String(styleText);
+    s = s.replace(/(^|;)\s*opacity\s*:\s*[^;]*(?=;|$)/gi, "$1");
+    s = s.replace(/;;+/g, ";");
+    s = s.replace(/^\s*;\s*|\s*;\s*$/g, "");
+    return s.trim();
+  }
+
+  function readOutsideOpacity(useEl) {
+    const st = useEl.style ? useEl.style.opacity : "";
+    if (st != null && st !== "") return String(st);
+    const at = useEl.getAttribute("opacity");
+    if (at != null && at !== "") return String(at);
+    return "";
+  }
+
+  function getUseCoord(useEl, prop) {
     try {
-      const uses = svgEl.querySelectorAll("g.s_e use");
-      const out = [];
-      for (let i = 0; i < uses.length; i++) {
-        const u = uses[i];
-        if (u && u.ownerSVGElement) out.push(u);
+      const v = useEl[prop];
+      if (v && v.baseVal && typeof v.baseVal.value === "number" && isFinite(v.baseVal.value)) {
+        return v.baseVal.value;
       }
-      return out;
-    } catch (e) {
-      return [];
+    } catch (e) {}
+    const raw = useEl.getAttribute(prop);
+    const num = raw == null || raw === "" ? 0 : parseFloat(raw);
+    return isFinite(num) ? num : 0;
+  }
+
+  function clearAttrs(el, keepSet) {
+    const rm = [];
+    for (let i = 0; i < el.attributes.length; i++) {
+      const n = el.attributes[i].name;
+      if (!keepSet.has(n)) rm.push(n);
+    }
+    for (let i = 0; i < rm.length; i++) el.removeAttribute(rm[i]);
+  }
+
+  function ensureMirrorNodes(useEl) {
+    const ctl = controllers.get(useEl);
+    if (ctl && ctl.nodes) return ctl.nodes;
+
+
+    const path = document.createElementNS(NS, "path");
+    path.setAttribute(ATTR_PATH, "1");
+    path.setAttribute(ATTR_GEN, "1");
+    path.style.pointerEvents = "none";
+
+	if (useEl.parentNode) useEl.parentNode.insertBefore(path, useEl.nextSibling);
+
+    return { path };
+  }
+
+  function keepMirrorAfterUse(useEl, path) {
+    const p = useEl.parentNode;
+    if (!p) return;
+    if (path.parentNode !== p || useEl.nextSibling !== path) {
+      p.insertBefore(path, useEl.nextSibling);
     }
   }
 
-  function dzvUseRefreshPulse(svgEl) {
-    if (!svgEl) return false;
-    const dzv = (window.dzv = window.dzv || {});
-    dzv._useRefreshSvg = svgEl;
+  function syncMirrorTransforms(useEl, targetPath, nodes) {
+    
 
-    if (_pending) return true;
-    _pending = true;
-
-    requestAnimationFrame(() => {
-      _pending = false;
-
-      const svg = dzv._useRefreshSvg;
-      if (!svg) return;
-
-      if (!dzv._useRefreshList || !dzv._useRefreshList.length) {
-        dzv._useRefreshList = _collectUses(svg);
-      }
-      const list = dzv._useRefreshList || [];
-
-      _flip ^= 1;
-      const pulse = _flip ? "1" : "0";
-
-      for (let i = 0; i < list.length; i++) {
-        const u = list[i];
-        if (!u || !u.ownerSVGElement) continue;
-
-        let href = u.getAttribute("href");
-        if (!href) {
-          try { href = u.getAttributeNS(XLINK_NS, "href"); } catch (e) { href = null; }
-        }
-        if (!href) href = u.getAttribute("xlink:href");
-
-        if (href) {
-          // set both for maximal compatibility
-          try { u.setAttribute("href", href); } catch (e) {}
-          try { u.setAttributeNS(XLINK_NS, "xlink:href", href); } catch (e) {}
-        }
-
-        // force instance invalidation without visual change
-        try { u.setAttribute("data-dzv-use-pulse", pulse); } catch (e) {}
-      }
-    });
-
-    return true;
+    if (targetPath) {
+      const tt = targetPath.getAttribute("transform");
+      if (tt) nodes.path.setAttribute("transform", tt);
+      else nodes.path.removeAttribute("transform");
+    } else {
+      nodes.path.removeAttribute("transform");
+    }
   }
 
-  window.dzv = window.dzv || {};
-  window.dzv.dzvUseRefreshPulse = dzvUseRefreshPulse;
-})();
-
-
-function dzvCalibrateMinRenderableSvgPxRaster(svgEl, startPx, stepPx, maxPx) {
-  startPx = (typeof startPx === "number") ? startPx : 0.25;
-  stepPx  = (typeof stepPx  === "number") ? stepPx  : 0.25;
-  maxPx   = (typeof maxPx   === "number") ? maxPx   : 8.0;
-
-  const NS = "http://www.w3.org/2000/svg";
-  const dpr = window.devicePixelRatio || 1;
-
-  function raf2(cb) { requestAnimationFrame(() => requestAnimationFrame(cb)); }
-
-  function pxPerUserY(el) {
-    const m = el.getScreenCTM && el.getScreenCTM();
-    if (!m) return 0;
-    return Math.hypot(m.c, m.d);
-  }
-  function pxPerUserX(el) {
-    const m = el.getScreenCTM && el.getScreenCTM();
-    if (!m) return 0;
-    return Math.hypot(m.a, m.b);
-  }
-  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
-
-  function svgToCanvasAndProbeAlpha(svgText, svgRect, cxCss, cyCss, probeHalfPx, cb) {
-    const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
-
-    // Prefer createImageBitmap, fallback to <img>
-    if (window.createImageBitmap) {
-      createImageBitmap(blob).then((bmp) => {
-        try {
-          const c = document.createElement("canvas");
-          c.width  = Math.max(1, Math.round(svgRect.width  * dpr));
-          c.height = Math.max(1, Math.round(svgRect.height * dpr));
-          const ctx = c.getContext("2d", { alpha: true, willReadFrequently: true });
-          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          ctx.clearRect(0, 0, svgRect.width, svgRect.height);
-          ctx.drawImage(bmp, 0, 0, svgRect.width, svgRect.height);
-
-          const x0 = clamp(Math.round((cxCss - probeHalfPx) * dpr), 0, c.width - 1);
-          const y0 = clamp(Math.round((cyCss - probeHalfPx) * dpr), 0, c.height - 1);
-          const x1 = clamp(Math.round((cxCss + probeHalfPx) * dpr), 0, c.width - 1);
-          const y1 = clamp(Math.round((cyCss + probeHalfPx) * dpr), 0, c.height - 1);
-          const w = Math.max(1, x1 - x0 + 1);
-          const h = Math.max(1, y1 - y0 + 1);
-
-          const data = ctx.getImageData(x0, y0, w, h).data;
-          for (let i = 3; i < data.length; i += 4) {
-            if (data[i] !== 0) { cb(true); return; }
-          }
-          cb(false);
-        } finally {
-          try { bmp.close && bmp.close(); } catch (e) {}
-        }
-      }).catch(() => {
-        // fall back
-        const url = URL.createObjectURL(blob);
-        const img = new Image();
-        img.decoding = "async";
-        img.onload = function () {
-          try {
-            const c = document.createElement("canvas");
-            c.width  = Math.max(1, Math.round(svgRect.width  * dpr));
-            c.height = Math.max(1, Math.round(svgRect.height * dpr));
-            const ctx = c.getContext("2d", { alpha: true, willReadFrequently: true });
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            ctx.clearRect(0, 0, svgRect.width, svgRect.height);
-            ctx.drawImage(img, 0, 0, svgRect.width, svgRect.height);
-
-            const x0 = clamp(Math.round((cxCss - probeHalfPx) * dpr), 0, c.width - 1);
-            const y0 = clamp(Math.round((cyCss - probeHalfPx) * dpr), 0, c.height - 1);
-            const x1 = clamp(Math.round((cxCss + probeHalfPx) * dpr), 0, c.width - 1);
-            const y1 = clamp(Math.round((cyCss + probeHalfPx) * dpr), 0, c.height - 1);
-            const w = Math.max(1, x1 - x0 + 1);
-            const h = Math.max(1, y1 - y0 + 1);
-
-            const data = ctx.getImageData(x0, y0, w, h).data;
-            for (let i = 3; i < data.length; i += 4) {
-              if (data[i] !== 0) { cb(true); return; }
-            }
-            cb(false);
-          } finally {
-            URL.revokeObjectURL(url);
-          }
-        };
-        img.onerror = function () {
-          try { URL.revokeObjectURL(url); } catch (e) {}
-          cb(false);
-        };
-        img.src = url;
-      });
+  function syncMirrorGeometry(targetPath, pathEl) {
+    if (!targetPath) {
+      pathEl.setAttribute("d", "");
+      pathEl.removeAttribute("pathLength");
       return;
     }
 
-    // Old fallback only
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.decoding = "async";
-    img.onload = function () {
-      try {
-        const c = document.createElement("canvas");
-        c.width  = Math.max(1, Math.round(svgRect.width  * dpr));
-        c.height = Math.max(1, Math.round(svgRect.height * dpr));
-        const ctx = c.getContext("2d", { alpha: true, willReadFrequently: true });
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.clearRect(0, 0, svgRect.width, svgRect.height);
-        ctx.drawImage(img, 0, 0, svgRect.width, svgRect.height);
+    pathEl.setAttribute("d", targetPath.getAttribute("d") || "");
 
-        const x0 = clamp(Math.round((cxCss - probeHalfPx) * dpr), 0, c.width - 1);
-        const y0 = clamp(Math.round((cyCss - probeHalfPx) * dpr), 0, c.height - 1);
-        const x1 = clamp(Math.round((cxCss + probeHalfPx) * dpr), 0, c.width - 1);
-        const y1 = clamp(Math.round((cyCss + probeHalfPx) * dpr), 0, c.height - 1);
-        const w = Math.max(1, x1 - x0 + 1);
-        const h = Math.max(1, y1 - y0 + 1);
-
-        const data = ctx.getImageData(x0, y0, w, h).data;
-        for (let i = 3; i < data.length; i += 4) {
-          if (data[i] !== 0) { cb(true); return; }
-        }
-        cb(false);
-      } finally {
-        URL.revokeObjectURL(url);
-      }
-    };
-    img.onerror = function () {
-      try { URL.revokeObjectURL(url); } catch (e) {}
-      cb(false);
-    };
-    img.src = url;
+    const pl = targetPath.getAttribute("pathLength");
+    if (pl != null) pathEl.setAttribute("pathLength", pl);
+    else pathEl.removeAttribute("pathLength");
+	
+	
   }
 
-  // Inject test ellipse into live SVG
-  const g = document.createElementNS(NS, "g");
-  g.setAttribute("data-dzv-calib", "1");
+  function syncUseAttrsToMirrorPath(useEl, pathEl, outsideOpacity) {
+    clearAttrs(pathEl, new Set([ATTR_PATH, ATTR_GEN]));
 
-  const ell = document.createElementNS(NS, "ellipse");
-  ell.setAttribute("fill", "rgba(0,0,0,1)");
-  ell.setAttribute("stroke", "none");
+    for (let i = 0; i < useEl.attributes.length; i++) {
+      const a = useEl.attributes[i];
+      const name = a.name;
+      const lname = name.toLowerCase();
 
-  const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
-  const cxUser = vb ? (vb.x + vb.width * 0.2) : 0;
-  const cyUser = vb ? (vb.y + vb.height * 0.2) : 0;
-  ell.setAttribute("cx", String(cxUser));
-  ell.setAttribute("cy", String(cyUser));
+      if (SKIP_USE_ATTRS.has(lname)) continue;
 
-  g.appendChild(ell);
-  svgEl.appendChild(g);
-
-  let h = startPx;
-  const widthPx = 24;
-  const probeHalfPx = 2;
-
-  function cleanup() {
-    try { if (g && g.parentNode) g.parentNode.removeChild(g); } catch (e) {}
-  }
-
-  function done(v) {
-    window.dzvMinRenderablePx = v;
-	//console.log(window.dzvMinRenderablePx);
-	const mpx = Math.max(window.dzvMinRenderablePx,1);
-    window.dzv.minimum_paint = dzvInstallMinPaintHeightBarGuard({root:document.getElementById("dzv_gen"), maxStrokeWidth : 1.5, minHeightPx:mpx, burstFrames:2});
-  }
-
-  function step() {
-    raf2(() => {
-      const sy = pxPerUserY(ell);
-      const sx = pxPerUserX(ell);
-
-      if (sy > 0 && sx > 0) {
-        const ry = (0.5 * h) / sy;
-        const rx = (0.5 * widthPx) / sx;
-        ell.setAttribute("ry", String(Math.max(1e-9, ry)));
-        ell.setAttribute("rx", String(Math.max(1e-9, rx)));
+      if (lname === "style") {
+        const s = a.value;//removeOpacityFromStyleText(a.value);
+        if (s) pathEl.setAttribute("style", s);
+        continue;
       }
 
-      raf2(() => {
-        const svgRect = svgEl.getBoundingClientRect();
-        const ellRect = ell.getBoundingClientRect();
+      pathEl.setAttribute(name, a.value);
+    }
+	
 
-        if (!(svgRect.width > 0) || !(svgRect.height > 0)) {
-          h += stepPx;
-          if (h > maxPx + 1e-9) { cleanup(); done(maxPx); return; }
-          step();
-          return;
-        }
+    pathEl.style.pointerEvents = "none";
 
-        const cxCss = (ellRect.left + 0.5 * ellRect.width) - svgRect.left;
-        const cyCss = (ellRect.top  + 0.5 * ellRect.height) - svgRect.top;
+  }
 
-        const ser = new XMLSerializer();
-        const svgText = ser.serializeToString(svgEl);
+  function installOne(useEl) {
+    if (!useEl || lowerTag(useEl) !== "use") {
+      throw new Error("dzvInstallUsePathMirror: expected a <use> element");
+    }
 
-        svgToCanvasAndProbeAlpha(svgText, svgRect, cxCss, cyCss, probeHalfPx, (ok) => {
-          if (ok) { cleanup(); done(h); return; }
-          h += stepPx;
-          if (h > maxPx + 1e-9) { cleanup(); done(maxPx); return; }
-          step();
-        });
+    const prev = controllers.get(useEl);
+    if (prev) return prev.api;
+
+    ensureHideRule();
+
+    const state = {
+      useEl: useEl,
+      nodes: ensureMirrorNodes(useEl),
+      useObs: null,
+      targetObs: null,
+      targetEl: null,
+      syncing: false
+    };
+
+    function bindUseObserver() {
+      if (state.useObs) state.useObs.disconnect();
+      state.useObs = new MutationObserver(function () {
+        syncNow();
       });
+      state.useObs.observe(useEl, {
+        attributes: true,
+        childList: false,
+        subtree: false
+      });
+    }
+
+    function bindTargetObserver(targetEl) {
+      if (state.targetObs) {
+        state.targetObs.disconnect();
+        state.targetObs = null;
+      }
+      state.targetEl = targetEl || null;
+      if (!state.targetEl) return;
+
+      state.targetObs = new MutationObserver(function () {
+        syncNow();
+      });
+      state.targetObs.observe(state.targetEl, {
+        attributes: true,
+        attributeFilter: ["d", "transform", "pathLength"]
+      });
+    }
+
+    function syncNow() {
+      if (state.syncing) return;
+      state.syncing = true;
+
+      if (state.useObs) state.useObs.disconnect();
+
+      try {
+        keepMirrorAfterUse(useEl, state.nodes.path);
+
+        const outsideOpacity = readOutsideOpacity(useEl);
+        useEl.setAttribute(ATTR_OUTSIDE, outsideOpacity);
+
+        const targetPath = resolveTargetPath(useEl);
+        if (targetPath !== state.targetEl) bindTargetObserver(targetPath);
+
+        syncUseAttrsToMirrorPath(useEl, state.nodes.path, outsideOpacity);
+        syncMirrorGeometry(targetPath, state.nodes.path);
+        syncMirrorTransforms(useEl, targetPath, state.nodes);
+
+        useEl.setAttribute(ATTR_HIDDEN, "1");
+      } finally {
+        bindUseObserver();
+        state.syncing = false;
+      }
+    }
+
+    const api = {
+      sync: syncNow,
+      showUse: function () {
+        if (state.useObs) state.useObs.disconnect();
+        try {
+          useEl.removeAttribute(ATTR_HIDDEN);
+        } finally {
+          bindUseObserver();
+        }
+      },
+      hideUse: function () {
+        if (state.useObs) state.useObs.disconnect();
+        try {
+          useEl.setAttribute(ATTR_HIDDEN, "1");
+        } finally {
+          bindUseObserver();
+        }
+      },
+      destroy: function () {
+        if (state.useObs) {
+          state.useObs.disconnect();
+          state.useObs = null;
+        }
+        if (state.targetObs) {
+          state.targetObs.disconnect();
+          state.targetObs = null;
+        }
+
+        useEl.removeAttribute(ATTR_HIDDEN);
+        useEl.removeAttribute(ATTR_OUTSIDE);
+
+        if (state.nodes.path && state.nodes.path.parentNode) {
+          state.nodes.path.parentNode.removeChild(state.nodes.path);
+        }
+
+        controllers.delete(useEl);
+      },
+      getMirrorPath: function () {
+        return state.nodes.path;
+      },
+      getMirrorWrap: function () {
+        return state.nodes.wrap;
+      },
+      getTargetPath: function () {
+        return state.targetEl;
+      }
+    };
+
+    controllers.set(useEl, { api: api, nodes: state.nodes, state: state });
+
+    bindUseObserver();
+    syncNow();
+
+    return api;
+  }
+
+  function installMany(input) {
+    let arr = [];
+
+    if (typeof input === "string") {
+      arr = Array.from(document.querySelectorAll(input));
+    } else if (input && typeof input.length === "number" && !input.nodeType) {
+      arr = Array.from(input);
+    } else if (input && input.nodeType === 1) {
+      arr = [input];
+    }
+
+    return arr.map(function (el) {
+      return installOne(el);
     });
   }
 
-  step();
-}
+  window.dzvInstallUsePathMirror = installOne;
+  window.dzvInstallUsePathMirrors = installMany;
+})();
 
-dzvCalibrateMinRenderableSvgPxRaster(document.getElementById("dzv_gen"));
+
+dzvInstallUsePathMirrors(document.getElementById("dzv_gen").querySelectorAll("g.s_e[use]"));
+
 
 let wheelBlocked = true;       // start blocked during loader
 let wheelDrainUntil = 0;       // time until which we discard backlog
@@ -5685,7 +5312,7 @@ function applyScrollScaleClippedPercent(ref_chart, ref_axis, clip_chart, clip_ax
   
   if (prev_vals[0] !== window.dzv.xscale || prev_vals[1] !== window.dzv.yscale)
    {
-    if (window.dzv.minimum_paint) window.dzv.minimum_paint.trigger();
+
     prev_vals[0] = window.dzv.xscale;
 	prev_vals[1] = window.dzv.yscale;
    } 
@@ -13020,7 +12647,7 @@ function dzvGlobalCircleToViolinTransition(is_circle=false, opts = {}) {
   if (window.dzv.hide_highlight) window.dzv.hide_highlight();
   if (typeof window.justHideMenu === "function") window.justHideMenu();
   window.dzv.animating = true;
-  if ( window.dzv.minimum_paint) {window.dzv.minimum_paint.stop();}
+
   
   window.dzv.morphing = false;
 
@@ -13765,7 +13392,7 @@ function d_from_array_or_ellipse(arr,closed = true) {
     if (window.dzv.scale_warp) window.dzv.scale_warp(window.dzv.warpingFactor);
 
     window.dzv.animating = false;
-	if ( window.dzv.minimum_paint) { window.dzv.minimum_paint.refresh(); window.dzv.minimum_paint.start();}
+
 
     if (_pauseBtn && _pauseBtn.btn) _pauseBtn.btn.style.display = "none";
 	if (_stopBtn && _stopBtn.btn) _stopBtn.btn.style.display = "none";
@@ -19574,7 +19201,6 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    if (window.dzv.stackTrack && window.dzv.stackTrack.isActive())
 	        window.dzv.stackTrack.updateBandRect();
 	    //window.dispatchEvent(new CustomEvent("dzv:warp", { detail: { t: tt } }));
-    if (window.dzv && window.dzv.dzvUseRefreshPulse) window.dzv.dzvUseRefreshPulse(svg);
 	}
 	let times_run = 0;
 	window.dzv.now_warping = false;
@@ -19781,7 +19407,6 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
 	        if (window.dzv.stackTrack && window.dzv.stackTrack.isActive())
 	            window.dzv.stackTrack.updateBandRect();
-	        if (window.dzv && window.dzv.dzvUseRefreshPulse) window.dzv.dzvUseRefreshPulse(svg);
 	        return fi;
 	    }
 
@@ -19796,7 +19421,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (window.dzv.scale_warp) window.dzv.scale_warp(tTarget);
 	        if (window.dzv.swap_axis_warp) window.dzv.swap_axis_warp();
 	        window.dzv.now_warping = false;
-			if ( window.dzv.minimum_paint) { window.dzv.minimum_paint.refresh(); window.dzv.minimum_paint.start();}
+
 
 	    }
 	    // Cached mode needs visible sets for speed
@@ -19897,9 +19522,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (tt < 0) tt = 0;
 	        if (tt > 1) tt = 1;
 	        if (u < 1) {
-			    
-				
-			
+
 	            window.dzv.now_warping = true;
 	            if (useCachedFrames) {
 	                const fi = applyCachedFrame(tt, setp, sett);
@@ -19920,7 +19543,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        // time ran out or ended: do symmetric mirrored tail + mandatory recompute
 	        mirroredTailAndCommit();
 	    }
-		if ( window.dzv.minimum_paint) window.dzv.minimum_paint.stop();
+
 	    requestAnimationFrame(tick);
 	}
 	// status helpers (you already had these earlier)
@@ -19943,6 +19566,9 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	function dzvToggleWarpAnimated(svg, ms = 500) {
 	    const dzv = window.dzv || {};
 	    const target = (+dzv.warpingFactor === 1) ? 0 : 1;
+		if (window.dzv.hide_tip) window.dzv.hide_tip();
+	    if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+			
 	    dzvAnimateWarp(svg, target, ms);
 	}
 
@@ -20332,7 +19958,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (window.dzv.hide_tip) window.dzv.hide_tip();
 	        if (window.dzv.hide_highlight) window.dzv.hide_highlight();
 	        window.dzv.focusing = true;
-			if ( window.dzv.minimum_paint) window.dzv.minimum_paint.stop();
+
 	        stopAnim();
 	        clearFocusInstant();
 	        const wrapper = ensureWrapper();
@@ -20431,6 +20057,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            const sy = 1 + (s.syTarget - 1) * e;
 	            const yC = baseCenterY + (targetYc - baseCenterY) * e;
 	            setWrapperTransformCentered(wrapper, sy, yC, baseCenterY);
+				if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 	            if (t < 1) {
 	                state.raf = requestAnimationFrame(tick);
 	            } else {
@@ -20441,8 +20068,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                    "transform", `matrix(1 0 0 ${s.syTarget} 0 ${targetYc - s.syTarget * baseCenterY})`
 	                );
 	                window.dzv.focusing = false;
-					
-					if ( window.dzv.minimum_paint) { window.dzv.minimum_paint.refresh(); window.dzv.minimum_paint.start();}
+
 					
 	                if (window.dzv.hide_tip) window.dzv.hide_tip();
 	                if (window.dzv.hide_highlight) window.dzv.hide_highlight();
@@ -20477,6 +20103,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        wrapper.removeAttribute("transform");
 	        if (s) {
 	            // restore hidden styles
+				restoreClip(s.clipRecs || []);
 	            for (let i = 0; i < s.hiddenPrev.length; i++) {
 	                const r = s.hiddenPrev[i];
 	                if (!r || !r.el) continue;
@@ -20487,7 +20114,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            // restore focus-local emp styles (fillOpacity + strokeWidth + any stored stroke/opacity)
 	            restoreEmpStyles(s.empStyleRecs || []);
 	            // restore clips (global mode gets back exactly what it had)
-	            restoreClip(s.clipRecs || []);
+	            //restoreClip(s.clipRecs || []);
 	            // restore DOM positions
 	            restoreMoved(s.hoverMoved || []);
 	            restoreMoved(s.moved || []);
@@ -20509,7 +20136,6 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (window.dzv.hide_tip) window.dzv.hide_tip();
 	        if (window.dzv.hide_highlight) window.dzv.hide_highlight();
 	        window.dzv.focusing = true;
-			if ( window.dzv.minimum_paint) window.dzv.minimum_paint.stop();
 	        stopAnim();
 	        const wrapper = ensureWrapper();
 	        const vb = getVB();
@@ -20518,8 +20144,11 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        const syFrom = s0.syTarget;
 	        const baseCenterY = s0.baseCenterY;
 	        // animate out: unscale + fade others back in
-			restoreClip(s0.clipRecs || []);
+			//restoreClip(s0.clipRecs || []);
+			
+			//window.dzvFocusMajor = state.activeMajor.substring(0, 2);
 	        const t0 = performance.now();
+			let once = false;
 	        const tick = (now) => {
 	            const dt = now - t0;
 	            const t = Math.max(0, Math.min(1, dt / cfg.durationMs));
@@ -20538,17 +20167,25 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            const sy = syFrom + (1 - syFrom) * e;
 	            const yC = targetYc + (baseCenterY - targetYc) * e;
 	            setWrapperTransformCentered(wrapper, sy, yC, baseCenterY);
+				//console.log(window.dzvFocusMajor);
+				//console.log(state.activeMajor);
+				//if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
+				if (t>0.5 && !once)
+				 {
+				  once = true;
+				  //restoreClip(s0.clipRecs || []);
+				 }
 	            if (t < 1) {
 	                state.raf = requestAnimationFrame(tick);
 	            } else {
 	                state.raf = 0;
+					//window.dzvFocusMajor="";
 	                clearFocusInstant();
 	                if (window.dzv.hide_tip) window.dzv.hide_tip();
 	                if (window.dzv.hide_highlight) window.dzv.hide_highlight();
 	                if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 	                window.dzv.focusing = false;
 					
-					if ( window.dzv.minimum_paint) { window.dzv.minimum_paint.refresh(); window.dzv.minimum_paint.start();}
 		
 	            }
 	        };
@@ -23485,7 +23122,7 @@ if (window.dzv.show_zoom_controls)
 	            xticks.forEach((tickG) => {
 	                tickG.querySelectorAll('g[id^="line2d_"] path').forEach((p) => {
 	                    if (p.closest("defs")) return;
-	                    registerPathToWarp(p, "axis", null, false);
+	                    //registerPathToWarp(p, "axis", null, false);
 	                });
 	                tickG.querySelectorAll('g[id^="line2d_"] use').forEach((u) => {
 	                    const xAttr = u.getAttribute("x") || "0";
@@ -26028,7 +25665,6 @@ runWhenFullyLoaded(() => {
   // your function here
    if (window.dzv && typeof window.dzv.recomputeAndApply === "function") window.dzv.recomputeAndApply(true);
    svg.style.visibility = "visible";
-   if (window.dzv && window.dzv.dzvUseRefreshPulse) window.dzv.dzvUseRefreshPulse(svg);
    
    if (window.stack_tracking)
    {
