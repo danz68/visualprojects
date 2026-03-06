@@ -5588,69 +5588,31 @@ window.dzv.rotateSvgOnceAnim = function (svgEl, degStep = 120, ms = 180) {
     if (!t.hasAttribute(ATTR_BASE)) dzvTextAnisoRebaseOne(t);
   }
 
-function _apply_one_(t, extraDx = 0, extraDy = 0) {
-    if (!t) return false;
 
-    _ensure_base(t);
-    const base = t.getAttribute(ATTR_BASE) || "";
+	let _ctmCache = new WeakMap();
+	let _ctmScopeId = 0;
 
-    const xy = _get_xy_first(t);
-    if (!Number.isFinite(xy.x) || !Number.isFinite(xy.y)) return false;
-
-
-    const parent = t.parentNode;
-    if (!parent || !parent.getScreenCTM) return false;
-
-    // Screen CTM of the PARENT: captures CSS resize / aspect changes, no feedback loop.
-    const m = parent.getScreenCTM();
-    if (!m) return false;
-
-    // Invert parent linear
-    const det = m.a * m.d - m.b * m.c;
-    if (Math.abs(det) < 1e-18) return false;
-
-    const inv_a =  m.d / det;
-    const inv_b = -m.b / det;
-    const inv_c = -m.c / det;
-    const inv_d =  m.a / det;
-
-    // Keep UNIFORM scale with the SVG size (like before), but remove anisotropy:
-    // sx, sy are parent screen scales; s is the uniform scale we keep.
-    const sx = Math.hypot(m.a, m.b);
-    const sy = Math.hypot(m.c, m.d);
-    if (!(sx > 0) || !(sy > 0)) return false;
+	window.dzv_ctm_cache = function () {
+	  return ++_ctmScopeId;
+	}
 	
-    	
-	
+	window.dzv_ctm_clear_cache = function () {
+	  _ctmCache = new WeakMap();
 
-	
-    const s = Math.sqrt(sx * sy);
-   
-	
+	}
 
-    const ia = inv_a * s;
-    const ib = inv_b * s;
-    const ic = inv_c * s;
-    const id = inv_d * s;
+	function getScreenCTM_cached(el) {
+	  const fid = el && el.ctm_cached;
+	  if (fid != null) {
+		const rec = _ctmCache.get(el);
+		if (rec && rec.fid === fid) return rec.m;
 
-    const dx = Number.isFinite(extraDx) ? extraDx : 0;
-    const dy = Number.isFinite(extraDy) ? extraDy : 0;
-    const sm  = Math.min(sx, sy); 
-	const kz = Math.sqrt(kk/sm) * (kx/sx)**0.25;
-	
-    const prefix =
-      `translate(${dx} ${dy}) ` +
-      `translate(${xy.x} ${xy.y}) ` +
-
-      `scale(${kz*sm/sx} ${kz*sm/sy}) `+
-      //`matrix(${ia} ${ib} ${ic} ${id} 0 0) ` +
-      `translate(${-xy.x} ${-xy.y})`;
-
-    t.setAttribute("transform", (prefix + (base ? (" " + base) : "")).trim());
-    t.setAttribute(ATTR_PREFIX, prefix);
-
-    return true;
-  }
+		const m = el.getScreenCTM();
+		_ctmCache.set(el, { fid, m });
+		return m;
+	  }
+	  return el.getScreenCTM();
+	}
 
   function _apply_one(t, extraDx = 0, extraDy = 0) {
 
@@ -5667,7 +5629,7 @@ function _apply_one_(t, extraDx = 0, extraDy = 0) {
     if (!parent || !parent.getScreenCTM) return false;
 
     // Screen CTM of the PARENT: captures CSS resize / aspect changes, no feedback loop.
-    const m = parent.getScreenCTM();
+    const m = getScreenCTM_cached(parent);// parent.getScreenCTM();
     if (!m) return false;
 
 
@@ -5702,65 +5664,18 @@ function _apply_one_(t, extraDx = 0, extraDy = 0) {
 
 	  `scale(${x_term}, ${y_term}) ` +
       `translate(${-xy.x} ${-xy.y})`;
+	  
+	const todo = (prefix + (base ? (" " + base) : "")).trim();
+	if (t.getAttribute("transform") !== todo)
+	  {
 
-    t.setAttribute("transform", (prefix + (base ? (" " + base) : "")).trim());
-    t.setAttribute(ATTR_PREFIX, prefix);
-
+		t.setAttribute("transform", todo);
+		t.setAttribute(ATTR_PREFIX, prefix);
+      }
     return true;
   }
 
 
-function _apply_onej(t, extraDx = 0, extraDy = 0) {
-  if (!t) return false;
-
-  _ensure_base(t);
-  const base = t.getAttribute(ATTR_BASE) || "";
-
-  const xy = _get_xy_first(t);
-  if (!Number.isFinite(xy.x) || !Number.isFinite(xy.y)) return false;
-
-  const parent = t.parentNode;
-  if (!parent || !parent.getScreenCTM) return false;
-
-  // Parent screen CTM includes ALL upstream transforms (viewBox, zoom/pan, focus, warp groups, etc.)
-  // but does NOT include the transform we are about to write onto the text (avoids feedback).
-  const m = parent.getScreenCTM();
-  if (!m) return false;
-
-  // Invert parent linear part (full 2x2, handles anisotropy + rotation + skew)
-  const det = m.a * m.d - m.b * m.c;
-  if (Math.abs(det) < 1e-18) return false;
-
-  const inv_a =  m.d / det;
-  const inv_b = -m.b / det;
-  const inv_c = -m.c / det;
-  const inv_d =  m.a / det;
-
-  // kk acts as an overall on-screen scale multiplier (1 = exact cancellation).
-  const k = (Number.isFinite(kk) && kk > 0) ? kk : 1;
-
-  const ia = inv_a * k;
-  const ib = inv_b * k;
-  const ic = inv_c * k;
-  const id = inv_d * k;
-
-  const dx = Number.isFinite(extraDx) ? extraDx : 0;
-  const dy = Number.isFinite(extraDy) ? extraDy : 0;
-  
-  const sx = Math.hypot(m.a, m.b);
-  const sy = Math.hypot(m.c, m.d);
-
-  const prefix =
-    `translate(${dx} ${dy}) ` +
-    `translate(${xy.x} ${xy.y}) ` +
-	`scale(${1/sx} ${1/sy}) ` +
-    //`matrix(${ia} ${ib} ${ic} ${id} 0 0) ` +
-    `translate(${-xy.x} ${-xy.y})`;
-
-  t.setAttribute("transform", (prefix + (base ? (" " + base) : "")).trim());
-  t.setAttribute(ATTR_PREFIX, prefix);
-  return true;
-}
 
   function dzvTextAnisoApplyOne(t) {
     return _apply_one(t, 0, 0);
@@ -5775,8 +5690,11 @@ function _apply_onej(t, extraDx = 0, extraDy = 0) {
     return n;
   }
 
+
+
   function _clamp_px(textEl, prect, padx, pady) {
     const b0 = textEl.getBoundingClientRect();
+   
     if (!(prect.width > 0 && prect.height > 0 && b0.width > 0 && b0.height > 0))
       return { dxPx: 0, dyPx: 0 };
 
@@ -5797,19 +5715,12 @@ function _apply_onej(t, extraDx = 0, extraDy = 0) {
   }
 
 
-  function _local_delta_from_screend(textEl, dxPx, dyPx) {
-    const ctm = textEl && textEl.getScreenCTM ? textEl.getScreenCTM() : null;
-    if (!ctm) return null;
-    const inv = ctm.inverse();
-    const p0 = new DOMPoint(0, 0).matrixTransform(inv);
-    const p1 = new DOMPoint(dxPx, dyPx).matrixTransform(inv);
-    return { dxLocal: p1.x - p0.x, dyLocal: p1.y - p0.y };
-  }
+
 function _local_delta_from_screen(textEl, dxPx, dyPx) {
   const parent = textEl ? textEl.parentNode : null;
   if (!parent || !parent.getScreenCTM) return null;
 
-  const m = parent.getScreenCTM();
+  const m = getScreenCTM_cached(parent);//parent.getScreenCTM();
   if (!m) return null;
 
   // Invert parent linear part
@@ -5964,7 +5875,7 @@ function dzvGetVisualBBoxInSvgUnits(el, svgRoot) {
       const obs = new MutationObserver(() => DZV.bumpLayoutEpoch());
       obs.observe(patchPath, {
         attributes: true,
-        attributeFilter: ["d", "transform", "style", "class", "stroke-width", "vector-effect", "x", "y"]
+        attributeFilter: ["d", "transform", "style", "class", "stroke-width", "vector-effect", "x", "y", "width", "height"]
       });
 
       rec.obs = obs;
@@ -14930,13 +14841,13 @@ const patchArea = svg0.querySelector('g#axes_1 g#patch_2 path');
 	            });
 	        } catch (_) {}
 	    }
-	    let runs = 5;
-	    let time_first;
+	   
+	    
 		
 
 
-	    function dzvLabelsOnWarpFrame_() {
-	        runs += 1;
+	    function dzvLabelsOnWarpFrame() {
+	        
 	        const dzv = window.dzv;
 	        const state = dzv && dzv._labels_state;
 	        if (!state) return;
@@ -14947,10 +14858,7 @@ const patchArea = svg0.querySelector('g#axes_1 g#patch_2 path');
 	            state.rec.forEach(r => r.t.setAttribute("visibility", "hidden"));
 	            return;
 	        }
-	        if (runs === 1) {
-	            void svg.offsetWidth;
-	            state.layer_labels.style.opacity = "0";
-	        }
+	        
 	        bringLayerFront(state.axes, state.layer_labels);
 	        const mode = state.focusMajorId ? "focus" : "global";
 			
@@ -15010,24 +14918,16 @@ const patchArea = svg0.querySelector('g#axes_1 g#patch_2 path');
 	        const used = new Set();
 	        let placedCount = 0;
 	        const ss = txt_scale();
-			let kx, ky;
-			{
-			  const cs = getComputedStyle(svg);
-
-			  const ss = parseFloat(cs.getPropertyValue("--ss")) || 1;
-			  const s  = parseFloat(cs.getPropertyValue("--s"))  || 1;
-			  const sx = parseFloat(cs.getPropertyValue("--sx")) || 1;
-			  const sy = parseFloat(cs.getPropertyValue("--sy")) || 1;
-
-			  kx = (ss * s) / sx;
-			  ky = (ss * s) / sy;
-			  }
-  
+			
 	        for (let i = 0; i < items.length; i++) {
 	            if (placedCount >= target && target > 0) break;
 	            const v = items[i];
 	            const rec = state.rec.get(v.id);
 	            if (!rec) continue;
+				if (i === 0)
+				  {
+				   rec.t.parentNode.ctm_cached = window.dzv_ctm_cache();
+				  }
 	            const ok = tryPlaceOne(state, rec, items, plot, placed, mode, ss, prect, prect2, ploti2);
 	            if (ok) {
 	                used.add(v.id);
@@ -15035,51 +14935,27 @@ const patchArea = svg0.querySelector('g#axes_1 g#patch_2 path');
 	            } else {
 	                rec.t.setAttribute("visibility", "hidden");
 	            }
+				
+			  if (i === items.length-1)	
+			    {
+				  rec.t.parentNode.ctm_cached = null;
+				  window.dzv_ctm_clear_cache();
+				}
 	        }
 	        state.rec.forEach((rec, id) => {
 	            if (!used.has(id)) rec.t.setAttribute("visibility", "hidden");
 	            else rec.t.setAttribute("visibility", "visible");
 	        });
-	        if (runs === 1) {
-	            time_first = window.setTimeout(function() {
-	                time_first = null;
-	                void svg.offsetWidth;
-	                state.layer_labels.style.opacity = "1";
-	                void svg.offsetWidth;
-	            }, 1);
-	        }
+	        
 	    }
-	    let _labels_busy = false;
-	    let _labels_rerun = false;
-
-	    function dzvLabelsOnWarpFrame() {
-		     try { dzvLabelsOnWarpFrame_();}catch{};
-			 return;
-	        if (!window.dzv.fit_gate.firstDone) return;
-	        // --- guard: prevent concurrent/interfering runs ---
-	        if (_labels_busy) {
-	            _labels_rerun = true;
-	            return;
-	        }
-	        _labels_busy = true;
-	        try {
-	            dzvLabelsOnWarpFrame_();
-	        } finally {
-	            _labels_busy = false;
-	            // collapse bursts into one rerun AFTER this one finishes
-	            if (_labels_rerun) {
-	                _labels_rerun = false;
-	                Promise.resolve().then(() => dzvLabelsOnWarpFrame());
-	            }
-	        }
-	    }
+	    
 	    window.dzv = window.dzv || {};
 	    window.dzv.dzvInitLabels = dzvInitLabels;
 	    window.dzv.dzvLabelsOnWarpFrame = dzvLabelsOnWarpFrame;
-	    window.dzv.dzvLabelsOnWarpFrame_ = dzvLabelsOnWarpFrame_;
+
 	    window.dzvInitLabels = dzvInitLabels;
 	    window.dzvLabelsOnWarpFrame = dzvLabelsOnWarpFrame;
-	    window.dzvLabelsOnWarpFrame_ = dzvLabelsOnWarpFrame_;
+
 	})();
 	window.dzv.dzvInitLabels(svg);
 
