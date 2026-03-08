@@ -4399,6 +4399,118 @@
 <script>
 // Global gate
 
+window.dzvHideFullyInvisibleDeep = function (roots, skipSubtreeSet) {
+
+  const hidden = [];
+  const seen = new WeakSet();
+  skipSubtreeSet = skipSubtreeSet || new Set();
+
+  function parseOpacity(v) {
+    if (v == null || v === "") return null;
+    const x = parseFloat(v);
+    return Number.isFinite(x) ? x : null;
+  }
+
+  function isTransparentPaintValue(v) {
+    if (v == null) return false;
+    v = String(v).trim().toLowerCase();
+    return (
+      v === "none" ||
+      v === "transparent" ||
+      v === "rgba(0,0,0,0)" ||
+      v === "rgba(0, 0, 0, 0)"
+    );
+  }
+
+  function isZeroOpacity(el, cs) {
+    const opAttr = parseOpacity(el.getAttribute("opacity"));
+    if (opAttr === 0) return true;
+    const opCss = parseOpacity(cs.opacity);
+    return opCss === 0;
+  }
+
+  function pathOrUseInvisible(el, cs) {
+    const tag = el.tagName && el.tagName.toLowerCase();
+    if (tag !== "path" && tag !== "use") return false;
+
+    const fillDead =
+      isTransparentPaintValue(cs.fill) ||
+      parseOpacity(el.getAttribute("fill-opacity")) === 0 ||
+      parseOpacity(cs.fillOpacity) === 0;
+
+    const strokeDead =
+      isTransparentPaintValue(cs.stroke) ||
+      parseOpacity(el.getAttribute("stroke-opacity")) === 0 ||
+      parseOpacity(cs.strokeOpacity) === 0;
+
+    return fillDead && strokeDead;
+  }
+
+  function recordAndHide(el) {
+    if (seen.has(el)) return;
+    seen.add(el);
+    hidden.push({
+      el: el,
+      display_attr: el.getAttribute("display"),
+      display_style: el.style.display
+    });
+    el.style.display = "none";
+  }
+
+  function selfInvisible(el) {
+    const cs = getComputedStyle(el);
+    if (cs.display === "none") return false;
+    if (isZeroOpacity(el, cs)) return true;
+    if (pathOrUseInvisible(el, cs)) return true;
+    return false;
+  }
+
+  function walk(root) {
+    if (!root || root.nodeType !== 1) return;
+    if (skipSubtreeSet.has(root)) return;
+
+    const stack = [[root, false]];
+
+    while (stack.length) {
+      const [el, inheritedHidden] = stack.pop();
+      if (!el || el.nodeType !== 1) continue;
+      if (skipSubtreeSet.has(el)) continue;
+
+      const hideThis = inheritedHidden || selfInvisible(el);
+
+      if (hideThis) recordAndHide(el);
+
+      const kids = el.children;
+      for (let i = kids.length - 1; i >= 0; i--) {
+        const kid = kids[i];
+        if (skipSubtreeSet.has(kid)) continue;
+        stack.push([kid, hideThis]);
+      }
+    }
+  }
+
+  for (let i = 0; i < roots.length; i++) walk(roots[i]);
+
+  return {
+    hidden,
+    restore() {
+      for (let i = hidden.length - 1; i >= 0; i--) {
+        const r = hidden[i];
+        if (!r.el) continue;
+
+        if (r.display_style != null && r.display_style !== "") {
+          r.el.style.display = r.display_style;
+        } else {
+          r.el.style.removeProperty("display");
+        }
+
+        if (r.display_attr == null) r.el.removeAttribute("display");
+        else r.el.setAttribute("display", r.display_attr);
+      }
+    }
+  };
+};
+
 (function () {
   const meta = document.getElementById("dzv_gen").querySelector('g#dzv-geom-metadata');
   if (!meta) return;
@@ -4697,6 +4809,12 @@ window.dzv = window.dzv || {};
     }
   }
 
+  function isTempBlockedAttr(name) {
+    if (!window.dzvSkipMirrorHidePropagation) return false;
+    const lname = String(name).toLowerCase();
+    return lname === "display" || lname === "style";
+  }
+
   function syncUseAttrsToMirrorPath(useEl, pathEl) {
     const desired = new Map();
 
@@ -4706,6 +4824,8 @@ window.dzv = window.dzv || {};
       const lname = name.toLowerCase();
 
       if (SKIP_USE_ATTRS.has(lname)) continue;
+      if (isTempBlockedAttr(name)) continue;
+
       desired.set(name, a.value);
     }
 
@@ -4722,6 +4842,7 @@ window.dzv = window.dzv || {};
       const a = pathEl.attributes[i];
       const name = a.name;
       if (keepOnPath.has(name)) continue;
+      if (isTempBlockedAttr(name)) continue;
       if (!desired.has(name)) toRemove.push(name);
     }
 
@@ -4890,7 +5011,6 @@ window.dzv = window.dzv || {};
   window.dzvInstallUsePathMirror = installOne;
   window.dzvInstallUsePathMirrors = installMany;
 })();
-
 
 dzvInstallUsePathMirrors(document.getElementById("dzv_gen").querySelectorAll("g.s_e use"));
 
@@ -19128,7 +19248,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	}
 	let times_run = 0;
 	window.dzv.now_warping = false;
-	const TOTAL_STEPS = 11;
+	const TOTAL_STEPS = 21;
 
 	function dzvPrecacheWarpFrames(svg, N_FRAMES = 10) {
 	    try {
@@ -19244,18 +19364,23 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	}
 	const all_to_hide = hidden_cache();
 
-	function dzvAnimateWarp(svg, tTarget, ms = 350) {
+	 function dzvAnimateWarp(svg, tTarget, ms = 350) {
+	   if (window.dzv.now_warping) return;
+	
 	    const dzv = (window.dzv = window.dzv || {});
 	    const t0 = Math.max(0, Math.min(1, +dzv.warpingFactor || 0));
 	    const t1 = Math.max(0, Math.min(1, +tTarget || 0));
 	    const dur = Math.max(1, +ms || 350);
-	    const tStart = performance.now();
+	    let tStart;// = performance.now();
 	    if (dzv._warpHideRestore) {
 	        try {
 	            dzv._warpHideRestore();
 	        } catch (_) {}
 	        dzv._warpHideRestore = null;
 	    }
+		
+		
+			
 	    const inFocusMode = (window.dzvFocusMajor != null) || (window.dzvFocusMajorId != null);
 	    if (!inFocusMode && (t0 !== t1)) {
 	        const hidden = [];
@@ -19281,6 +19406,16 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            }
 	        };
 	    }
+		
+		window.dzvSkipMirrorHidePropagation = true;
+		const axes = svg.querySelector("g#axes_1");
+		const patch2 = axes.querySelector('g#patch_2');
+
+		const hFull = window.dzvHideFullyInvisibleDeep(
+		  Array.from(axes.children).filter(el => el !== patch2)
+		);
+
+
 
 	    function easeInOut(x) {
 	        return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
@@ -19345,6 +19480,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        if (window.dzv.scale_warp) window.dzv.scale_warp(tTarget);
 	        if (window.dzv.swap_axis_warp) window.dzv.swap_axis_warp();
 	        window.dzv.now_warping = false;
+			hFull.restore();
+			window.dzvSkipMirrorHidePropagation = false;
 
 
 	    }
@@ -19440,14 +19577,16 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        requestAnimationFrame(step);
 	    }
 
+		//let ticcnt = 0;
 	    function tick(now) {
 	        const u = Math.max(0, Math.min(1, (now - tStart) / dur));
 	        let tt = t0 + (t1 - t0) * easeInOut(u);
 	        if (tt < 0) tt = 0;
 	        if (tt > 1) tt = 1;
-	        if (u < 1) {
 
-	            window.dzv.now_warping = true;
+	        if (u < 1) {
+				//console.log(++ticcnt);
+	            
 	            if (useCachedFrames) {
 	                const fi = applyCachedFrame(tt, setp, sett);
 	                if (cache && cache.fis) cache.fis.push(fi);
@@ -19467,7 +19606,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        // time ran out or ended: do symmetric mirrored tail + mandatory recompute
 	        mirroredTailAndCommit();
 	    }
-
+		window.dzv.now_warping = true;
+		tStart = performance.now();
 	    requestAnimationFrame(tick);
 	}
 	// status helpers (you already had these earlier)
@@ -19966,6 +20106,9 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            syTarget: syT,
 	            t0: performance.now(),
 	        };
+			window.dzvSkipMirrorHidePropagation = true;
+			const hFull =  window.dzvHideFullyInvisibleDeep(wrapper.querySelectorAll("*"));
+			
 	        const tick = (now) => {
 	            const s = state.session;
 	            if (!s) return;
@@ -19997,6 +20140,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                    "transform", `matrix(1 0 0 ${s.syTarget} 0 ${targetYc - s.syTarget * baseCenterY})`
 	                );
 	                window.dzv.focusing = false;
+					hFull.restore();
+					window.dzvSkipMirrorHidePropagation = false;
 
 					
 	                if (window.dzv.hide_tip) window.dzv.hide_tip();
@@ -22141,6 +22286,7 @@ function applyLayout(items) {
     startCenter = cNow;
   }
 
+  let hFull = null;
   function _beginGestureIfReady() {
     if (gActive) return;
     if (pointers.size !== 2) return;
@@ -22159,11 +22305,22 @@ function applyLayout(items) {
 
     gActive = true;
     state._gesture2Active = true;
+	window.dzvSkipMirrorHidePropagation = true;
+	const axes = svg.querySelector("g#axes_1");
+	const patch2 = axes.querySelector('g#patch_2');
+
+	hFull = window.dzvHideFullyInvisibleDeep(
+	  Array.from(axes.children).filter(el => el !== patch2)
+	);
+		
   }
 
   function _endGesture() {
     gActive = false;
     state._gesture2Active = false;
+	hFull.restore();
+	window.dzvSkipMirrorHidePropagation = false;
+	hFull = null;		
   }
 
   function onPointerDown(ev) {
@@ -22848,10 +23005,15 @@ if (window.dzv.show_zoom_controls)
 
 	        function warpXBlend(xLinear, t) {
 				const patchBox = DZV.getPlotBox(patch2Path);// patch2Path.getBBox();
+				
 				const xLeft = patchBox.x;
 				const xRight = patchBox.x + patchBox.width;
 				const W = patchBox.width;
-				if (W <= 0) return;
+				if (W <= 0) 
+				  {
+				   console.log(patch2Path);
+				   return;
+				  }
 			
 	            const u = (xLinear - xLeft) / W;
 	            const uBlend = warpUBlend(u, t);
@@ -23098,6 +23260,7 @@ if (window.dzv.show_zoom_controls)
 	        function applyTickMarksForT(t) {
 	            tickMarks.forEach((tm) => {
 	                const x = warpXBlend(tm.x0, t);
+					//console.log(tm.x0, t, x);
 	                tm.el.setAttribute("x", fmtCoord(x));
 	            });
 	        }
