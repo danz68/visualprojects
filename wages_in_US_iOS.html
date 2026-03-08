@@ -20155,6 +20155,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            }
 	        };
 	        finalizeHidden(state.session.hiddenPrev, state.session.hiddenEls);
+			state.session.t0 = performance.now();
 	        state.raf = requestAnimationFrame(tick);
 	        return true;
 	    }
@@ -20223,6 +20224,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        // animate out: unscale + fade others back in
 			//restoreClip(s0.clipRecs || []);
 			
+			window.dzvSkipMirrorHidePropagation = true;
+			const hFull = dzvHideFullyInvisibleDeep(wrapper.querySelectorAll("*"));
 
 	        const t0 = performance.now();
 			let once = false;
@@ -20262,6 +20265,9 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                if (window.dzv.hide_highlight) window.dzv.hide_highlight();
 	                if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 	                window.dzv.focusing = false;
+					hFull.restore();
+					window.dzvSkipMirrorHidePropagation = false;
+
 					
 		
 	            }
@@ -20291,7 +20297,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	window.dzv = window.dzv || {};
 	window.dzv.majorFocus = dzvInitMajorFocus(svg, {
 	    hoverLayerId: "dzv-hover-highlight-layer",
-	    durationMs: 420,
+	    durationMs: 500,
 	    padFrac: 0.95,
 	});
 	// then call (example):
