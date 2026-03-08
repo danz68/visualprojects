@@ -4936,6 +4936,8 @@ window.dzv = window.dzv || {};
 
     const api = {
       sync: syncNow,
+	  stop_observer: function() {if (state.useObs) state.useObs.disconnect();},
+	  start_observer: function() {bindUseObserver();syncNow();},
       showUse: function () {
         if (state.useObs) state.useObs.disconnect();
         try {
@@ -5012,7 +5014,8 @@ window.dzv = window.dzv || {};
   window.dzvInstallUsePathMirrors = installMany;
 })();
 
-dzvInstallUsePathMirrors(document.getElementById("dzv_gen").querySelectorAll("g.s_e use"));
+
+window.dzvPathMirror = window.dzvInstallUsePathMirrors(document.getElementById("dzv_gen").querySelectorAll("g.s_e use"));
 
 
 let wheelBlocked = true;       // start blocked during loader
@@ -20106,8 +20109,10 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            syTarget: syT,
 	            t0: performance.now(),
 	        };
-			window.dzvSkipMirrorHidePropagation = true;
-			const hFull =  window.dzvHideFullyInvisibleDeep(wrapper.querySelectorAll("*"));
+			// 
+			
+	
+			
 			
 	        const tick = (now) => {
 	            const s = state.session;
@@ -20142,7 +20147,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                window.dzv.focusing = false;
 					hFull.restore();
 					window.dzvSkipMirrorHidePropagation = false;
-
+					window.dzvPathMirror.forEach(api => api.start_observer()); 
 					
 	                if (window.dzv.hide_tip) window.dzv.hide_tip();
 	                if (window.dzv.hide_highlight) window.dzv.hide_highlight();
@@ -20154,7 +20159,13 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                if (window.dzvLabelsOnWarpFrame) window.dzvLabelsOnWarpFrame();
 	            }
 	        };
+			
+			
 	        finalizeHidden(state.session.hiddenPrev, state.session.hiddenEls);
+			window.dzvPathMirror.forEach(api => {api.sync();api.stop_observer();});
+			window.dzvSkipMirrorHidePropagation = true;
+			const hFull =  window.dzvHideFullyInvisibleDeep(wrapper.querySelectorAll("*"));
+			
 			state.session.t0 = performance.now();
 	        state.raf = requestAnimationFrame(tick);
 	        return true;
@@ -20223,7 +20234,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        const baseCenterY = s0.baseCenterY;
 	        // animate out: unscale + fade others back in
 			//restoreClip(s0.clipRecs || []);
-			
+			window.dzvPathMirror.forEach(api => api.stop_observer()); 
 			window.dzvSkipMirrorHidePropagation = true;
 			const hFull = dzvHideFullyInvisibleDeep(wrapper.querySelectorAll("*"));
 
@@ -20267,6 +20278,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                window.dzv.focusing = false;
 					hFull.restore();
 					window.dzvSkipMirrorHidePropagation = false;
+					window.dzvPathMirror.forEach(api => api.start_observer()); 
 
 					
 		
@@ -22318,6 +22330,7 @@ function applyLayout(items) {
 	hFull = window.dzvHideFullyInvisibleDeep(
 	  Array.from(axes.children).filter(el => el !== patch2)
 	);
+	window.dzvPathMirror.forEach(api => {api.sync();api.stop_observer();});
 		
   }
 
@@ -22327,6 +22340,7 @@ function applyLayout(items) {
 	hFull.restore();
 	window.dzvSkipMirrorHidePropagation = false;
 	hFull = null;		
+	window.dzvPathMirror.forEach(api => {api.start_observer();});
   }
 
   function onPointerDown(ev) {
