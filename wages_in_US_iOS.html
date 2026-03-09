@@ -4399,7 +4399,7 @@
 <script>
 // Global gate
 
-window.dzvHideFullyInvisibleDeep = function (roots, skipSubtreeSet) {
+window.dzvHideFullyInvisibleDeepOld = function (roots, skipSubtreeSet) {
 
   const hidden = [];
   const seen = new WeakSet();
@@ -4511,6 +4511,110 @@ window.dzvHideFullyInvisibleDeep = function (roots, skipSubtreeSet) {
   };
 };
 
+
+window.dzvHideFullyInvisibleDeep = function (roots, skipSubtreeSet) {
+  const hidden = [];
+  skipSubtreeSet = skipSubtreeSet || new Set();
+
+  function numOrNull(v) {
+    if (v == null || v === "") return null;
+    v = +v;
+    return Number.isFinite(v) ? v : null;
+  }
+
+  function isTransparentPaintFast(v) {
+    return v === "none" ||
+           v === "transparent" ||
+           v === "rgba(0, 0, 0, 0)" ||
+           v === "rgba(0,0,0,0)";
+  }
+
+  function recordAndHide(el) {
+    hidden.push([el, el.getAttribute("display"), el.style.display]);
+    el.style.display = "none";
+  }
+
+  function selfInvisible(el) {
+    const opAttr = numOrNull(el.getAttribute("opacity"));
+    if (opAttr === 0) return true;
+
+    const tag = el.tagName;
+    if (tag !== "path" && tag !== "use" && tag !== "PATH" && tag !== "USE") {
+      return false;
+    }
+
+    const fillOpAttr = numOrNull(el.getAttribute("fill-opacity"));
+    const strokeOpAttr = numOrNull(el.getAttribute("stroke-opacity"));
+
+    const needCS = (
+      fillOpAttr == null || fillOpAttr !== 0 ||
+      strokeOpAttr == null || strokeOpAttr !== 0 ||
+      opAttr == null || opAttr !== 0
+    );
+
+    if (!needCS) return true;
+
+    const cs = getComputedStyle(el);
+    if (cs.display === "none") return false;
+    if (+cs.opacity === 0) return true;
+
+    const fillDead =
+      fillOpAttr === 0 ||
+      +cs.fillOpacity === 0 ||
+      isTransparentPaintFast(cs.fill);
+
+    const strokeDead =
+      strokeOpAttr === 0 ||
+      +cs.strokeOpacity === 0 ||
+      isTransparentPaintFast(cs.stroke);
+
+    return fillDead && strokeDead;
+  }
+
+  function walk(root) {
+    if (!root || root.nodeType !== 1) return;
+    if (skipSubtreeSet.has(root)) return;
+
+    const stack = [root, 0];
+
+    while (stack.length) {
+      const inheritedHidden = !!stack.pop();
+      const el = stack.pop();
+
+      if (!el || el.nodeType !== 1) continue;
+      if (skipSubtreeSet.has(el)) continue;
+
+      const hideThis = inheritedHidden || selfInvisible(el);
+      if (hideThis) recordAndHide(el);
+
+      for (let kid = el.lastElementChild; kid; kid = kid.previousElementSibling) {
+        if (skipSubtreeSet.has(kid)) continue;
+        stack.push(kid, hideThis ? 1 : 0);
+      }
+    }
+  }
+
+  for (let i = 0; i < roots.length; i++) walk(roots[i]);
+
+  return {
+    hidden,
+    restore() {
+      for (let i = hidden.length - 1; i >= 0; i--) {
+        const r = hidden[i];
+        const el = r[0];
+        if (!el) continue;
+
+        if (r[2] != null && r[2] !== "") el.style.display = r[2];
+        else el.style.removeProperty("display");
+
+        if (r[1] == null) el.removeAttribute("display");
+        else el.setAttribute("display", r[1]);
+      }
+    }
+  };
+};
+
+
 (function () {
   const meta = document.getElementById("dzv_gen").querySelector('g#dzv-geom-metadata');
   if (!meta) return;
@@ -4592,7 +4696,9 @@ function dzvSecureMinStrokeWidth(opts) {
       const parsed = _parseNumAndUnit(swStr);
       if (!parsed) continue;
 
-      if (parsed.num <= maxConsider) {
+      if (parsed.num <= maxConsider) 
+	  
+	  {
         hits.push({
           g,
           useEl: u,
@@ -4644,6 +4750,7 @@ function dzvSecureMinStrokeWidth(opts) {
 
     if (h.useEl.style.strokeWidth !== newStr) {
       h.useEl.style.strokeWidth = newStr;
+	  
       changed++;
     }
 
@@ -4657,7 +4764,8 @@ function dzvSecureMinStrokeWidth(opts) {
   return { changed, minOld, maxOld, items };
 }
 
-dzvSecureMinStrokeWidth({root:document.getElementById("dzv_gen"), targetMin:0.5, maxConsider:1.201});
+const resy = dzvSecureMinStrokeWidth({root:document.getElementById("dzv_gen"), targetMin:0.5, maxConsider:1.501});
+
 
 window.dzv = window.dzv || {};
 
@@ -4859,6 +4967,8 @@ window.dzv = window.dzv || {};
     if (pathEl.style.pointerEvents !== "none") {
       pathEl.style.pointerEvents = "none";
     }
+	
+	
   }
 
   function installOne(useEl) {
@@ -5016,6 +5126,3335 @@ window.dzv = window.dzv || {};
 
 
 window.dzvPathMirror = window.dzvInstallUsePathMirrors(document.getElementById("dzv_gen").querySelectorAll("g.s_e use"));
+
+function createNativeAdaptiveBatchSimplifier(options) {
+  options = options || {};
+
+  const CFG = {
+    tolerancePx: options.tolerancePx != null ? +options.tolerancePx : 0.75,
+    minSpanLen: options.minSpanLen != null ? +options.minSpanLen : 1e-4,
+    minChordPx: options.minChordPx != null ? +options.minChordPx : 0.5,
+    lengthSlackPx: options.lengthSlackPx != null ? +options.lengthSlackPx : 0.20,
+    quarterTestChordPx: options.quarterTestChordPx != null ? +options.quarterTestChordPx : 20.0,
+    maxDepth: options.maxDepth != null ? (options.maxDepth | 0) : 20,
+    openSeeds: options.openSeeds != null ? (options.openSeeds | 0) : 1,
+    closedSeeds: options.closedSeeds != null ? (options.closedSeeds | 0) : 8,
+    getTransformKey: typeof options.getTransformKey === "function" ? options.getTransformKey : null,
+    getScreenCTMForPath: typeof options.getScreenCTMForPath === "function" ? options.getScreenCTMForPath : null,
+    quantizeDigits: options.quantizeDigits != null ? (options.quantizeDigits | 0) : -1,
+    quantizeFactorSafety: options.quantizeFactorSafety != null ? +options.quantizeFactorSafety : 8.0
+  };
+
+  const NS = "http://www.w3.org/2000/svg";
+
+  const WS = {
+    stack: new Float64Array(12 * 512),   // s0,s1,x0,y0,sx0,sy0,x1,y1,sx1,sy1,depth,flags
+    outXY: new Float64Array(2 * 4096),
+    seedS: new Float64Array(513),
+    seedXY: new Float64Array(2 * 513),
+    seedSXY: new Float64Array(2 * 513),
+    parts: new Array(256),
+    closedFlags: new Array(256),
+    subDs: new Array(64),
+    tmpPaths: []
+  };
+
+  function ensureF64(name, need) {
+    let a = WS[name];
+    if (!a || a.length < need) {
+      let n = a ? a.length : 1;
+      while (n < need) n <<= 1;
+      a = new Float64Array(n);
+      WS[name] = a;
+    }
+    return a;
+  }
+
+  function ensureSlots(name, need) {
+    let a = WS[name];
+    if (a.length < need) {
+      let n = a.length || 1;
+      while (n < need) n <<= 1;
+      a.length = n;
+      WS[name] = a;
+    }
+    return a;
+  }
+
+  function ensureTmpPaths(need) {
+    const arr = WS.tmpPaths;
+    while (arr.length < need) arr.push(document.createElementNS(NS, "path"));
+    return arr;
+  }
+
+  function tx(m, x, y) { return m.a * x + m.c * y + m.e; }
+  function ty(m, x, y) { return m.b * x + m.d * y + m.f; }
+
+  function dist2(ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    return dx * dx + dy * dy;
+  }
+
+  function dist(ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    return Math.hypot(dx, dy);
+  }
+
+  function pointSegDist2(px, py, ax, ay, bx, by) {
+    const vx = bx - ax, vy = by - ay;
+    const wx = px - ax, wy = py - ay;
+    const c1 = vx * wx + vy * wy;
+    if (c1 <= 0) return dist2(px, py, ax, ay);
+    const c2 = vx * vx + vy * vy;
+    if (c2 <= c1) return dist2(px, py, bx, by);
+    const t = c1 / c2;
+    const qx = ax + t * vx, qy = ay + t * vy;
+    return dist2(px, py, qx, qy);
+  }
+
+  function sameLocalPoint(buf, nPts, x, y) {
+    if (nPts <= 0) return false;
+    const j = 2 * (nPts - 1);
+    return buf[j] === x && buf[j + 1] === y;
+  }
+
+  function appendLocalPoint(x, y, nPtsRef, partIdx) {
+    let outXY = WS.outXY;
+    const nPts = nPtsRef.value;
+    const need = 2 * (nPts + 1);
+    if (need > outXY.length) outXY = ensureF64("outXY", need);
+    outXY[2 * nPts] = x;
+    outXY[2 * nPts + 1] = y;
+    WS.outXY = outXY;
+    nPtsRef.value = nPts + 1;
+    if (partIdx >= 0) WS.parts[partIdx].nPts++;
+  }
+
+  function computeQuantizer(m, tolerancePx, digitsOpt, safety) {
+    if (digitsOpt >= 0) return { factor: Math.pow(10, digitsOpt) };
+
+    const sx = Math.hypot(m.a, m.b);
+    const sy = Math.hypot(m.c, m.d);
+    const pxPerUnit = Math.max(sx, sy, 1e-12);
+    const qLocal = tolerancePx / (pxPerUnit * safety);
+
+    let digits = 0;
+    if (qLocal < 1) digits = Math.ceil(-Math.log10(qLocal));
+    if (digits < 0) digits = 0;
+    if (digits > 12) digits = 12;
+
+    return { factor: Math.pow(10, digits) };
+  }
+
+  function qnum(v, qf) {
+    const r = Math.round(v * qf) / qf;
+    return Object.is(r, -0) ? 0 : r;
+  }
+
+  function buildPathD(partsN, quantizer) {
+    const parts = WS.parts;
+    const outXY = WS.outXY;
+    const qf = quantizer.factor;
+    let s = "";
+
+    for (let p = 0; p < partsN; p++) {
+      const part = parts[p];
+      const off = part.off;
+      const nPts = part.nPts;
+      if (nPts <= 0) continue;
+
+      let x = qnum(outXY[2 * off], qf);
+      let y = qnum(outXY[2 * off + 1], qf);
+      s += "M" + x + " " + y;
+
+      let prevX = x, prevY = y;
+      for (let i = 1; i < nPts; i++) {
+        x = qnum(outXY[2 * (off + i)], qf);
+        y = qnum(outXY[2 * (off + i) + 1], qf);
+        if (x === prevX && y === prevY) continue;
+        s += "L" + x + " " + y;
+        prevX = x;
+        prevY = y;
+      }
+
+      if (part.closed) s += "Z";
+    }
+
+    return s;
+  }
+
+  function getMatrixForPath(pathEl, cache, getTransformKey, getScreenCTMForPath) {
+    if (!getTransformKey) {
+      return getScreenCTMForPath ? getScreenCTMForPath(pathEl) : pathEl.getScreenCTM();
+    }
+    const key = getTransformKey(pathEl);
+    if (cache.has(key)) return cache.get(key);
+    const m = getScreenCTMForPath ? getScreenCTMForPath(pathEl) : pathEl.getScreenCTM();
+    cache.set(key, m);
+    return m;
+  }
+
+  function splitIntoSubpathStrings(d) {
+    const out = ensureSlots("subDs", 1);
+    let outN = 0;
+
+    const n = d.length;
+    let i = 0;
+    let start = -1;
+
+    while (i < n) {
+      const c = d.charCodeAt(i);
+      if (c === 77 || c === 109) {
+        if (start >= 0) {
+          const part = d.slice(start, i).trim();
+          if (part) out[outN++] = part;
+        }
+        start = i;
+      }
+      i++;
+    }
+
+    if (start >= 0) {
+      const part = d.slice(start).trim();
+      if (part) out[outN++] = part;
+    } else {
+      const part = d.trim();
+      if (part) out[outN++] = part;
+    }
+
+    return outN;
+  }
+
+  function subpathClosed(subd) {
+    let i = subd.length - 1;
+    while (i >= 0) {
+      const c = subd.charCodeAt(i);
+      if (c === 32 || c === 9 || c === 10 || c === 13 || c === 44) {
+        i--;
+        continue;
+      }
+      return c === 90 || c === 122;
+    }
+    return false;
+  }
+
+  function simplifyContinuousPath(nativePath, m, closed, opt, tol2, minChord2, quarterTestChord2, nPtsRef, partIdx) {
+    let stack = WS.stack;
+    let seedS = WS.seedS;
+    let seedXY = WS.seedXY;
+    let seedSXY = WS.seedSXY;
+
+    const totalLen = nativePath.getTotalLength();
+
+    if (!(totalLen > 0)) {
+      const p0 = nativePath.getPointAtLength(0);
+      appendLocalPoint(p0.x, p0.y, nPtsRef, partIdx);
+      return { samples: 1 };
+    }
+
+    const pStart = nativePath.getPointAtLength(0);
+    const pEnd   = nativePath.getPointAtLength(totalLen);
+    const sxStart = tx(m, pStart.x, pStart.y), syStart = ty(m, pStart.x, pStart.y);
+    const sxEnd   = tx(m, pEnd.x,   pEnd.y),   syEnd   = ty(m, pEnd.x,   pEnd.y);
+
+    const looksClosed = closed || dist2(sxStart, syStart, sxEnd, syEnd) <= minChord2;
+    const seedN = looksClosed ? Math.max(8, opt.closedSeeds) : Math.max(1, opt.openSeeds);
+
+    if (seedS.length < seedN + 1) seedS = ensureF64("seedS", seedN + 1);
+    if (seedXY.length < 2 * (seedN + 1)) seedXY = ensureF64("seedXY", 2 * (seedN + 1));
+    if (seedSXY.length < 2 * (seedN + 1)) seedSXY = ensureF64("seedSXY", 2 * (seedN + 1));
+
+    let sampleCount = 0;
+
+    for (let i = 0; i <= seedN; i++) {
+      const s = (i * totalLen) / seedN;
+      const p = nativePath.getPointAtLength(s);
+      const x = p.x, y = p.y;
+      seedS[i] = s;
+      seedXY[2 * i] = x;
+      seedXY[2 * i + 1] = y;
+      seedSXY[2 * i] = tx(m, x, y);
+      seedSXY[2 * i + 1] = ty(m, x, y);
+    }
+    sampleCount += (seedN + 1);
+
+    appendLocalPoint(seedXY[0], seedXY[1], nPtsRef, partIdx);
+
+    let sp = 0;
+
+    function pushInterval(s0, s1, x0, y0, sx0, sy0, x1, y1, sx1, sy1, depth) {
+      if (sp + 12 > stack.length) stack = ensureF64("stack", stack.length * 2);
+      stack[sp++] = s0;
+      stack[sp++] = s1;
+      stack[sp++] = x0;
+      stack[sp++] = y0;
+      stack[sp++] = sx0;
+      stack[sp++] = sy0;
+      stack[sp++] = x1;
+      stack[sp++] = y1;
+      stack[sp++] = sx1;
+      stack[sp++] = sy1;
+      stack[sp++] = depth;
+      stack[sp++] = 0;
+      WS.stack = stack;
+    }
+
+    for (let i = seedN - 1; i >= 0; i--) {
+      pushInterval(
+        seedS[i], seedS[i + 1],
+        seedXY[2 * i], seedXY[2 * i + 1],
+        seedSXY[2 * i], seedSXY[2 * i + 1],
+        seedXY[2 * (i + 1)], seedXY[2 * (i + 1) + 1],
+        seedSXY[2 * (i + 1)], seedSXY[2 * (i + 1) + 1],
+        0
+      );
+    }
+
+    while (sp > 0) {
+      sp -= 12;
+
+      const s0 = stack[sp];
+      const s1 = stack[sp + 1];
+      const x0 = stack[sp + 2];
+      const y0 = stack[sp + 3];
+      const sx0 = stack[sp + 4];
+      const sy0 = stack[sp + 5];
+      const x1 = stack[sp + 6];
+      const y1 = stack[sp + 7];
+      const sx1 = stack[sp + 8];
+      const sy1 = stack[sp + 9];
+      const depth = stack[sp + 10] | 0;
+
+      const chord2 = dist2(sx0, sy0, sx1, sy1);
+      const spanLen = s1 - s0;
+
+      if (depth >= opt.maxDepth || spanLen <= opt.minSpanLen) {
+        if (!sameLocalPoint(WS.outXY, nPtsRef.value, x1, y1)) appendLocalPoint(x1, y1, nPtsRef, partIdx);
+        continue;
+      }
+
+      if (chord2 <= minChord2 && spanLen <= opt.minSpanLen * 8) {
+        if (!sameLocalPoint(WS.outXY, nPtsRef.value, x1, y1)) appendLocalPoint(x1, y1, nPtsRef, partIdx);
+        continue;
+      }
+
+      const sm = 0.5 * (s0 + s1);
+      const pm = nativePath.getPointAtLength(sm);
+      const xm = pm.x, ym = pm.y;
+      const sxm = tx(m, xm, ym);
+      const sym = ty(m, xm, ym);
+      sampleCount++;
+
+      let accept = false;
+
+      if (pointSegDist2(sxm, sym, sx0, sy0, sx1, sy1) <= tol2) {
+        const pieceLenPx = dist(sx0, sy0, sxm, sym) + dist(sxm, sym, sx1, sy1);
+        const chordPx = Math.sqrt(chord2);
+
+        if (pieceLenPx - chordPx <= opt.lengthSlackPx) {
+          accept = true;
+
+          if (chord2 >= quarterTestChord2 || chord2 <= minChord2) {
+            const sq1 = 0.5 * (s0 + sm);
+            const sq3 = 0.5 * (sm + s1);
+
+            const pq1 = nativePath.getPointAtLength(sq1);
+            const pq3 = nativePath.getPointAtLength(sq3);
+            sampleCount += 2;
+
+            const sxq1 = tx(m, pq1.x, pq1.y), syq1 = ty(m, pq1.x, pq1.y);
+            const sxq3 = tx(m, pq3.x, pq3.y), syq3 = ty(m, pq3.x, pq3.y);
+
+            if (
+              pointSegDist2(sxq1, syq1, sx0, sy0, sx1, sy1) > tol2 ||
+              pointSegDist2(sxq3, syq3, sx0, sy0, sx1, sy1) > tol2
+            ) {
+              accept = false;
+            }
+          }
+        }
+      }
+
+      if (accept) {
+        if (!sameLocalPoint(WS.outXY, nPtsRef.value, x1, y1)) appendLocalPoint(x1, y1, nPtsRef, partIdx);
+      } else {
+        pushInterval(sm, s1, xm, ym, sxm, sym, x1, y1, sx1, sy1, depth + 1);
+        pushInterval(s0, sm, x0, y0, sx0, sy0, xm, ym, sxm, sym, depth + 1);
+      }
+    }
+
+    WS.seedS = seedS;
+    WS.seedXY = seedXY;
+    WS.seedSXY = seedSXY;
+    WS.stack = stack;
+
+    if (closed && WS.parts[partIdx].nPts > 1) {
+      const off = WS.parts[partIdx].off;
+      const nPts = WS.parts[partIdx].nPts;
+      const fx = WS.outXY[2 * off], fy = WS.outXY[2 * off + 1];
+      const lx = WS.outXY[2 * (off + nPts - 1)], ly = WS.outXY[2 * (off + nPts - 1) + 1];
+      if (fx === lx && fy === ly) WS.parts[partIdx].nPts--;
+    }
+
+    return { samples: sampleCount };
+  }
+
+  function run(paths, runOptions) {
+    const opt = runOptions ? {
+      tolerancePx: runOptions.tolerancePx != null ? +runOptions.tolerancePx : CFG.tolerancePx,
+      minSpanLen: runOptions.minSpanLen != null ? +runOptions.minSpanLen : CFG.minSpanLen,
+      minChordPx: runOptions.minChordPx != null ? +runOptions.minChordPx : CFG.minChordPx,
+      lengthSlackPx: runOptions.lengthSlackPx != null ? +runOptions.lengthSlackPx : CFG.lengthSlackPx,
+      quarterTestChordPx: runOptions.quarterTestChordPx != null ? +runOptions.quarterTestChordPx : CFG.quarterTestChordPx,
+      maxDepth: runOptions.maxDepth != null ? (runOptions.maxDepth | 0) : CFG.maxDepth,
+      openSeeds: runOptions.openSeeds != null ? (runOptions.openSeeds | 0) : CFG.openSeeds,
+      closedSeeds: runOptions.closedSeeds != null ? (runOptions.closedSeeds | 0) : CFG.closedSeeds,
+      getTransformKey: typeof runOptions.getTransformKey === "function" ? runOptions.getTransformKey : CFG.getTransformKey,
+      getScreenCTMForPath: typeof runOptions.getScreenCTMForPath === "function" ? runOptions.getScreenCTMForPath : CFG.getScreenCTMForPath,
+      quantizeDigits: runOptions.quantizeDigits != null ? (runOptions.quantizeDigits | 0) : CFG.quantizeDigits,
+      quantizeFactorSafety: runOptions.quantizeFactorSafety != null ? +runOptions.quantizeFactorSafety : CFG.quantizeFactorSafety
+    } : CFG;
+
+    const tol2 = opt.tolerancePx * opt.tolerancePx;
+    const minChord2 = opt.minChordPx * opt.minChordPx;
+    const quarterTestChord2 = opt.quarterTestChordPx * opt.quarterTestChordPx;
+
+    const ctmCache = new Map();
+    const out = new Array(paths.length);
+    const parts = WS.parts;
+
+    for (let pidx = 0; pidx < paths.length; pidx++) {
+      const pathEl = paths[pidx];
+      if (!pathEl || typeof pathEl.getAttribute !== "function" || typeof pathEl.getTotalLength !== "function" || typeof pathEl.getPointAtLength !== "function") {
+        out[pidx] = null;
+        continue;
+      }
+
+      const d0 = pathEl.getAttribute("d") || "";
+      if (!d0) {
+        out[pidx] = { el: pathEl, d: d0, d_simplified: d0, totalLen: 0, samples: 0, points: 0 };
+        continue;
+      }
+
+      const m = getMatrixForPath(pathEl, ctmCache, opt.getTransformKey, opt.getScreenCTMForPath);
+      if (!m) {
+        out[pidx] = null;
+        continue;
+      }
+
+      const subN = splitIntoSubpathStrings(d0);
+      ensureSlots("parts", subN);
+      const tmpPaths = subN > 1 ? ensureTmpPaths(subN) : null;
+      const quantizer = computeQuantizer(m, opt.tolerancePx, opt.quantizeDigits, opt.quantizeFactorSafety);
+
+      let sampleCount = 0;
+      let nPtsTotal = 0;
+      let totalLenAll = 0;
+      const nPtsRef = { value: 0 };
+
+      for (let sidx = 0; sidx < subN; sidx++) {
+        const subd = WS.subDs[sidx];
+        const closed = subpathClosed(subd);
+
+        parts[sidx] = { off: nPtsRef.value, nPts: 0, closed: closed };
+
+        let nativePath;
+        if (subN === 1) {
+          nativePath = pathEl;
+        } else {
+          nativePath = tmpPaths[sidx];
+          nativePath.setAttribute("d", subd);
+        }
+
+        const res = simplifyContinuousPath(
+          nativePath, m, closed, opt, tol2, minChord2, quarterTestChord2, nPtsRef, sidx
+        );
+
+        sampleCount += res.samples;
+        nPtsTotal = nPtsRef.value;
+        totalLenAll += nativePath.getTotalLength();
+      }
+
+      out[pidx] = {
+        el: pathEl,
+        d: d0,
+        d_simplified: buildPathD(subN, quantizer),
+        totalLen: totalLenAll,
+        samples: sampleCount,
+        points: nPtsTotal
+      };
+    }
+
+    return out;
+  }
+
+  return { run: run };
+}
+
+
+
+/*
+window.dzvSimplifier = createNativeAdaptiveBatchSimplifier({
+  tolerancePx: 0.75,
+  minSpanLen: 1e-4,
+  minChordPx: 0.5,
+  lengthSlackPx: 0.20,
+  quarterTestChordPx: 20,
+  maxDepth: 20,
+  openSeeds: 1,
+  closedSeeds: 8,
+  quantizeDigits: -1,
+  quantizeFactorSafety: 8,
+  getTransformKeyX: function (pathEl) {
+    return pathEl.parentNode.parentNode;
+  }
+});
+*/
+
+
+function createArcLengthSegmentBatchSimplifierLUT(options) {
+  options = options || {};
+
+  const CFG = {
+    d_attrib: options.d_attrib != null ? options.d_attrib : "d",
+    tolerancePx: options.tolerancePx != null ? +options.tolerancePx : 0.75,
+    lengthSlackPx: options.lengthSlackPx != null ? +options.lengthSlackPx : 0.20,
+    maxDepth: options.maxDepth != null ? (options.maxDepth | 0) : 18,
+    curveLutN: options.curveLutN != null ? (options.curveLutN | 0) : 24,
+    quantizeDigits: options.quantizeDigits != null ? (options.quantizeDigits | 0) : -1,
+    quantizeFactorSafety: options.quantizeFactorSafety != null ? +options.quantizeFactorSafety : 8.0,
+    getTransformKey: typeof options.getTransformKey === "function" ? options.getTransformKey : null,
+    getScreenCTMForPath: typeof options.getScreenCTMForPath === "function" ? options.getScreenCTMForPath : null
+  };
+
+  const CACHE = new WeakMap();
+
+  const WS = {
+    outXY: new Float64Array(2 * 8192),
+    parts: new Array(512),
+    stack: new Float64Array(3 * 4096), // s0, s1, depth
+    roots: new Float64Array(32),
+    split16: new Float64Array(16),
+    split12: new Float64Array(12),
+    pt0: { x: 0, y: 0 },
+    pt1: { x: 0, y: 0 },
+    pt2: { x: 0, y: 0 },
+    pt3: { x: 0, y: 0 }
+  };
+
+  function ensureF64(name, need) {
+    let a = WS[name];
+    if (!a || a.length < need) {
+      let n = a ? a.length : 1;
+      while (n < need) n <<= 1;
+      a = new Float64Array(n);
+      WS[name] = a;
+    }
+    return a;
+  }
+
+  function ensureArr(name, need) {
+    let a = WS[name];
+    if (a.length < need) {
+      let n = a.length || 1;
+      while (n < need) n <<= 1;
+      a.length = n;
+      WS[name] = a;
+    }
+    return a;
+  }
+
+  function tx(m, x, y) { return m.a * x + m.c * y + m.e; }
+  function ty(m, x, y) { return m.b * x + m.d * y + m.f; }
+
+  function dist(ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    return Math.hypot(dx, dy);
+  }
+
+  function dist2(ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    return dx * dx + dy * dy;
+  }
+
+  function pointSegDist2(px, py, ax, ay, bx, by) {
+    const vx = bx - ax, vy = by - ay;
+    const wx = px - ax, wy = py - ay;
+    const c1 = vx * wx + vy * wy;
+    if (c1 <= 0) return dist2(px, py, ax, ay);
+    const c2 = vx * vx + vy * vy;
+    if (c2 <= c1) return dist2(px, py, bx, by);
+    const t = c1 / c2;
+    const qx = ax + t * vx, qy = ay + t * vy;
+    return dist2(px, py, qx, qy);
+  }
+
+  function computeQuantizer(m, tolerancePx, digitsOpt, safety) {
+    if (digitsOpt >= 0) return { factor: Math.pow(10, digitsOpt) };
+    const sx = Math.hypot(m.a, m.b);
+    const sy = Math.hypot(m.c, m.d);
+    const pxPerUnit = Math.max(sx, sy, 1e-12);
+    const qLocal = tolerancePx / (pxPerUnit * safety);
+    let digits = 0;
+    if (qLocal < 1) digits = Math.ceil(-Math.log10(qLocal));
+    if (digits < 0) digits = 0;
+    if (digits > 12) digits = 12;
+    return { factor: Math.pow(10, digits) };
+  }
+
+  function qnum(v, qf) {
+    const r = Math.round(v * qf) / qf;
+    return Object.is(r, -0) ? 0 : r;
+  }
+
+  function getMatrixForPath(pathEl, cache, getTransformKey, getScreenCTMForPath) {
+    if (!getTransformKey) {
+      return getScreenCTMForPath ? getScreenCTMForPath(pathEl) : pathEl.getScreenCTM();
+    }
+    const key = getTransformKey(pathEl);
+    if (cache.has(key)) return cache.get(key);
+    const m = getScreenCTMForPath ? getScreenCTMForPath(pathEl) : pathEl.getScreenCTM();
+    cache.set(key, m);
+    return m;
+  }
+
+  function skipWS(str, i) {
+    const n = str.length;
+    while (i < n) {
+      const c = str.charCodeAt(i);
+      if (c === 32 || c === 9 || c === 10 || c === 13 || c === 44) i++;
+      else break;
+    }
+    return i;
+  }
+
+  function isCmd(c) {
+    return (
+      c === 77 || c === 109 || c === 76 || c === 108 || c === 72 || c === 104 ||
+      c === 86 || c === 118 || c === 67 || c === 99 || c === 83 || c === 115 ||
+      c === 81 || c === 113 || c === 84 || c === 116 || c === 65 || c === 97 ||
+      c === 90 || c === 122
+    );
+  }
+
+  function parseNum(str, i) {
+    const n = str.length;
+    i = skipWS(str, i);
+    if (i >= n) return null;
+
+    let j = i;
+    let c = str.charCodeAt(j);
+    if (c === 43 || c === 45) j++;
+
+    let saw = false;
+    while (j < n) {
+      c = str.charCodeAt(j);
+      if (c >= 48 && c <= 57) { saw = true; j++; }
+      else break;
+    }
+
+    if (j < n && str.charCodeAt(j) === 46) {
+      j++;
+      while (j < n) {
+        c = str.charCodeAt(j);
+        if (c >= 48 && c <= 57) { saw = true; j++; }
+        else break;
+      }
+    }
+
+    if (!saw) return null;
+
+    if (j < n) {
+      c = str.charCodeAt(j);
+      if (c === 69 || c === 101) {
+        const je = j;
+        j++;
+        if (j < n) {
+          c = str.charCodeAt(j);
+          if (c === 43 || c === 45) j++;
+        }
+        let sawExp = false;
+        while (j < n) {
+          c = str.charCodeAt(j);
+          if (c >= 48 && c <= 57) { sawExp = true; j++; }
+          else break;
+        }
+        if (!sawExp) j = je;
+      }
+    }
+
+    return { value: +str.slice(i, j), next: j };
+  }
+
+  function hasNumAhead(str, i) {
+    i = skipWS(str, i);
+    if (i >= str.length) return false;
+    return !isCmd(str.charCodeAt(i));
+  }
+
+  function linePoint(seg, t, out) {
+    out.x = seg.x0 + (seg.x1 - seg.x0) * t;
+    out.y = seg.y0 + (seg.y1 - seg.y0) * t;
+    return out;
+  }
+
+  function quadPoint(seg, t, out) {
+    const mt = 1 - t;
+    out.x = mt * mt * seg.x0 + 2 * mt * t * seg.x1 + t * t * seg.x2;
+    out.y = mt * mt * seg.y0 + 2 * mt * t * seg.y1 + t * t * seg.y2;
+    return out;
+  }
+
+  function cubicPoint(seg, t, out) {
+    const mt = 1 - t;
+    const mt2 = mt * mt, t2 = t * t;
+    out.x = mt2 * mt * seg.x0 + 3 * mt2 * t * seg.x1 + 3 * mt * t2 * seg.x2 + t2 * t * seg.x3;
+    out.y = mt2 * mt * seg.y0 + 3 * mt2 * t * seg.y1 + 3 * mt * t2 * seg.y2 + t2 * t * seg.y3;
+    return out;
+  }
+
+  function segPoint(seg, t, out) {
+    if (seg.kind === 1) return linePoint(seg, t, out);
+    if (seg.kind === 2) return quadPoint(seg, t, out);
+    return cubicPoint(seg, t, out);
+  }
+
+  function lineLen(seg) {
+    return dist(seg.x0, seg.y0, seg.x1, seg.y1);
+  }
+
+  function buildCurveLUT(seg, n) {
+    const lutT = new Float64Array(n + 1);
+    const lutS = new Float64Array(n + 1);
+    const p = { x: 0, y: 0 };
+    const q = { x: 0, y: 0 };
+
+    lutT[0] = 0;
+    lutS[0] = 0;
+    segPoint(seg, 0, p);
+
+    let acc = 0;
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      segPoint(seg, t, q);
+      acc += dist(q.x, q.y, p.x, p.y);
+      lutT[i] = t;
+      lutS[i] = acc;
+      p.x = q.x;
+      p.y = q.y;
+    }
+
+    seg.lutT = lutT;
+    seg.lutS = lutS;
+    seg.len = acc;
+  }
+
+  function segTAtLocalS(seg, s) {
+    if (!(seg.len > 0)) return 0;
+
+    if (seg.kind === 1) {
+      if (s <= 0) return 0;
+      if (s >= seg.len) return 1;
+      return s / seg.len;
+    }
+
+    if (s <= 0) return 0;
+    if (s >= seg.len) return 1;
+
+    const lutS = seg.lutS;
+    const lutT = seg.lutT;
+
+    let lo = 0, hi = lutS.length - 1;
+    while (lo + 1 < hi) {
+      const mid = (lo + hi) >> 1;
+      if (lutS[mid] <= s) lo = mid;
+      else hi = mid;
+    }
+
+    const s0 = lutS[lo], s1 = lutS[hi];
+    const t0 = lutT[lo], t1 = lutT[hi];
+    if (!(s1 > s0)) return t0;
+    return t0 + (s - s0) * (t1 - t0) / (s1 - s0);
+  }
+
+  function rootsAdd(arr, n, t) {
+    if (!(t > 1e-12 && t < 1 - 1e-12)) return n;
+    for (let i = 0; i < n; i++) {
+      if (Math.abs(arr[i] - t) <= 1e-12) return n;
+    }
+    arr[n++] = t;
+    return n;
+  }
+
+  function rootsSort(arr, n) {
+    for (let i = 1; i < n; i++) {
+      const v = arr[i];
+      let j = i - 1;
+      while (j >= 0 && arr[j] > v) {
+        arr[j + 1] = arr[j];
+        j--;
+      }
+      arr[j + 1] = v;
+    }
+  }
+
+  function quadDxRoots(seg, arr) {
+    let n = 0;
+    const den = seg.x0 - 2 * seg.x1 + seg.x2;
+    if (Math.abs(den) >= 1e-15) {
+      n = rootsAdd(arr, n, (seg.x0 - seg.x1) / den);
+    }
+    rootsSort(arr, n);
+    return n;
+  }
+
+  function cubicDxRoots(seg, arr) {
+    let n = 0;
+    const a = -seg.x0 + 3 * seg.x1 - 3 * seg.x2 + seg.x3;
+    const b = 2 * (seg.x0 - 2 * seg.x1 + seg.x2);
+    const c = seg.x1 - seg.x0;
+
+    if (Math.abs(a) < 1e-15) {
+      if (Math.abs(b) >= 1e-15) n = rootsAdd(arr, n, -c / b);
+    } else {
+      const disc = b * b - 4 * a * c;
+      if (disc >= 0) {
+        const s = Math.sqrt(disc);
+        n = rootsAdd(arr, n, (-b - s) / (2 * a));
+        n = rootsAdd(arr, n, (-b + s) / (2 * a));
+      }
+    }
+    rootsSort(arr, n);
+    return n;
+  }
+
+  function splitQuadAt(seg, t, out) {
+    const x01 = seg.x0 + (seg.x1 - seg.x0) * t, y01 = seg.y0 + (seg.y1 - seg.y0) * t;
+    const x12 = seg.x1 + (seg.x2 - seg.x1) * t, y12 = seg.y1 + (seg.y2 - seg.y1) * t;
+    const x012 = x01 + (x12 - x01) * t, y012 = y01 + (y12 - y01) * t;
+
+    out[0] = seg.x0;  out[1] = seg.y0;
+    out[2] = x01;     out[3] = y01;
+    out[4] = x012;    out[5] = y012;
+
+    out[6] = x012;    out[7] = y012;
+    out[8] = x12;     out[9] = y12;
+    out[10] = seg.x2; out[11] = seg.y2;
+  }
+
+  function splitCubicAt(seg, t, out) {
+    const x01 = seg.x0 + (seg.x1 - seg.x0) * t, y01 = seg.y0 + (seg.y1 - seg.y0) * t;
+    const x12 = seg.x1 + (seg.x2 - seg.x1) * t, y12 = seg.y1 + (seg.y2 - seg.y1) * t;
+    const x23 = seg.x2 + (seg.x3 - seg.x2) * t, y23 = seg.y2 + (seg.y3 - seg.y2) * t;
+
+    const x012 = x01 + (x12 - x01) * t, y012 = y01 + (y12 - y01) * t;
+    const x123 = x12 + (x23 - x12) * t, y123 = y12 + (y23 - y12) * t;
+
+    const x0123 = x012 + (x123 - x012) * t, y0123 = y012 + (y123 - y012) * t;
+
+    out[0] = seg.x0;   out[1] = seg.y0;
+    out[2] = x01;      out[3] = y01;
+    out[4] = x012;     out[5] = y012;
+    out[6] = x0123;    out[7] = y0123;
+
+    out[8]  = x0123;   out[9]  = y0123;
+    out[10] = x123;    out[11] = y123;
+    out[12] = x23;     out[13] = y23;
+    out[14] = seg.x3;  out[15] = seg.y3;
+  }
+
+  function splitArcToCubics(x1, y1, rx, ry, phiDeg, largeArcFlag, sweepFlag, x2, y2, emit) {
+    if (!(rx > 0) || !(ry > 0) || (x1 === x2 && y1 === y2)) {
+      emit({ kind: 1, x0: x1, y0: y1, x1: x2, y1: y2 });
+      return;
+    }
+
+    const phi = phiDeg * Math.PI / 180;
+    const cosPhi = Math.cos(phi), sinPhi = Math.sin(phi);
+    const dx2 = (x1 - x2) / 2;
+    const dy2 = (y1 - y2) / 2;
+
+    let x1p = cosPhi * dx2 + sinPhi * dy2;
+    let y1p = -sinPhi * dx2 + cosPhi * dy2;
+
+    rx = Math.abs(rx);
+    ry = Math.abs(ry);
+
+    const lam = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+    if (lam > 1) {
+      const s = Math.sqrt(lam);
+      rx *= s;
+      ry *= s;
+    }
+
+    const rx2 = rx * rx, ry2 = ry * ry;
+    const x1p2 = x1p * x1p, y1p2 = y1p * y1p;
+
+    let num = rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2;
+    let den = rx2 * y1p2 + ry2 * x1p2;
+    if (den === 0) {
+      emit({ kind: 1, x0: x1, y0: y1, x1: x2, y1: y2 });
+      return;
+    }
+    num = Math.max(0, num);
+
+    const sign = (largeArcFlag === sweepFlag) ? -1 : 1;
+    const coef = sign * Math.sqrt(num / den);
+
+    const cxp = coef * (rx * y1p / ry);
+    const cyp = coef * (-ry * x1p / rx);
+
+    const cx = cosPhi * cxp - sinPhi * cyp + (x1 + x2) / 2;
+    const cy = sinPhi * cxp + cosPhi * cyp + (y1 + y2) / 2;
+
+    function angleBetween(ux, uy, vx, vy) {
+      return Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+    }
+
+    const ux = (x1p - cxp) / rx;
+    const uy = (y1p - cyp) / ry;
+    const vx = (-x1p - cxp) / rx;
+    const vy = (-y1p - cyp) / ry;
+
+    let th1 = angleBetween(1, 0, ux, uy);
+    let dth = angleBetween(ux, uy, vx, vy);
+
+    if (!sweepFlag && dth > 0) dth -= 2 * Math.PI;
+    if (sweepFlag && dth < 0) dth += 2 * Math.PI;
+
+    let segs = Math.ceil(Math.abs(dth) / (Math.PI / 2));
+    if (segs < 1) segs = 1;
+
+    const delta = dth / segs;
+    const t = (4 / 3) * Math.tan(delta / 4);
+
+    let px = x1, py = y1;
+
+    for (let i = 0; i < segs; i++) {
+      const a0 = th1 + i * delta;
+      const a1 = a0 + delta;
+
+      const cos0 = Math.cos(a0), sin0 = Math.sin(a0);
+      const cos1 = Math.cos(a1), sin1 = Math.sin(a1);
+
+      const e1x = rx * cos0, e1y = ry * sin0;
+      const e2x = rx * cos1, e2y = ry * sin1;
+
+      const c1x = e1x - t * rx * sin0;
+      const c1y = e1y + t * ry * cos0;
+      const c2x = e2x - t * rx * sin1;
+      const c2y = e2y + t * ry * cos1;
+
+      const q1x = cosPhi * c1x - sinPhi * c1y + cx;
+      const q1y = sinPhi * c1x + cosPhi * c1y + cy;
+      const q2x = cosPhi * c2x - sinPhi * c2y + cx;
+      const q2y = sinPhi * c2x + cosPhi * c2y + cy;
+      const p2x = cosPhi * e2x - sinPhi * e2y + cx;
+      const p2y = sinPhi * e2x + cosPhi * e2y + cy;
+
+      emit({ kind: 3, x0: px, y0: py, x1: q1x, y1: q1y, x2: q2x, y2: q2y, x3: p2x, y3: p2y });
+      px = p2x;
+      py = p2y;
+    }
+  }
+
+  function splitMonotoneX(seg, emit) {
+    if (seg.kind === 1) {
+      emit(seg);
+      return;
+    }
+
+    const roots = WS.roots;
+    let n = 0;
+    if (seg.kind === 2) n = quadDxRoots(seg, roots);
+    else n = cubicDxRoots(seg, roots);
+
+    if (n === 0) {
+      emit(seg);
+      return;
+    }
+
+    let cur = seg;
+    let prev = 0;
+
+    for (let i = 0; i < n; i++) {
+      const tAbs = roots[i];
+      const tRel = (tAbs - prev) / (1 - prev);
+      if (!(tRel > 1e-12 && tRel < 1 - 1e-12)) continue;
+
+      if (cur.kind === 2) {
+        const out = WS.split12;
+        splitQuadAt(cur, tRel, out);
+        emit({ kind: 2, x0: out[0], y0: out[1], x1: out[2], y1: out[3], x2: out[4], y2: out[5] });
+        cur = { kind: 2, x0: out[6], y0: out[7], x1: out[8], y1: out[9], x2: out[10], y2: out[11] };
+      } else {
+        const out = WS.split16;
+        splitCubicAt(cur, tRel, out);
+        emit({ kind: 3, x0: out[0], y0: out[1], x1: out[2], y1: out[3], x2: out[4], y2: out[5], x3: out[6], y3: out[7] });
+        cur = { kind: 3, x0: out[8], y0: out[9], x1: out[10], y1: out[11], x2: out[12], y2: out[13], x3: out[14], y3: out[15] };
+      }
+      prev = tAbs;
+    }
+
+    emit(cur);
+  }
+
+  function compilePath(pathEl, compileOptions) {
+    const d = pathEl.getAttribute(CFG.d_attrib) || "";
+    const lutN = compileOptions.curveLutN | 0;
+    if (!d) return { el: pathEl, d: d, pieces: [], parts: [], totalLen: 0, srcD: d, curveLutN: lutN };
+
+    let i = 0;
+    let x = 0, y = 0;
+    let sx = 0, sy = 0;
+    let cmd = 0;
+    let prevCmd = 0;
+    let prevC2x = 0, prevC2y = 0;
+    let prevQx = 0, prevQy = 0;
+
+    const pieces = [];
+    const parts = [];
+    let curPart = null;
+
+    function startPart(px, py) {
+      curPart = {
+        x0: px, y0: py,
+        x1: px, y1: py,
+        piece0: pieces.length,
+        piece1: pieces.length - 1,
+        s0: 0,
+        s1: 0,
+        closed: false
+      };
+      parts.push(curPart);
+      sx = px;
+      sy = py;
+    }
+
+    function pushPiece(piece) {
+      if (piece.kind === 1) {
+        piece.len = lineLen(piece);
+      } else {
+        buildCurveLUT(piece, lutN);
+      }
+      piece.s0 = 0;
+      piece.s1 = 0;
+      pieces.push(piece);
+      if (curPart) curPart.piece1 = pieces.length - 1;
+    }
+
+    function emitMonotone(seg) {
+      splitMonotoneX(seg, pushPiece);
+    }
+
+    while (true) {
+      i = skipWS(d, i);
+      if (i >= d.length) break;
+
+      const c = d.charCodeAt(i);
+      if (isCmd(c)) {
+        cmd = c;
+        i++;
+      } else if (!cmd) {
+        break;
+      }
+
+      switch (cmd) {
+        case 77:
+        case 109: {
+          let first = true;
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            let nx = a.value, ny = b.value;
+            if (cmd === 109) { nx += x; ny += y; }
+
+            if (first) {
+              x = nx; y = ny;
+              startPart(x, y);
+              first = false;
+            } else {
+              emitMonotone({ kind: 1, x0: x, y0: y, x1: nx, y1: ny });
+              x = nx; y = ny;
+              curPart.x1 = x; curPart.y1 = y;
+            }
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 76:
+        case 108: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            let nx = a.value, ny = b.value;
+            if (cmd === 108) { nx += x; ny += y; }
+            emitMonotone({ kind: 1, x0: x, y0: y, x1: nx, y1: ny });
+            x = nx; y = ny;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 72:
+        case 104: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            let nx = a.value;
+            if (cmd === 104) nx += x;
+            emitMonotone({ kind: 1, x0: x, y0: y, x1: nx, y1: y });
+            x = nx;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 86:
+        case 118: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            let ny = a.value;
+            if (cmd === 118) ny += y;
+            emitMonotone({ kind: 1, x0: x, y0: y, x1: x, y1: ny });
+            y = ny;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 67:
+        case 99: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            const c1 = parseNum(d, i); if (!c1) break; i = c1.next;
+            const d1 = parseNum(d, i); if (!d1) break; i = d1.next;
+            const e = parseNum(d, i); if (!e) break; i = e.next;
+            const f = parseNum(d, i); if (!f) break; i = f.next;
+
+            let x1 = a.value, y1 = b.value, x2 = c1.value, y2 = d1.value, x3 = e.value, y3 = f.value;
+            if (cmd === 99) {
+              x1 += x; y1 += y;
+              x2 += x; y2 += y;
+              x3 += x; y3 += y;
+            }
+
+            emitMonotone({ kind: 3, x0: x, y0: y, x1: x1, y1: y1, x2: x2, y2: y2, x3: x3, y3: y3 });
+            x = x3; y = y3;
+            prevC2x = x2; prevC2y = y2;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 83:
+        case 115: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            const c1 = parseNum(d, i); if (!c1) break; i = c1.next;
+            const d1 = parseNum(d, i); if (!d1) break; i = d1.next;
+
+            let rx1 = x, ry1 = y;
+            if (prevCmd === 67 || prevCmd === 99 || prevCmd === 83 || prevCmd === 115) {
+              rx1 = 2 * x - prevC2x;
+              ry1 = 2 * y - prevC2y;
+            }
+
+            let x2 = a.value, y2 = b.value, x3 = c1.value, y3 = d1.value;
+            if (cmd === 115) {
+              x2 += x; y2 += y;
+              x3 += x; y3 += y;
+            }
+
+            emitMonotone({ kind: 3, x0: x, y0: y, x1: rx1, y1: ry1, x2: x2, y2: y2, x3: x3, y3: y3 });
+            x = x3; y = y3;
+            prevC2x = x2; prevC2y = y2;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 81:
+        case 113: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            const c1 = parseNum(d, i); if (!c1) break; i = c1.next;
+            const d1 = parseNum(d, i); if (!d1) break; i = d1.next;
+
+            let x1 = a.value, y1 = b.value, x2 = c1.value, y2 = d1.value;
+            if (cmd === 113) {
+              x1 += x; y1 += y;
+              x2 += x; y2 += y;
+            }
+
+            emitMonotone({ kind: 2, x0: x, y0: y, x1: x1, y1: y1, x2: x2, y2: y2 });
+            x = x2; y = y2;
+            prevQx = x1; prevQy = y1;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 84:
+        case 116: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+
+            let qx = x, qy = y;
+            if (prevCmd === 81 || prevCmd === 113 || prevCmd === 84 || prevCmd === 116) {
+              qx = 2 * x - prevQx;
+              qy = 2 * y - prevQy;
+            }
+
+            let x2 = a.value, y2 = b.value;
+            if (cmd === 116) { x2 += x; y2 += y; }
+
+            emitMonotone({ kind: 2, x0: x, y0: y, x1: qx, y1: qy, x2: x2, y2: y2 });
+            x = x2; y = y2;
+            prevQx = qx; prevQy = qy;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 65:
+        case 97: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            const c1 = parseNum(d, i); if (!c1) break; i = c1.next;
+            const d1 = parseNum(d, i); if (!d1) break; i = d1.next;
+            const e = parseNum(d, i); if (!e) break; i = e.next;
+            const f = parseNum(d, i); if (!f) break; i = f.next;
+            const g = parseNum(d, i); if (!g) break; i = g.next;
+
+            let rx = a.value, ry = b.value, ang = c1.value;
+            const largeArc = d1.value ? 1 : 0;
+            const sweep = e.value ? 1 : 0;
+            let x2 = f.value, y2 = g.value;
+            if (cmd === 97) { x2 += x; y2 += y; }
+
+            splitArcToCubics(x, y, rx, ry, ang, largeArc, sweep, x2, y2, emitMonotone);
+            x = x2; y = y2;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 90:
+        case 122: {
+          if (curPart) {
+            curPart.closed = true;
+            x = sx; y = sy;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        default:
+          i = d.length;
+          break;
+      }
+    }
+
+    let acc = 0;
+    for (let k = 0; k < pieces.length; k++) {
+      pieces[k].s0 = acc;
+      acc += pieces[k].len;
+      pieces[k].s1 = acc;
+    }
+
+    for (let p = 0; p < parts.length; p++) {
+      const part = parts[p];
+      if (part.piece1 >= part.piece0) {
+        part.s0 = pieces[part.piece0].s0;
+        part.s1 = pieces[part.piece1].s1;
+      } else {
+        part.s0 = 0;
+        part.s1 = 0;
+      }
+    }
+
+    return {
+      el: pathEl,
+      d: d,
+      pieces: pieces,
+      parts: parts,
+      totalLen: acc,
+      srcD: d,
+      curveLutN: lutN
+    };
+  }
+
+  function compile(paths, compileOptions) {
+	const d_attrib = CFG.d_attrib;
+    compileOptions = compileOptions || {};
+    const lutN = compileOptions.curveLutN != null ? (compileOptions.curveLutN | 0) : CFG.curveLutN;
+    const out = new Array(paths.length);
+
+    for (let i = 0; i < paths.length; i++) {
+      const el = paths[i];
+      if (!el) {
+        out[i] = null;
+        continue;
+      }
+
+      const d = el.getAttribute(d_attrib) || "";
+      const rec = CACHE.get(el);
+      if (rec && rec.srcD === d && rec.curveLutN === lutN) {
+        out[i] = rec;
+        continue;
+      }
+
+      const compiled = compilePath(el, { curveLutN: lutN });
+      CACHE.set(el, compiled);
+      out[i] = compiled;
+    }
+
+    return out;
+  }
+
+  function buildPathD(partsN, quantizer) {
+    const qf = quantizer.factor;
+    const outXY = WS.outXY;
+    const parts = WS.parts;
+    let s = "";
+
+    for (let p = 0; p < partsN; p++) {
+      const part = parts[p];
+      if (!part) continue;
+      const off = part.off;
+      const nPts = part.nPts;
+      if (!(nPts > 0)) continue;
+
+      let x = qnum(outXY[2 * off], qf);
+      let y = qnum(outXY[2 * off + 1], qf);
+      s += "M" + x + " " + y;
+
+      let px = x, py = y;
+      for (let i = 1; i < nPts; i++) {
+        x = qnum(outXY[2 * (off + i)], qf);
+        y = qnum(outXY[2 * (off + i) + 1], qf);
+        if (x === px && y === py) continue;
+        s += "L" + x + " " + y;
+        px = x;
+        py = y;
+      }
+
+      if (part.closed) s += "Z";
+    }
+
+    return s;
+  }
+
+  function piecePointAtS(piece, s, out) {
+    if (s <= piece.s0) return segPoint(piece, 0, out);
+    if (s >= piece.s1) return segPoint(piece, 1, out);
+    const t = segTAtLocalS(piece, s - piece.s0);
+    return segPoint(piece, t, out);
+  }
+
+  function runCompiled(compiledPaths, runOptions) {
+    const opt = runOptions ? {
+      tolerancePx: runOptions.tolerancePx != null ? +runOptions.tolerancePx : CFG.tolerancePx,
+      lengthSlackPx: runOptions.lengthSlackPx != null ? +runOptions.lengthSlackPx : CFG.lengthSlackPx,
+      maxDepth: runOptions.maxDepth != null ? (runOptions.maxDepth | 0) : CFG.maxDepth,
+      quantizeDigits: runOptions.quantizeDigits != null ? (runOptions.quantizeDigits | 0) : CFG.quantizeDigits,
+      quantizeFactorSafety: runOptions.quantizeFactorSafety != null ? +runOptions.quantizeFactorSafety : CFG.quantizeFactorSafety,
+      getTransformKey: typeof runOptions.getTransformKey === "function" ? runOptions.getTransformKey : CFG.getTransformKey,
+      getScreenCTMForPath: typeof runOptions.getScreenCTMForPath === "function" ? runOptions.getScreenCTMForPath : CFG.getScreenCTMForPath
+    } : CFG;
+
+    const tol2 = opt.tolerancePx * opt.tolerancePx;
+    const ctmCache = new Map();
+    const out = new Array(compiledPaths.length);
+
+    for (let iPath = 0; iPath < compiledPaths.length; iPath++) {
+      const comp = compiledPaths[iPath];
+      if (!comp || !comp.el) {
+        out[iPath] = null;
+        continue;
+      }
+
+      const m = getMatrixForPath(comp.el, ctmCache, opt.getTransformKey, opt.getScreenCTMForPath);
+      if (!m) {
+        out[iPath] = null;
+        continue;
+      }
+
+      const quantizer = computeQuantizer(m, opt.tolerancePx, opt.quantizeDigits, opt.quantizeFactorSafety);
+
+      let outXY = WS.outXY;
+      let parts = WS.parts;
+      let stack = WS.stack;
+      let nPts = 0;
+      let partsN = 0;
+
+      function beginPart(x, y, closed) {
+        if (partsN >= parts.length) parts = ensureArr("parts", partsN + 1);
+        const partIdx = partsN++;
+        parts[partIdx] = { off: nPts, nPts: 0, closed: !!closed };
+
+        const need = 2 * (nPts + 1);
+        if (need > outXY.length) outXY = ensureF64("outXY", need);
+        outXY[2 * nPts] = x;
+        outXY[2 * nPts + 1] = y;
+        nPts++;
+        parts[partIdx].nPts = 1;
+
+        WS.outXY = outXY;
+        WS.parts = parts;
+        return partIdx;
+      }
+
+      function appendPointToPart(partIdx, x, y) {
+        const part = parts[partIdx];
+        const j = 2 * (part.off + part.nPts - 1);
+        if (part.nPts > 0 && outXY[j] === x && outXY[j + 1] === y) return;
+
+        const need = 2 * (nPts + 1);
+        if (need > outXY.length) outXY = ensureF64("outXY", need);
+        outXY[2 * nPts] = x;
+        outXY[2 * nPts + 1] = y;
+        nPts++;
+        part.nPts++;
+
+        WS.outXY = outXY;
+      }
+
+      for (let p = 0; p < comp.parts.length; p++) {
+        const part = comp.parts[p];
+        if (!part) continue;
+
+        if (part.piece1 < part.piece0) {
+          beginPart(part.x0, part.y0, part.closed);
+          continue;
+        }
+
+        piecePointAtS(comp.pieces[part.piece0], part.s0, WS.pt0);
+        const partIdx = beginPart(WS.pt0.x, WS.pt0.y, part.closed);
+
+        for (let k = part.piece0; k <= part.piece1; k++) {
+          const piece = comp.pieces[k];
+          if (!piece || !(piece.len > 0)) {
+            piecePointAtS(piece, piece ? piece.s1 : part.s1, WS.pt1);
+            appendPointToPart(partIdx, WS.pt1.x, WS.pt1.y);
+            continue;
+          }
+
+          let sp = 0;
+
+          function pushSpan(s0, s1, depth) {
+            if (sp + 3 > stack.length) stack = ensureF64("stack", stack.length * 2);
+            stack[sp++] = s0;
+            stack[sp++] = s1;
+            stack[sp++] = depth;
+            WS.stack = stack;
+          }
+
+          pushSpan(piece.s0, piece.s1, 0);
+
+          while (sp > 0) {
+            sp -= 3;
+
+            const s0 = stack[sp];
+            const s1 = stack[sp + 1];
+            const depth = stack[sp + 2] | 0;
+
+            piecePointAtS(piece, s0, WS.pt0);
+            piecePointAtS(piece, s1, WS.pt1);
+
+            const sx0 = tx(m, WS.pt0.x, WS.pt0.y), sy0 = ty(m, WS.pt0.x, WS.pt0.y);
+            const sx1 = tx(m, WS.pt1.x, WS.pt1.y), sy1 = ty(m, WS.pt1.x, WS.pt1.y);
+
+            if (depth >= opt.maxDepth) {
+              appendPointToPart(partIdx, WS.pt1.x, WS.pt1.y);
+              continue;
+            }
+
+            const sm = 0.5 * (s0 + s1);
+            const sq1 = 0.5 * (s0 + sm);
+            const sq3 = 0.5 * (sm + s1);
+
+            piecePointAtS(piece, sq1, WS.pt2);
+            const sxq1 = tx(m, WS.pt2.x, WS.pt2.y), syq1 = ty(m, WS.pt2.x, WS.pt2.y);
+
+            piecePointAtS(piece, sm, WS.pt3);
+            const sxm = tx(m, WS.pt3.x, WS.pt3.y), sym = ty(m, WS.pt3.x, WS.pt3.y);
+
+            piecePointAtS(piece, sq3, WS.pt2);
+            const sxq3 = tx(m, WS.pt2.x, WS.pt2.y), syq3 = ty(m, WS.pt2.x, WS.pt2.y);
+
+            let accept = true;
+
+            if (pointSegDist2(sxq1, syq1, sx0, sy0, sx1, sy1) > tol2) accept = false;
+            if (accept && pointSegDist2(sxm, sym, sx0, sy0, sx1, sy1) > tol2) accept = false;
+            if (accept && pointSegDist2(sxq3, syq3, sx0, sy0, sx1, sy1) > tol2) accept = false;
+
+            if (accept) {
+              const net =
+                dist(sx0, sy0, sxq1, syq1) +
+                dist(sxq1, syq1, sxm, sym) +
+                dist(sxm, sym, sxq3, syq3) +
+                dist(sxq3, syq3, sx1, sy1);
+
+              const chord = dist(sx0, sy0, sx1, sy1);
+              if (net - chord > opt.lengthSlackPx) accept = false;
+            }
+
+            if (accept) {
+              appendPointToPart(partIdx, WS.pt1.x, WS.pt1.y);
+            } else {
+              pushSpan(sm, s1, depth + 1);
+              pushSpan(s0, sm, depth + 1);
+            }
+          }
+        }
+
+        const lastPart = parts[partIdx];
+        if (lastPart.closed && lastPart.nPts > 1) {
+          const off = lastPart.off;
+          const n = lastPart.nPts;
+          const fx = outXY[2 * off], fy = outXY[2 * off + 1];
+          const lx = outXY[2 * (off + n - 1)], ly = outXY[2 * (off + n - 1) + 1];
+          if (fx === lx && fy === ly) {
+            lastPart.nPts--;
+          }
+        }
+      }
+
+      WS.outXY = outXY;
+      WS.parts = parts;
+      WS.stack = stack;
+
+      out[iPath] = {
+        el: comp.el,
+        d: comp.d,
+        d_simplified: buildPathD(partsN, quantizer),
+        points: nPts,
+        totalLen: comp.totalLen
+      };
+    }
+
+    return out;
+  }
+
+
+
+  function run(paths, runOptions) {
+    return runCompiled(compile(paths), runOptions);
+  }
+
+  return {
+    compile: compile,
+    runCompiled: runCompiled,
+    run: run
+  };
+}
+
+
+function createArcLengthSegmentBatchSimplifier(options) {
+  options = options || {};
+
+  const CFG = {
+    d_attrib: options.d_attrib != null ? options.d_attrib : "d",
+    tolerancePx: options.tolerancePx != null ? +options.tolerancePx : 0.75,
+    lengthSlackPx: options.lengthSlackPx != null ? +options.lengthSlackPx : 0.20,
+    maxDepth: options.maxDepth != null ? (options.maxDepth | 0) : 18,
+    curveLutN: options.curveLutN != null ? (options.curveLutN | 0) : 24,
+    quantizeDigits: options.quantizeDigits != null ? (options.quantizeDigits | 0) : -1,
+    quantizeFactorSafety: options.quantizeFactorSafety != null ? +options.quantizeFactorSafety : 8.0,
+    getTransformKey: typeof options.getTransformKey === "function" ? options.getTransformKey : null,
+    getScreenCTMForPath: typeof options.getScreenCTMForPath === "function" ? options.getScreenCTMForPath : null
+  };
+
+  const CACHE = new WeakMap();
+
+  const WS = {
+    outXY: new Float64Array(2 * 8192),
+    parts: new Array(512),
+    stack: new Float64Array(3 * 4096), // t0, t1, depth
+    roots: new Float64Array(32),
+    split16: new Float64Array(16),
+    split12: new Float64Array(12),
+    pt0: { x: 0, y: 0 },
+    pt1: { x: 0, y: 0 },
+    pt2: { x: 0, y: 0 },
+    pt3: { x: 0, y: 0 },
+    pt4: { x: 0, y: 0 }
+  };
+
+  function ensureF64(name, need) {
+    let a = WS[name];
+    if (!a || a.length < need) {
+      let n = a ? a.length : 1;
+      while (n < need) n <<= 1;
+      a = new Float64Array(n);
+      WS[name] = a;
+    }
+    return a;
+  }
+
+  function ensureArr(name, need) {
+    let a = WS[name];
+    if (a.length < need) {
+      let n = a.length || 1;
+      while (n < need) n <<= 1;
+      a.length = n;
+      WS[name] = a;
+    }
+    return a;
+  }
+
+  function tx(m, x, y) { return m.a * x + m.c * y + m.e; }
+  function ty(m, x, y) { return m.b * x + m.d * y + m.f; }
+
+  function dist(ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    return Math.hypot(dx, dy);
+  }
+
+  function dist2(ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    return dx * dx + dy * dy;
+  }
+
+  function pointSegDist2(px, py, ax, ay, bx, by) {
+    const vx = bx - ax, vy = by - ay;
+    const wx = px - ax, wy = py - ay;
+    const c1 = vx * wx + vy * wy;
+    if (c1 <= 0) return dist2(px, py, ax, ay);
+    const c2 = vx * vx + vy * vy;
+    if (c2 <= c1) return dist2(px, py, bx, by);
+    const t = c1 / c2;
+    const qx = ax + t * vx, qy = ay + t * vy;
+    return dist2(px, py, qx, qy);
+  }
+
+  function computeQuantizer(m, tolerancePx, digitsOpt, safety) {
+    if (digitsOpt >= 0) return { factor: Math.pow(10, digitsOpt) };
+    const sx = Math.hypot(m.a, m.b);
+    const sy = Math.hypot(m.c, m.d);
+    const pxPerUnit = Math.max(sx, sy, 1e-12);
+    const qLocal = tolerancePx / (pxPerUnit * safety);
+    let digits = 0;
+    if (qLocal < 1) digits = Math.ceil(-Math.log10(qLocal));
+    if (digits < 0) digits = 0;
+    if (digits > 12) digits = 12;
+    return { factor: Math.pow(10, digits) };
+  }
+
+  function qnum(v, qf) {
+    const r = Math.round(v * qf) / qf;
+    return Object.is(r, -0) ? 0 : r;
+  }
+
+  function getMatrixForPath(pathEl, cache, getTransformKey, getScreenCTMForPath) {
+    if (!getTransformKey) {
+      return getScreenCTMForPath ? getScreenCTMForPath(pathEl) : pathEl.getScreenCTM();
+    }
+    const key = getTransformKey(pathEl);
+    if (cache.has(key)) return cache.get(key);
+    const m = getScreenCTMForPath ? getScreenCTMForPath(pathEl) : pathEl.getScreenCTM();
+    cache.set(key, m);
+    return m;
+  }
+
+  function skipWS(str, i) {
+    const n = str.length;
+    while (i < n) {
+      const c = str.charCodeAt(i);
+      if (c === 32 || c === 9 || c === 10 || c === 13 || c === 44) i++;
+      else break;
+    }
+    return i;
+  }
+
+  function isCmd(c) {
+    return (
+      c === 77 || c === 109 || c === 76 || c === 108 || c === 72 || c === 104 ||
+      c === 86 || c === 118 || c === 67 || c === 99 || c === 83 || c === 115 ||
+      c === 81 || c === 113 || c === 84 || c === 116 || c === 65 || c === 97 ||
+      c === 90 || c === 122
+    );
+  }
+
+  function parseNum(str, i) {
+    const n = str.length;
+    i = skipWS(str, i);
+    if (i >= n) return null;
+
+    let j = i;
+    let c = str.charCodeAt(j);
+    if (c === 43 || c === 45) j++;
+
+    let saw = false;
+    while (j < n) {
+      c = str.charCodeAt(j);
+      if (c >= 48 && c <= 57) { saw = true; j++; }
+      else break;
+    }
+
+    if (j < n && str.charCodeAt(j) === 46) {
+      j++;
+      while (j < n) {
+        c = str.charCodeAt(j);
+        if (c >= 48 && c <= 57) { saw = true; j++; }
+        else break;
+      }
+    }
+
+    if (!saw) return null;
+
+    if (j < n) {
+      c = str.charCodeAt(j);
+      if (c === 69 || c === 101) {
+        const je = j;
+        j++;
+        if (j < n) {
+          c = str.charCodeAt(j);
+          if (c === 43 || c === 45) j++;
+        }
+        let sawExp = false;
+        while (j < n) {
+          c = str.charCodeAt(j);
+          if (c >= 48 && c <= 57) { sawExp = true; j++; }
+          else break;
+        }
+        if (!sawExp) j = je;
+      }
+    }
+
+    return { value: +str.slice(i, j), next: j };
+  }
+
+  function hasNumAhead(str, i) {
+    i = skipWS(str, i);
+    if (i >= str.length) return false;
+    return !isCmd(str.charCodeAt(i));
+  }
+
+  function linePoint(seg, t, out) {
+    out.x = seg.x0 + (seg.x1 - seg.x0) * t;
+    out.y = seg.y0 + (seg.y1 - seg.y0) * t;
+    return out;
+  }
+
+  function quadPoint(seg, t, out) {
+    const mt = 1 - t;
+    out.x = mt * mt * seg.x0 + 2 * mt * t * seg.x1 + t * t * seg.x2;
+    out.y = mt * mt * seg.y0 + 2 * mt * t * seg.y1 + t * t * seg.y2;
+    return out;
+  }
+
+  function cubicPoint(seg, t, out) {
+    const mt = 1 - t;
+    const mt2 = mt * mt, t2 = t * t;
+    out.x = mt2 * mt * seg.x0 + 3 * mt2 * t * seg.x1 + 3 * mt * t2 * seg.x2 + t2 * t * seg.x3;
+    out.y = mt2 * mt * seg.y0 + 3 * mt2 * t * seg.y1 + 3 * mt * t2 * seg.y2 + t2 * t * seg.y3;
+    return out;
+  }
+
+  function segPoint(seg, t, out) {
+    if (seg.kind === 1) return linePoint(seg, t, out);
+    if (seg.kind === 2) return quadPoint(seg, t, out);
+    return cubicPoint(seg, t, out);
+  }
+
+  function lineLen(seg) {
+    return dist(seg.x0, seg.y0, seg.x1, seg.y1);
+  }
+
+  function approxCurveLen(seg, n) {
+    let prevx, prevy, qx, qy, acc = 0;
+    segPoint(seg, 0, WS.pt4);
+    prevx = WS.pt4.x;
+    prevy = WS.pt4.y;
+    for (let i = 1; i <= n; i++) {
+      segPoint(seg, i / n, WS.pt4);
+      qx = WS.pt4.x;
+      qy = WS.pt4.y;
+      acc += dist(qx, qy, prevx, prevy);
+      prevx = qx;
+      prevy = qy;
+    }
+    return acc;
+  }
+
+  function rootsAdd(arr, n, t) {
+    if (!(t > 1e-12 && t < 1 - 1e-12)) return n;
+    for (let i = 0; i < n; i++) {
+      if (Math.abs(arr[i] - t) <= 1e-12) return n;
+    }
+    arr[n++] = t;
+    return n;
+  }
+
+  function rootsSort(arr, n) {
+    for (let i = 1; i < n; i++) {
+      const v = arr[i];
+      let j = i - 1;
+      while (j >= 0 && arr[j] > v) {
+        arr[j + 1] = arr[j];
+        j--;
+      }
+      arr[j + 1] = v;
+    }
+  }
+
+  function quadDxRoots(seg, arr) {
+    let n = 0;
+    const den = seg.x0 - 2 * seg.x1 + seg.x2;
+    if (Math.abs(den) >= 1e-15) {
+      n = rootsAdd(arr, n, (seg.x0 - seg.x1) / den);
+    }
+    rootsSort(arr, n);
+    return n;
+  }
+
+  function cubicDxRoots(seg, arr) {
+    let n = 0;
+    const a = -seg.x0 + 3 * seg.x1 - 3 * seg.x2 + seg.x3;
+    const b = 2 * (seg.x0 - 2 * seg.x1 + seg.x2);
+    const c = seg.x1 - seg.x0;
+
+    if (Math.abs(a) < 1e-15) {
+      if (Math.abs(b) >= 1e-15) n = rootsAdd(arr, n, -c / b);
+    } else {
+      const disc = b * b - 4 * a * c;
+      if (disc >= 0) {
+        const s = Math.sqrt(disc);
+        n = rootsAdd(arr, n, (-b - s) / (2 * a));
+        n = rootsAdd(arr, n, (-b + s) / (2 * a));
+      }
+    }
+    rootsSort(arr, n);
+    return n;
+  }
+
+  function splitQuadAt(seg, t, out) {
+    const x01 = seg.x0 + (seg.x1 - seg.x0) * t, y01 = seg.y0 + (seg.y1 - seg.y0) * t;
+    const x12 = seg.x1 + (seg.x2 - seg.x1) * t, y12 = seg.y1 + (seg.y2 - seg.y1) * t;
+    const x012 = x01 + (x12 - x01) * t, y012 = y01 + (y12 - y01) * t;
+
+    out[0] = seg.x0;  out[1] = seg.y0;
+    out[2] = x01;     out[3] = y01;
+    out[4] = x012;    out[5] = y012;
+
+    out[6] = x012;    out[7] = y012;
+    out[8] = x12;     out[9] = y12;
+    out[10] = seg.x2; out[11] = seg.y2;
+  }
+
+  function splitCubicAt(seg, t, out) {
+    const x01 = seg.x0 + (seg.x1 - seg.x0) * t, y01 = seg.y0 + (seg.y1 - seg.y0) * t;
+    const x12 = seg.x1 + (seg.x2 - seg.x1) * t, y12 = seg.y1 + (seg.y2 - seg.y1) * t;
+    const x23 = seg.x2 + (seg.x3 - seg.x2) * t, y23 = seg.y2 + (seg.y3 - seg.y2) * t;
+
+    const x012 = x01 + (x12 - x01) * t, y012 = y01 + (y12 - y01) * t;
+    const x123 = x12 + (x23 - x12) * t, y123 = y12 + (y23 - y12) * t;
+
+    const x0123 = x012 + (x123 - x012) * t, y0123 = y012 + (y123 - y012) * t;
+
+    out[0] = seg.x0;   out[1] = seg.y0;
+    out[2] = x01;      out[3] = y01;
+    out[4] = x012;     out[5] = y012;
+    out[6] = x0123;    out[7] = y0123;
+
+    out[8]  = x0123;   out[9]  = y0123;
+    out[10] = x123;    out[11] = y123;
+    out[12] = x23;     out[13] = y23;
+    out[14] = seg.x3;  out[15] = seg.y3;
+  }
+
+  function splitArcToCubics(x1, y1, rx, ry, phiDeg, largeArcFlag, sweepFlag, x2, y2, emit) {
+    if (!(rx > 0) || !(ry > 0) || (x1 === x2 && y1 === y2)) {
+      emit({ kind: 1, x0: x1, y0: y1, x1: x2, y1: y2 });
+      return;
+    }
+
+    const phi = phiDeg * Math.PI / 180;
+    const cosPhi = Math.cos(phi), sinPhi = Math.sin(phi);
+    const dx2 = (x1 - x2) / 2;
+    const dy2 = (y1 - y2) / 2;
+
+    let x1p = cosPhi * dx2 + sinPhi * dy2;
+    let y1p = -sinPhi * dx2 + cosPhi * dy2;
+
+    rx = Math.abs(rx);
+    ry = Math.abs(ry);
+
+    const lam = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+    if (lam > 1) {
+      const s = Math.sqrt(lam);
+      rx *= s;
+      ry *= s;
+    }
+
+    const rx2 = rx * rx, ry2 = ry * ry;
+    const x1p2 = x1p * x1p, y1p2 = y1p * y1p;
+
+    let num = rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2;
+    let den = rx2 * y1p2 + ry2 * x1p2;
+    if (den === 0) {
+      emit({ kind: 1, x0: x1, y0: y1, x1: x2, y1: y2 });
+      return;
+    }
+    num = Math.max(0, num);
+
+    const sign = (largeArcFlag === sweepFlag) ? -1 : 1;
+    const coef = sign * Math.sqrt(num / den);
+
+    const cxp = coef * (rx * y1p / ry);
+    const cyp = coef * (-ry * x1p / rx);
+
+    const cx = cosPhi * cxp - sinPhi * cyp + (x1 + x2) / 2;
+    const cy = sinPhi * cxp + cosPhi * cyp + (y1 + y2) / 2;
+
+    function angleBetween(ux, uy, vx, vy) {
+      return Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+    }
+
+    const ux = (x1p - cxp) / rx;
+    const uy = (y1p - cyp) / ry;
+    const vx = (-x1p - cxp) / rx;
+    const vy = (-y1p - cyp) / ry;
+
+    let th1 = angleBetween(1, 0, ux, uy);
+    let dth = angleBetween(ux, uy, vx, vy);
+
+    if (!sweepFlag && dth > 0) dth -= 2 * Math.PI;
+    if (sweepFlag && dth < 0) dth += 2 * Math.PI;
+
+    let segs = Math.ceil(Math.abs(dth) / (Math.PI / 2));
+    if (segs < 1) segs = 1;
+
+    const delta = dth / segs;
+    const t = (4 / 3) * Math.tan(delta / 4);
+
+    let px = x1, py = y1;
+
+    for (let i = 0; i < segs; i++) {
+      const a0 = th1 + i * delta;
+      const a1 = a0 + delta;
+
+      const cos0 = Math.cos(a0), sin0 = Math.sin(a0);
+      const cos1 = Math.cos(a1), sin1 = Math.sin(a1);
+
+      const e1x = rx * cos0, e1y = ry * sin0;
+      const e2x = rx * cos1, e2y = ry * sin1;
+
+      const c1x = e1x - t * rx * sin0;
+      const c1y = e1y + t * ry * cos0;
+      const c2x = e2x - t * rx * sin1;
+      const c2y = e2y + t * ry * cos1;
+
+      const q1x = cosPhi * c1x - sinPhi * c1y + cx;
+      const q1y = sinPhi * c1x + cosPhi * c1y + cy;
+      const q2x = cosPhi * c2x - sinPhi * c2y + cx;
+      const q2y = sinPhi * c2x + cosPhi * c2y + cy;
+      const p2x = cosPhi * e2x - sinPhi * e2y + cx;
+      const p2y = sinPhi * e2x + cosPhi * e2y + cy;
+
+      emit({ kind: 3, x0: px, y0: py, x1: q1x, y1: q1y, x2: q2x, y2: q2y, x3: p2x, y3: p2y });
+      px = p2x;
+      py = p2y;
+    }
+  }
+
+  function splitMonotoneX(seg, emit) {
+    if (seg.kind === 1) {
+      emit(seg);
+      return;
+    }
+
+    const roots = WS.roots;
+    let n = 0;
+    if (seg.kind === 2) n = quadDxRoots(seg, roots);
+    else n = cubicDxRoots(seg, roots);
+
+    if (n === 0) {
+      emit(seg);
+      return;
+    }
+
+    let cur = seg;
+    let prev = 0;
+
+    for (let i = 0; i < n; i++) {
+      const tAbs = roots[i];
+      const tRel = (tAbs - prev) / (1 - prev);
+      if (!(tRel > 1e-12 && tRel < 1 - 1e-12)) continue;
+
+      if (cur.kind === 2) {
+        const out = WS.split12;
+        splitQuadAt(cur, tRel, out);
+        emit({ kind: 2, x0: out[0], y0: out[1], x1: out[2], y1: out[3], x2: out[4], y2: out[5] });
+        cur = { kind: 2, x0: out[6], y0: out[7], x1: out[8], y1: out[9], x2: out[10], y2: out[11] };
+      } else {
+        const out = WS.split16;
+        splitCubicAt(cur, tRel, out);
+        emit({ kind: 3, x0: out[0], y0: out[1], x1: out[2], y1: out[3], x2: out[4], y2: out[5], x3: out[6], y3: out[7] });
+        cur = { kind: 3, x0: out[8], y0: out[9], x1: out[10], y1: out[11], x2: out[12], y2: out[13], x3: out[14], y3: out[15] };
+      }
+      prev = tAbs;
+    }
+
+    emit(cur);
+  }
+
+  function compilePath(pathEl, compileOptions) {
+    const d = pathEl.getAttribute(CFG.d_attrib) || "";
+    const lenSamples = compileOptions.curveLutN > 1 ? (compileOptions.curveLutN | 0) : 8;
+    if (!d) return { el: pathEl, d: d, pieces: [], parts: [], totalLen: 0, srcD: d, curveLutN: lenSamples };
+
+    let i = 0;
+    let x = 0, y = 0;
+    let sx = 0, sy = 0;
+    let cmd = 0;
+    let prevCmd = 0;
+    let prevC2x = 0, prevC2y = 0;
+    let prevQx = 0, prevQy = 0;
+
+    const pieces = [];
+    const parts = [];
+    let curPart = null;
+
+    function startPart(px, py) {
+      curPart = {
+        x0: px, y0: py,
+        x1: px, y1: py,
+        piece0: pieces.length,
+        piece1: pieces.length - 1,
+        s0: 0,
+        s1: 0,
+        closed: false
+      };
+      parts.push(curPart);
+      sx = px;
+      sy = py;
+    }
+
+    function pushPiece(piece) {
+      piece.len = (piece.kind === 1) ? lineLen(piece) : approxCurveLen(piece, lenSamples);
+      piece.s0 = 0;
+      piece.s1 = 0;
+      pieces.push(piece);
+      if (curPart) curPart.piece1 = pieces.length - 1;
+    }
+
+    function emitMonotone(seg) {
+      splitMonotoneX(seg, pushPiece);
+    }
+
+    while (true) {
+      i = skipWS(d, i);
+      if (i >= d.length) break;
+
+      const c = d.charCodeAt(i);
+      if (isCmd(c)) {
+        cmd = c;
+        i++;
+      } else if (!cmd) {
+        break;
+      }
+
+      switch (cmd) {
+        case 77:
+        case 109: {
+          let first = true;
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            let nx = a.value, ny = b.value;
+            if (cmd === 109) { nx += x; ny += y; }
+
+            if (first) {
+              x = nx; y = ny;
+              startPart(x, y);
+              first = false;
+            } else {
+              emitMonotone({ kind: 1, x0: x, y0: y, x1: nx, y1: ny });
+              x = nx; y = ny;
+              curPart.x1 = x; curPart.y1 = y;
+            }
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 76:
+        case 108: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            let nx = a.value, ny = b.value;
+            if (cmd === 108) { nx += x; ny += y; }
+            emitMonotone({ kind: 1, x0: x, y0: y, x1: nx, y1: ny });
+            x = nx; y = ny;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 72:
+        case 104: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            let nx = a.value;
+            if (cmd === 104) nx += x;
+            emitMonotone({ kind: 1, x0: x, y0: y, x1: nx, y1: y });
+            x = nx;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 86:
+        case 118: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            let ny = a.value;
+            if (cmd === 118) ny += y;
+            emitMonotone({ kind: 1, x0: x, y0: y, x1: x, y1: ny });
+            y = ny;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 67:
+        case 99: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            const c1 = parseNum(d, i); if (!c1) break; i = c1.next;
+            const d1 = parseNum(d, i); if (!d1) break; i = d1.next;
+            const e = parseNum(d, i); if (!e) break; i = e.next;
+            const f = parseNum(d, i); if (!f) break; i = f.next;
+
+            let x1 = a.value, y1 = b.value, x2 = c1.value, y2 = d1.value, x3 = e.value, y3 = f.value;
+            if (cmd === 99) {
+              x1 += x; y1 += y;
+              x2 += x; y2 += y;
+              x3 += x; y3 += y;
+            }
+
+            emitMonotone({ kind: 3, x0: x, y0: y, x1: x1, y1: y1, x2: x2, y2: y2, x3: x3, y3: y3 });
+            x = x3; y = y3;
+            prevC2x = x2; prevC2y = y2;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 83:
+        case 115: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            const c1 = parseNum(d, i); if (!c1) break; i = c1.next;
+            const d1 = parseNum(d, i); if (!d1) break; i = d1.next;
+
+            let rx1 = x, ry1 = y;
+            if (prevCmd === 67 || prevCmd === 99 || prevCmd === 83 || prevCmd === 115) {
+              rx1 = 2 * x - prevC2x;
+              ry1 = 2 * y - prevC2y;
+            }
+
+            let x2 = a.value, y2 = b.value, x3 = c1.value, y3 = d1.value;
+            if (cmd === 115) {
+              x2 += x; y2 += y;
+              x3 += x; y3 += y;
+            }
+
+            emitMonotone({ kind: 3, x0: x, y0: y, x1: rx1, y1: ry1, x2: x2, y2: y2, x3: x3, y3: y3 });
+            x = x3; y = y3;
+            prevC2x = x2; prevC2y = y2;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 81:
+        case 113: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            const c1 = parseNum(d, i); if (!c1) break; i = c1.next;
+            const d1 = parseNum(d, i); if (!d1) break; i = d1.next;
+
+            let x1 = a.value, y1 = b.value, x2 = c1.value, y2 = d1.value;
+            if (cmd === 113) {
+              x1 += x; y1 += y;
+              x2 += x; y2 += y;
+            }
+
+            emitMonotone({ kind: 2, x0: x, y0: y, x1: x1, y1: y1, x2: x2, y2: y2 });
+            x = x2; y = y2;
+            prevQx = x1; prevQy = y1;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 84:
+        case 116: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+
+            let qx = x, qy = y;
+            if (prevCmd === 81 || prevCmd === 113 || prevCmd === 84 || prevCmd === 116) {
+              qx = 2 * x - prevQx;
+              qy = 2 * y - prevQy;
+            }
+
+            let x2 = a.value, y2 = b.value;
+            if (cmd === 116) { x2 += x; y2 += y; }
+
+            emitMonotone({ kind: 2, x0: x, y0: y, x1: qx, y1: qy, x2: x2, y2: y2 });
+            x = x2; y = y2;
+            prevQx = qx; prevQy = qy;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 65:
+        case 97: {
+          while (hasNumAhead(d, i)) {
+            const a = parseNum(d, i); if (!a) break; i = a.next;
+            const b = parseNum(d, i); if (!b) break; i = b.next;
+            const c1 = parseNum(d, i); if (!c1) break; i = c1.next;
+            const d1 = parseNum(d, i); if (!d1) break; i = d1.next;
+            const e = parseNum(d, i); if (!e) break; i = e.next;
+            const f = parseNum(d, i); if (!f) break; i = f.next;
+            const g = parseNum(d, i); if (!g) break; i = g.next;
+
+            let rx = a.value, ry = b.value, ang = c1.value;
+            const largeArc = d1.value ? 1 : 0;
+            const sweep = e.value ? 1 : 0;
+            let x2 = f.value, y2 = g.value;
+            if (cmd === 97) { x2 += x; y2 += y; }
+
+            splitArcToCubics(x, y, rx, ry, ang, largeArc, sweep, x2, y2, emitMonotone);
+            x = x2; y = y2;
+            curPart.x1 = x; curPart.y1 = y;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        case 90:
+        case 122: {
+          if (curPart) {
+            curPart.closed = true;
+            x = sx; y = sy;
+          }
+          prevCmd = cmd;
+          break;
+        }
+
+        default:
+          i = d.length;
+          break;
+      }
+    }
+
+    let acc = 0;
+    for (let k = 0; k < pieces.length; k++) {
+      pieces[k].s0 = acc;
+      acc += pieces[k].len;
+      pieces[k].s1 = acc;
+    }
+
+    for (let p = 0; p < parts.length; p++) {
+      const part = parts[p];
+      if (part.piece1 >= part.piece0) {
+        part.s0 = pieces[part.piece0].s0;
+        part.s1 = pieces[part.piece1].s1;
+      } else {
+        part.s0 = 0;
+        part.s1 = 0;
+      }
+    }
+
+    return {
+      el: pathEl,
+      d: d,
+      pieces: pieces,
+      parts: parts,
+      totalLen: acc,
+      srcD: d,
+      curveLutN: lenSamples
+    };
+  }
+
+  function compile(paths, compileOptions) {
+    compileOptions = compileOptions || {};
+    const lutN = compileOptions.curveLutN != null ? (compileOptions.curveLutN | 0) : CFG.curveLutN;
+    const out = new Array(paths.length);
+
+    for (let i = 0; i < paths.length; i++) {
+      const el = paths[i];
+      if (!el) {
+        out[i] = null;
+        continue;
+      }
+
+      const d = el.getAttribute(CFG.d_attrib) || "";
+      const rec = CACHE.get(el);
+      if (rec && rec.srcD === d && rec.curveLutN === lutN) {
+        out[i] = rec;
+        continue;
+      }
+
+      const compiled = compilePath(el, { curveLutN: lutN });
+      CACHE.set(el, compiled);
+      out[i] = compiled;
+    }
+
+    return out;
+  }
+
+  function buildPathD(partsN, quantizer) {
+    const qf = quantizer.factor;
+    const outXY = WS.outXY;
+    const parts = WS.parts;
+    let s = "";
+
+    for (let p = 0; p < partsN; p++) {
+      const part = parts[p];
+      if (!part) continue;
+      const off = part.off;
+      const nPts = part.nPts;
+      if (!(nPts > 0)) continue;
+
+      let x = qnum(outXY[2 * off], qf);
+      let y = qnum(outXY[2 * off + 1], qf);
+      s += "M" + x + " " + y;
+
+      let px = x, py = y;
+      for (let i = 1; i < nPts; i++) {
+        x = qnum(outXY[2 * (off + i)], qf);
+        y = qnum(outXY[2 * (off + i) + 1], qf);
+        if (x === px && y === py) continue;
+        s += "L" + x + " " + y;
+        px = x;
+        py = y;
+      }
+
+      if (part.closed) s += "Z";
+    }
+
+    return s;
+  }
+
+
+function buildPathD1(partsN, quantizer) {
+  const qf = quantizer.factor;
+  const outXY = WS.outXY;
+  const parts = WS.parts;
+  let s = "";
+
+  // Tolerance for collinearity and area comparisons.
+  // Adjust based on your coordinate scale and quantizer.
+  const EPS = 1e-9;
+
+  // ---- helper: collinearity test with tolerance ----
+  function areCollinear(a, b, c) {
+    const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    return Math.abs(cross) < EPS;
+  }
+
+  // ---- helper: squared distance (to find farthest points) ----
+  function dist2(p, q) {
+    const dx = p.x - q.x, dy = p.y - q.y;
+    return dx * dx + dy * dy;
+  }
+
+  // ---- simplify a polyline, keeping only points where direction changes ----
+  function simplifyPoints(pts, closed) {
+    if (pts.length < 3) return pts.slice();
+
+    // For closed paths we temporarily append the first point to handle the wrap‑around.
+    const work = closed ? pts.concat(pts[0]) : pts.slice();
+    const result = [work[0]];
+
+    for (let i = 1; i < work.length; i++) {
+      const c = work[i];
+
+      // Check the last two points in the result against the new point.
+      while (result.length >= 2) {
+        const a = result[result.length - 2];
+        const b = result[result.length - 1];
+
+        // Condition for removing b:
+        // 1. a, b, c are collinear.
+        // 2. The direction from a→b and b→c is the same (dot product positive).
+        //    This prevents removal when the path backtracks on the same line.
+        if (areCollinear(a, b, c)) {
+          const v1 = {x: b.x - a.x, y: b.y - a.y};
+          const v2 = {x: c.x - b.x, y: c.y - b.y};
+          const dot = v1.x * v2.x + v1.y * v2.y;
+          if (dot > EPS) {  // same direction (positive dot product)
+            result.pop();   // remove b (redundant)
+            continue;
+          }
+        }
+        break;  // not collinear or direction changed → keep b
+      }
+      result.push(c);
+    }
+
+    // If the path was closed, remove the extra copy of the first point.
+    if (closed) result.pop();
+    return result;
+  }
+
+  // ---- signed area of a closed polygon (last point connects to first) ----
+  function signedArea(pts) {
+    let area = 0;
+    const n = pts.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      area += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+    }
+    return area / 2;
+  }
+
+  // ---- build a thin polygon from two endpoints (for zero‑area closed paths) ----
+  function makeThinPolygon(end1, end2) {
+    const dx = end2.x - end1.x;
+    const dy = end2.y - end1.y;
+    const len = Math.hypot(dx, dy);
+
+    // If the two endpoints are the same (single point), create a tiny square.
+    if (len < EPS) {
+      const tiny = 1e-4;   // small offset (tune as needed)
+      return [
+        {x: end1.x - tiny, y: end1.y - tiny},
+        {x: end1.x + tiny, y: end1.y - tiny},
+        {x: end1.x + tiny, y: end1.y + tiny},
+        {x: end1.x - tiny, y: end1.y + tiny}
+      ];
+    }
+
+    // Perpendicular unit vector (rotate 90° clockwise).
+    const perp = {x: dy / len, y: -dx / len};
+    const offset = 1e-4;    // nudge amount – adjust for your scale
+
+    // Build a thin rectangle around the segment [end1 → end2].
+    const p1 = {x: end1.x + perp.x * offset, y: end1.y + perp.y * offset};
+    const p2 = {x: end2.x + perp.x * offset, y: end2.y + perp.y * offset};
+    const p3 = {x: end2.x - perp.x * offset, y: end2.y - perp.y * offset};
+    const p4 = {x: end1.x - perp.x * offset, y: end1.y - perp.y * offset};
+
+    return [p1, p2, p3, p4];
+  }
+
+  // ---- main loop over parts ----
+  for (let p = 0; p < partsN; p++) {
+    const part = parts[p];
+    if (!part) continue;
+    const off = part.off;
+    const nPts = part.nPts;
+    if (!(nPts > 0)) continue;
+
+    // Collect all points of this part (as objects with x,y).
+    const rawPts = [];
+    for (let i = 0; i < nPts; i++) {
+      rawPts.push({
+        x: qnum(outXY[2 * (off + i)], qf),
+        y: qnum(outXY[2 * (off + i) + 1], qf)
+      });
+    }
+
+    // 1. Simplify while preserving direction changes.
+    let pts = simplifyPoints(rawPts, part.closed);
+
+    // 2. For closed paths, ensure the polygon has positive area (or create one if zero).
+    if (part.closed) {
+      if (pts.length >= 3) {
+        const area = signedArea(pts);
+        if (Math.abs(area) < EPS) {
+          // Area is practically zero → replace with a thin polygon.
+          // Find the two farthest points among the original points.
+          let maxDist2 = -1;
+          let far1 = rawPts[0], far2 = rawPts[0];
+          for (let i = 0; i < rawPts.length; i++) {
+            for (let j = i + 1; j < rawPts.length; j++) {
+              const d2 = dist2(rawPts[i], rawPts[j]);
+              if (d2 > maxDist2) {
+                maxDist2 = d2;
+                far1 = rawPts[i];
+                far2 = rawPts[j];
+              }
+            }
+          }
+          pts = makeThinPolygon(far1, far2);
+        } else if (area < 0) {
+          // Negative area → reverse to get positive (optional, for consistent fill).
+          pts = [pts[0], ...pts.slice(1).reverse()];
+        }
+      } else if (pts.length === 2) {
+        // Closed path with only two points is degenerate: replace with thin polygon.
+        // Use the two points as endpoints.
+        pts = makeThinPolygon(pts[0], pts[1]);
+      } else if (pts.length === 1) {
+        // Single point: make a tiny square.
+        pts = makeThinPolygon(pts[0], pts[0]);  // handles the single‑point case
+      }
+    }
+
+    // 3. Build the SVG path string.
+    if (pts.length === 0) continue;
+    s += "M" + pts[0].x + " " + pts[0].y;
+    for (let i = 1; i < pts.length; i++) {
+      s += "L" + pts[i].x + " " + pts[i].y;
+    }
+    if (part.closed) s += "Z";
+  }
+
+  return s;
+}
+
+
+function buildPathD2(partsN, quantizer) {
+  const qf = quantizer.factor;
+  const outXY = WS.outXY;
+  const parts = WS.parts;
+  let s = "";
+
+  const EPS = 1e-9;
+
+  function areCollinearXY(ax, ay, bx, by, cx, cy) {
+    const cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    return Math.abs(cross) < EPS;
+  }
+
+  function dist2XY(ax, ay, bx, by) {
+    const dx = ax - bx, dy = ay - by;
+    return dx * dx + dy * dy;
+  }
+
+  function simplifyPointsFlat(src, nPts, closed) {
+    if (nPts < 3) {
+      const out = new Array(2 * nPts);
+      for (let i = 0; i < 2 * nPts; i++) out[i] = src[i];
+      return out;
+    }
+
+    const workN = closed ? (nPts + 1) : nPts;
+    const work = new Array(2 * workN);
+
+    for (let i = 0; i < nPts; i++) {
+      work[2 * i] = src[2 * i];
+      work[2 * i + 1] = src[2 * i + 1];
+    }
+    if (closed) {
+      work[2 * nPts] = src[0];
+      work[2 * nPts + 1] = src[1];
+    }
+
+    const result = new Array(2 * workN);
+    let rn = 0;
+
+    result[0] = work[0];
+    result[1] = work[1];
+    rn = 1;
+
+    for (let i = 1; i < workN; i++) {
+      const cx = work[2 * i];
+      const cy = work[2 * i + 1];
+
+      while (rn >= 2) {
+        const ia = 2 * (rn - 2);
+        const ib = 2 * (rn - 1);
+
+        const ax = result[ia];
+        const ay = result[ia + 1];
+        const bx = result[ib];
+        const by = result[ib + 1];
+
+        if (areCollinearXY(ax, ay, bx, by, cx, cy)) {
+          const v1x = bx - ax, v1y = by - ay;
+          const v2x = cx - bx, v2y = cy - by;
+          const dot = v1x * v2x + v1y * v2y;
+          if (dot > EPS) {
+            rn--;
+            continue;
+          }
+        }
+        break;
+      }
+
+      result[2 * rn] = cx;
+      result[2 * rn + 1] = cy;
+      rn++;
+    }
+
+    if (closed && rn > 0) rn--;
+
+    result.length = 2 * rn;
+    return result;
+  }
+
+  function signedAreaFlat(pts) {
+    const n = pts.length >> 1;
+    let area = 0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const xi = pts[2 * i], yi = pts[2 * i + 1];
+      const xj = pts[2 * j], yj = pts[2 * j + 1];
+      area += xi * yj - xj * yi;
+    }
+    return area / 2;
+  }
+
+  function makeThinPolygonFlat(x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+
+    if (len < EPS) {
+      const tiny = 1e-4;
+      return [
+        x1 - tiny, y1 - tiny,
+        x1 + tiny, y1 - tiny,
+        x1 + tiny, y1 + tiny,
+        x1 - tiny, y1 + tiny
+      ];
+    }
+
+    const px = dy / len;
+    const py = -dx / len;
+    const offset = 1e-4;
+
+    return [
+      x1 + px * offset, y1 + py * offset,
+      x2 + px * offset, y2 + py * offset,
+      x2 - px * offset, y2 - py * offset,
+      x1 - px * offset, y1 - py * offset
+    ];
+  }
+
+  for (let p = 0; p < partsN; p++) {
+    const part = parts[p];
+    if (!part) continue;
+
+    const off = part.off;
+    const nPts = part.nPts;
+    if (!(nPts > 0)) continue;
+
+    const rawPts = new Array(2 * nPts);
+    for (let i = 0; i < nPts; i++) {
+      rawPts[2 * i]     = qnum(outXY[2 * (off + i)], qf);
+      rawPts[2 * i + 1] = qnum(outXY[2 * (off + i) + 1], qf);
+    }
+
+    let pts = simplifyPointsFlat(rawPts, nPts, part.closed);
+
+    if (part.closed) {
+      const mPts = pts.length >> 1;
+
+      if (mPts >= 3) {
+        const area = signedAreaFlat(pts);
+
+        if (Math.abs(area) < EPS) {
+          let maxD2 = -1;
+          let far1x = rawPts[0], far1y = rawPts[1];
+          let far2x = rawPts[0], far2y = rawPts[1];
+
+          for (let i = 0; i < nPts; i++) {
+            const xi = rawPts[2 * i];
+            const yi = rawPts[2 * i + 1];
+            for (let j = i + 1; j < nPts; j++) {
+              const xj = rawPts[2 * j];
+              const yj = rawPts[2 * j + 1];
+              const d2 = dist2XY(xi, yi, xj, yj);
+              if (d2 > maxD2) {
+                maxD2 = d2;
+                far1x = xi; far1y = yi;
+                far2x = xj; far2y = yj;
+              }
+            }
+          }
+
+          pts = makeThinPolygonFlat(far1x, far1y, far2x, far2y);
+        } else if (area < 0) {
+          const rev = new Array(pts.length);
+          rev[0] = pts[0];
+          rev[1] = pts[1];
+          let w = 2;
+          for (let i = mPts - 1; i >= 1; i--) {
+            rev[w++] = pts[2 * i];
+            rev[w++] = pts[2 * i + 1];
+          }
+          pts = rev;
+        }
+      } else if (mPts === 2) {
+        pts = makeThinPolygonFlat(pts[0], pts[1], pts[2], pts[3]);
+      } else if (mPts === 1) {
+        pts = makeThinPolygonFlat(pts[0], pts[1], pts[0], pts[1]);
+      }
+    }
+
+    const mPts = pts.length >> 1;
+    if (mPts === 0) continue;
+
+    s += "M" + pts[0] + " " + pts[1];
+    for (let i = 1; i < mPts; i++) {
+      s += "L" + pts[2 * i] + " " + pts[2 * i + 1];
+    }
+    if (part.closed) s += "Z";
+  }
+
+  return s;
+}
+
+  function runCompiled1(compiledPaths, runOptions) {
+    const opt = runOptions ? {
+      tolerancePx: runOptions.tolerancePx != null ? +runOptions.tolerancePx : CFG.tolerancePx,
+      lengthSlackPx: runOptions.lengthSlackPx != null ? +runOptions.lengthSlackPx : CFG.lengthSlackPx,
+      maxDepth: runOptions.maxDepth != null ? (runOptions.maxDepth | 0) : CFG.maxDepth,
+      quantizeDigits: runOptions.quantizeDigits != null ? (runOptions.quantizeDigits | 0) : CFG.quantizeDigits,
+      quantizeFactorSafety: runOptions.quantizeFactorSafety != null ? +runOptions.quantizeFactorSafety : CFG.quantizeFactorSafety,
+      getTransformKey: typeof runOptions.getTransformKey === "function" ? runOptions.getTransformKey : CFG.getTransformKey,
+      getScreenCTMForPath: typeof runOptions.getScreenCTMForPath === "function" ? runOptions.getScreenCTMForPath : CFG.getScreenCTMForPath
+    } : CFG;
+
+    const tol2 = opt.tolerancePx * opt.tolerancePx;
+    const ctmCache = new Map();
+    const out = new Array(compiledPaths.length);
+
+    for (let iPath = 0; iPath < compiledPaths.length; iPath++) {
+      const comp = compiledPaths[iPath];
+      if (!comp || !comp.el) {
+        out[iPath] = null;
+        continue;
+      }
+
+      const m = getMatrixForPath(comp.el, ctmCache, opt.getTransformKey, opt.getScreenCTMForPath);
+      if (!m) {
+        out[iPath] = null;
+        continue;
+      }
+
+      const quantizer = computeQuantizer(m, opt.tolerancePx, opt.quantizeDigits, opt.quantizeFactorSafety);
+
+      let outXY = WS.outXY;
+      let parts = WS.parts;
+      let stack = WS.stack;
+      let nPts = 0;
+      let partsN = 0;
+
+      function beginPart(x, y, closed) {
+        if (partsN >= parts.length) parts = ensureArr("parts", partsN + 1);
+        const partIdx = partsN++;
+        parts[partIdx] = { off: nPts, nPts: 0, closed: !!closed };
+
+        const need = 2 * (nPts + 1);
+        if (need > outXY.length) outXY = ensureF64("outXY", need);
+        outXY[2 * nPts] = x;
+        outXY[2 * nPts + 1] = y;
+        nPts++;
+        parts[partIdx].nPts = 1;
+
+        WS.outXY = outXY;
+        WS.parts = parts;
+        return partIdx;
+      }
+
+      function appendPointToPart(partIdx, x, y) {
+        const part = parts[partIdx];
+        const j = 2 * (part.off + part.nPts - 1);
+        if (part.nPts > 0 && outXY[j] === x && outXY[j + 1] === y) return;
+
+        const need = 2 * (nPts + 1);
+        if (need > outXY.length) outXY = ensureF64("outXY", need);
+        outXY[2 * nPts] = x;
+        outXY[2 * nPts + 1] = y;
+        nPts++;
+        part.nPts++;
+
+        WS.outXY = outXY;
+      }
+
+      for (let p = 0; p < comp.parts.length; p++) {
+        const part = comp.parts[p];
+        if (!part) continue;
+
+        if (part.piece1 < part.piece0) {
+          beginPart(part.x0, part.y0, part.closed);
+          continue;
+        }
+
+        segPoint(comp.pieces[part.piece0], 0, WS.pt0);
+        const partIdx = beginPart(WS.pt0.x, WS.pt0.y, part.closed);
+
+        for (let k = part.piece0; k <= part.piece1; k++) {
+          const piece = comp.pieces[k];
+          if (!piece) continue;
+
+          if (piece.kind === 1 || !(piece.len > 0)) {
+            appendPointToPart(partIdx, piece.kind === 1 ? piece.x1 : piece.x1, piece.kind === 1 ? piece.y1 : piece.y1);
+            continue;
+          }
+
+          let sp = 0;
+
+          function pushSpan(t0, t1, depth) {
+            if (sp + 3 > stack.length) stack = ensureF64("stack", stack.length * 2);
+            stack[sp++] = t0;
+            stack[sp++] = t1;
+            stack[sp++] = depth;
+            WS.stack = stack;
+          }
+
+          pushSpan(0, 1, 0);
+
+          while (sp > 0) {
+            sp -= 3;
+
+            const t0 = stack[sp];
+            const t1 = stack[sp + 1];
+            const depth = stack[sp + 2] | 0;
+
+            segPoint(piece, t0, WS.pt0);
+            segPoint(piece, t1, WS.pt1);
+
+            const sx0 = tx(m, WS.pt0.x, WS.pt0.y), sy0 = ty(m, WS.pt0.x, WS.pt0.y);
+            const sx1 = tx(m, WS.pt1.x, WS.pt1.y), sy1 = ty(m, WS.pt1.x, WS.pt1.y);
+
+            if (depth >= opt.maxDepth) {
+              appendPointToPart(partIdx, WS.pt1.x, WS.pt1.y);
+              continue;
+            }
+
+            const tm = 0.5 * (t0 + t1);
+            const tq1 = 0.5 * (t0 + tm);
+            const tq3 = 0.5 * (tm + t1);
+
+            segPoint(piece, tq1, WS.pt2);
+            const sxq1 = tx(m, WS.pt2.x, WS.pt2.y), syq1 = ty(m, WS.pt2.x, WS.pt2.y);
+
+            segPoint(piece, tm, WS.pt3);
+            const sxm = tx(m, WS.pt3.x, WS.pt3.y), sym = ty(m, WS.pt3.x, WS.pt3.y);
+
+            segPoint(piece, tq3, WS.pt2);
+            const sxq3 = tx(m, WS.pt2.x, WS.pt2.y), syq3 = ty(m, WS.pt2.x, WS.pt2.y);
+
+            let accept = true;
+
+            if (pointSegDist2(sxq1, syq1, sx0, sy0, sx1, sy1) > tol2) accept = false;
+            if (accept && pointSegDist2(sxm, sym, sx0, sy0, sx1, sy1) > tol2) accept = false;
+            if (accept && pointSegDist2(sxq3, syq3, sx0, sy0, sx1, sy1) > tol2) accept = false;
+
+            if (accept) {
+              const net =
+                dist(sx0, sy0, sxq1, syq1) +
+                dist(sxq1, syq1, sxm, sym) +
+                dist(sxm, sym, sxq3, syq3) +
+                dist(sxq3, syq3, sx1, sy1);
+
+              const chord = dist(sx0, sy0, sx1, sy1);
+              if (net - chord > opt.lengthSlackPx) accept = false;
+            }
+
+            if (accept) {
+              appendPointToPart(partIdx, WS.pt1.x, WS.pt1.y);
+            } else {
+              pushSpan(tm, t1, depth + 1);
+              pushSpan(t0, tm, depth + 1);
+            }
+          }
+        }
+
+        const lastPart = parts[partIdx];
+        if (lastPart.closed && lastPart.nPts > 1) {
+          const off = lastPart.off;
+          const n = lastPart.nPts;
+          const fx = outXY[2 * off], fy = outXY[2 * off + 1];
+          const lx = outXY[2 * (off + n - 1)], ly = outXY[2 * (off + n - 1) + 1];
+          if (fx === lx && fy === ly) {
+            lastPart.nPts--;
+          }
+        }
+      }
+
+      WS.outXY = outXY;
+      WS.parts = parts;
+      WS.stack = stack;
+
+      out[iPath] = {
+        el: comp.el,
+        d: comp.d,
+        d_simplified: buildPathD2(partsN, quantizer),//, opt.tolerancePx / Math.max(Math.hypot(m.a, m.b), Math.hypot(m.c, m.d), 1e-12)
+        points: nPts,
+        totalLen: comp.totalLen
+      };
+    }
+
+    return out;
+  }
+
+
+function runCompiled(compiledPaths, runOptions) {
+  const opt = runOptions ? {
+    tolerancePx: runOptions.tolerancePx != null ? +runOptions.tolerancePx : CFG.tolerancePx,
+    lengthSlackPx: runOptions.lengthSlackPx != null ? +runOptions.lengthSlackPx : CFG.lengthSlackPx,
+    maxDepth: runOptions.maxDepth != null ? (runOptions.maxDepth | 0) : CFG.maxDepth,
+    quantizeDigits: runOptions.quantizeDigits != null ? (runOptions.quantizeDigits | 0) : CFG.quantizeDigits,
+    quantizeFactorSafety: runOptions.quantizeFactorSafety != null ? +runOptions.quantizeFactorSafety : CFG.quantizeFactorSafety,
+    getTransformKey: typeof runOptions.getTransformKey === "function" ? runOptions.getTransformKey : CFG.getTransformKey,
+    getScreenCTMForPath: typeof runOptions.getScreenCTMForPath === "function" ? runOptions.getScreenCTMForPath : CFG.getScreenCTMForPath
+  } : CFG;
+
+  const tol2 = opt.tolerancePx * opt.tolerancePx;
+  const lengthSlackPx = opt.lengthSlackPx;
+  const maxDepth = opt.maxDepth;
+  const ctmCache = new Map();
+  const out = new Array(compiledPaths.length);
+
+  for (let iPath = 0; iPath < compiledPaths.length; iPath++) {
+    const comp = compiledPaths[iPath];
+    if (!comp || !comp.el) {
+      out[iPath] = null;
+      continue;
+    }
+
+    const m = getMatrixForPath(comp.el, ctmCache, opt.getTransformKey, opt.getScreenCTMForPath);
+    if (!m) {
+      out[iPath] = null;
+      continue;
+    }
+
+    const ma = m.a, mb = m.b, mc = m.c, md = m.d, me = m.e, mf = m.f;
+    const quantizer = computeQuantizer(m, opt.tolerancePx, opt.quantizeDigits, opt.quantizeFactorSafety);
+
+    let outXY = WS.outXY;
+    let parts = WS.parts;
+    let stack = WS.stack;
+    let nPts = 0;
+    let partsN = 0;
+
+    function beginPart(x, y, closed) {
+      if (partsN >= parts.length) parts = ensureArr("parts", partsN + 1);
+      const partIdx = partsN++;
+      parts[partIdx] = { off: nPts, nPts: 0, closed: !!closed };
+
+      const need = 2 * (nPts + 1);
+      if (need > outXY.length) outXY = ensureF64("outXY", need);
+      outXY[2 * nPts] = x;
+      outXY[2 * nPts + 1] = y;
+      nPts++;
+      parts[partIdx].nPts = 1;
+
+      WS.outXY = outXY;
+      WS.parts = parts;
+      return partIdx;
+    }
+
+    function appendPointToPart(partIdx, x, y) {
+      const part = parts[partIdx];
+      const j = 2 * (part.off + part.nPts - 1);
+      if (part.nPts > 0 && outXY[j] === x && outXY[j + 1] === y) return;
+
+      const need = 2 * (nPts + 1);
+      if (need > outXY.length) outXY = ensureF64("outXY", need);
+      outXY[2 * nPts] = x;
+      outXY[2 * nPts + 1] = y;
+      nPts++;
+      part.nPts++;
+
+      WS.outXY = outXY;
+    }
+
+    function pushSpan(t0, t1, depth) {
+      if (sp + 3 > stack.length) stack = ensureF64("stack", stack.length * 2);
+      stack[sp++] = t0;
+      stack[sp++] = t1;
+      stack[sp++] = depth;
+      WS.stack = stack;
+    }
+
+    function pointSegDist2_inline(px, py, ax, ay, bx, by) {
+      const vx = bx - ax, vy = by - ay;
+      const wx = px - ax, wy = py - ay;
+      const c1 = vx * wx + vy * wy;
+      if (c1 <= 0) {
+        const dx = px - ax, dy = py - ay;
+        return dx * dx + dy * dy;
+      }
+      const c2 = vx * vx + vy * vy;
+      if (c2 <= c1) {
+        const dx = px - bx, dy = py - by;
+        return dx * dx + dy * dy;
+      }
+      const t = c1 / c2;
+      const qx = ax + t * vx, qy = ay + t * vy;
+      const dx = px - qx, dy = py - qy;
+      return dx * dx + dy * dy;
+    }
+
+    function runQuadPiece(partIdx, piece) {
+      const x0c = piece.x0, y0c = piece.y0;
+      const x1c = piece.x1, y1c = piece.y1;
+      const x2c = piece.x2, y2c = piece.y2;
+
+      sp = 0;
+      pushSpan(0, 1, 0);
+
+      while (sp > 0) {
+        sp -= 3;
+
+        const t0 = stack[sp];
+        const t1 = stack[sp + 1];
+        const depth = stack[sp + 2] | 0;
+
+        let mt = 1 - t0;
+        let x0 = mt * mt * x0c + 2 * mt * t0 * x1c + t0 * t0 * x2c;
+        let y0 = mt * mt * y0c + 2 * mt * t0 * y1c + t0 * t0 * y2c;
+
+        mt = 1 - t1;
+        let x1 = mt * mt * x0c + 2 * mt * t1 * x1c + t1 * t1 * x2c;
+        let y1 = mt * mt * y0c + 2 * mt * t1 * y1c + t1 * t1 * y2c;
+
+        const sx0 = ma * x0 + mc * y0 + me;
+        const sy0 = mb * x0 + md * y0 + mf;
+        const sx1 = ma * x1 + mc * y1 + me;
+        const sy1 = mb * x1 + md * y1 + mf;
+
+        if (depth >= maxDepth) {
+          appendPointToPart(partIdx, x1, y1);
+          continue;
+        }
+
+        const tm = 0.5 * (t0 + t1);
+        const tq1 = 0.5 * (t0 + tm);
+        const tq3 = 0.5 * (tm + t1);
+
+        mt = 1 - tq1;
+        const xq1 = mt * mt * x0c + 2 * mt * tq1 * x1c + tq1 * tq1 * x2c;
+        const yq1 = mt * mt * y0c + 2 * mt * tq1 * y1c + tq1 * tq1 * y2c;
+        const sxq1 = ma * xq1 + mc * yq1 + me;
+        const syq1 = mb * xq1 + md * yq1 + mf;
+
+        mt = 1 - tm;
+        const xm = mt * mt * x0c + 2 * mt * tm * x1c + tm * tm * x2c;
+        const ym = mt * mt * y0c + 2 * mt * tm * y1c + tm * tm * y2c;
+        const sxm = ma * xm + mc * ym + me;
+        const sym = mb * xm + md * ym + mf;
+
+        mt = 1 - tq3;
+        const xq3 = mt * mt * x0c + 2 * mt * tq3 * x1c + tq3 * tq3 * x2c;
+        const yq3 = mt * mt * y0c + 2 * mt * tq3 * y1c + tq3 * tq3 * y2c;
+        const sxq3 = ma * xq3 + mc * yq3 + me;
+        const syq3 = mb * xq3 + md * yq3 + mf;
+
+        let accept = true;
+
+        if (pointSegDist2_inline(sxq1, syq1, sx0, sy0, sx1, sy1) > tol2) accept = false;
+        if (accept && pointSegDist2_inline(sxm, sym, sx0, sy0, sx1, sy1) > tol2) accept = false;
+        if (accept && pointSegDist2_inline(sxq3, syq3, sx0, sy0, sx1, sy1) > tol2) accept = false;
+
+        if (accept) {
+          let dx = sxq1 - sx0, dy = syq1 - sy0;
+          const d01 = Math.hypot(dx, dy);
+          dx = sxm - sxq1; dy = sym - syq1;
+          const d12 = Math.hypot(dx, dy);
+          dx = sxq3 - sxm; dy = syq3 - sym;
+          const d23 = Math.hypot(dx, dy);
+          dx = sx1 - sxq3; dy = sy1 - syq3;
+          const d34 = Math.hypot(dx, dy);
+          dx = sx1 - sx0; dy = sy1 - sy0;
+          const chord = Math.hypot(dx, dy);
+
+          if ((d01 + d12 + d23 + d34) - chord > lengthSlackPx) accept = false;
+        }
+
+        if (accept) {
+          appendPointToPart(partIdx, x1, y1);
+        } else {
+          pushSpan(tm, t1, depth + 1);
+          pushSpan(t0, tm, depth + 1);
+        }
+      }
+    }
+
+    function runCubicPiece(partIdx, piece) {
+      const x0c = piece.x0, y0c = piece.y0;
+      const x1c = piece.x1, y1c = piece.y1;
+      const x2c = piece.x2, y2c = piece.y2;
+      const x3c = piece.x3, y3c = piece.y3;
+
+      sp = 0;
+      pushSpan(0, 1, 0);
+
+      while (sp > 0) {
+        sp -= 3;
+
+        const t0 = stack[sp];
+        const t1 = stack[sp + 1];
+        const depth = stack[sp + 2] | 0;
+
+        let mt = 1 - t0;
+        let mt2 = mt * mt, t02 = t0 * t0;
+        let x0 = mt2 * mt * x0c + 3 * mt2 * t0 * x1c + 3 * mt * t02 * x2c + t02 * t0 * x3c;
+        let y0 = mt2 * mt * y0c + 3 * mt2 * t0 * y1c + 3 * mt * t02 * y2c + t02 * t0 * y3c;
+
+        mt = 1 - t1;
+        mt2 = mt * mt;
+        const t12 = t1 * t1;
+        let x1 = mt2 * mt * x0c + 3 * mt2 * t1 * x1c + 3 * mt * t12 * x2c + t12 * t1 * x3c;
+        let y1 = mt2 * mt * y0c + 3 * mt2 * t1 * y1c + 3 * mt * t12 * y2c + t12 * t1 * y3c;
+
+        const sx0 = ma * x0 + mc * y0 + me;
+        const sy0 = mb * x0 + md * y0 + mf;
+        const sx1 = ma * x1 + mc * y1 + me;
+        const sy1 = mb * x1 + md * y1 + mf;
+
+        if (depth >= maxDepth) {
+          appendPointToPart(partIdx, x1, y1);
+          continue;
+        }
+
+        const tm = 0.5 * (t0 + t1);
+        const tq1 = 0.5 * (t0 + tm);
+        const tq3 = 0.5 * (tm + t1);
+
+        mt = 1 - tq1;
+        mt2 = mt * mt;
+        const tq12 = tq1 * tq1;
+        const xq1 = mt2 * mt * x0c + 3 * mt2 * tq1 * x1c + 3 * mt * tq12 * x2c + tq12 * tq1 * x3c;
+        const yq1 = mt2 * mt * y0c + 3 * mt2 * tq1 * y1c + 3 * mt * tq12 * y2c + tq12 * tq1 * y3c;
+        const sxq1 = ma * xq1 + mc * yq1 + me;
+        const syq1 = mb * xq1 + md * yq1 + mf;
+
+        mt = 1 - tm;
+        mt2 = mt * mt;
+        const tm2 = tm * tm;
+        const xm = mt2 * mt * x0c + 3 * mt2 * tm * x1c + 3 * mt * tm2 * x2c + tm2 * tm * x3c;
+        const ym = mt2 * mt * y0c + 3 * mt2 * tm * y1c + 3 * mt * tm2 * y2c + tm2 * tm * y3c;
+        const sxm = ma * xm + mc * ym + me;
+        const sym = mb * xm + md * ym + mf;
+
+        mt = 1 - tq3;
+        mt2 = mt * mt;
+        const tq32 = tq3 * tq3;
+        const xq3 = mt2 * mt * x0c + 3 * mt2 * tq3 * x1c + 3 * mt * tq32 * x2c + tq32 * tq3 * x3c;
+        const yq3 = mt2 * mt * y0c + 3 * mt2 * tq3 * y1c + 3 * mt * tq32 * y2c + tq32 * tq3 * y3c;
+        const sxq3 = ma * xq3 + mc * yq3 + me;
+        const syq3 = mb * xq3 + md * yq3 + mf;
+
+        let accept = true;
+
+        if (pointSegDist2_inline(sxq1, syq1, sx0, sy0, sx1, sy1) > tol2) accept = false;
+        if (accept && pointSegDist2_inline(sxm, sym, sx0, sy0, sx1, sy1) > tol2) accept = false;
+        if (accept && pointSegDist2_inline(sxq3, syq3, sx0, sy0, sx1, sy1) > tol2) accept = false;
+
+        if (accept) {
+          let dx = sxq1 - sx0, dy = syq1 - sy0;
+          const d01 = Math.hypot(dx, dy);
+          dx = sxm - sxq1; dy = sym - syq1;
+          const d12 = Math.hypot(dx, dy);
+          dx = sxq3 - sxm; dy = syq3 - sym;
+          const d23 = Math.hypot(dx, dy);
+          dx = sx1 - sxq3; dy = sy1 - syq3;
+          const d34 = Math.hypot(dx, dy);
+          dx = sx1 - sx0; dy = sy1 - sy0;
+          const chord = Math.hypot(dx, dy);
+
+          if ((d01 + d12 + d23 + d34) - chord > lengthSlackPx) accept = false;
+        }
+
+        if (accept) {
+          appendPointToPart(partIdx, x1, y1);
+        } else {
+          pushSpan(tm, t1, depth + 1);
+          pushSpan(t0, tm, depth + 1);
+        }
+      }
+    }
+
+    let sp = 0;
+
+    for (let p = 0; p < comp.parts.length; p++) {
+      const part = comp.parts[p];
+      if (!part) continue;
+
+      if (part.piece1 < part.piece0) {
+        beginPart(part.x0, part.y0, part.closed);
+        continue;
+      }
+
+      const firstPiece = comp.pieces[part.piece0];
+      let xStart, yStart;
+
+      if (firstPiece.kind === 1) {
+        xStart = firstPiece.x0;
+        yStart = firstPiece.y0;
+      } else if (firstPiece.kind === 2) {
+        xStart = firstPiece.x0;
+        yStart = firstPiece.y0;
+      } else {
+        xStart = firstPiece.x0;
+        yStart = firstPiece.y0;
+      }
+
+      const partIdx = beginPart(xStart, yStart, part.closed);
+
+      for (let k = part.piece0; k <= part.piece1; k++) {
+        const piece = comp.pieces[k];
+        if (!piece) continue;
+
+        if (piece.kind === 1 || !(piece.len > 0)) {
+          appendPointToPart(partIdx, piece.x1, piece.y1);
+          continue;
+        }
+
+        if (piece.kind === 2) {
+          runQuadPiece(partIdx, piece);
+        } else {
+          runCubicPiece(partIdx, piece);
+        }
+      }
+
+      const lastPart = parts[partIdx];
+      if (lastPart.closed && lastPart.nPts > 1) {
+        const off = lastPart.off;
+        const n = lastPart.nPts;
+        const fx = outXY[2 * off], fy = outXY[2 * off + 1];
+        const lx = outXY[2 * (off + n - 1)], ly = outXY[2 * (off + n - 1) + 1];
+        if (fx === lx && fy === ly) {
+          lastPart.nPts--;
+        }
+      }
+    }
+
+    WS.outXY = outXY;
+    WS.parts = parts;
+    WS.stack = stack;
+
+    out[iPath] = {
+      el: comp.el,
+      d: comp.d,
+      d_simplified: buildPathD2(partsN, quantizer),
+      points: nPts,
+      totalLen: comp.totalLen
+    };
+  }
+
+  return out;
+}
+
+
+  function run(paths, runOptions) {
+    //const t0 = performance.now();
+    const ret = runCompiled(compile(paths), runOptions);
+	//const t1 = performance.now();
+	//console.log("ms =", t1 - t0);
+    return ret;
+  }
+
+  return {
+    compile: compile,
+    runCompiled: runCompiled,
+    run: run
+  };
+}
+
+
+
+
+
+
+window.dzvSimplifier = createArcLengthSegmentBatchSimplifier({
+  d_attrib:"d",
+  //curveLutN: 24,
+  tolerancePx: 1,
+  lengthSlackPx: 0.20,
+  maxDepth: 18
+});
+
+window.dzvSimplifierLin = createArcLengthSegmentBatchSimplifier({
+  d_attrib:"d",
+  //curveLutN: 24,
+  tolerancePx: 5,
+  lengthSlackPx: 0.20,
+  maxDepth: 18
+});
+
+
+//const compiled = simplifier.compile(paths);
+//const batch = simplifier.runCompiled(compiled);
+
+
+//data-dzv-global-lin, data-dzv-global-warp, data-dzv-focus-lin, data-dzv-focus-warp
+window.dzvApplySimplifiedBatch = function (batch, attrName) {
+  attrName = attrName || "data-dzv-d-orig";
+  for (let i = 0; i < batch.length; i++) {
+    const r = batch[i];
+    if (!r || !r.el) continue;
+    if (!r.el.hasAttribute(attrName)) r.el.setAttribute(attrName, r.d);
+
+    r.el.setAttribute("d", r.d_simplified);
+  }
+}
+
+window.dzvRestoreSimplifiedBatch = function (batch, attrName) {
+  attrName = attrName || "data-dzv-d-orig";
+  for (let i = 0; i < batch.length; i++) {
+    const r = batch[i];
+    if (!r || !r.el) continue;
+    const d0 = r.el.getAttribute(attrName);
+    if (d0 != null) {
+      r.el.setAttribute("d", d0);
+    }
+  }
+}
+
+window.dzvStoreDefault = function (batch, attrName) {
+  attrName = attrName || "data-dzv-d-orig";
+  for (let i = 0; i < batch.length; i++) {
+    const r = batch[i];
+    if (!r || !r.el) continue;
+    if (!r.el.hasAttribute(attrName)) r.el.setAttribute(attrName, r.d);
+  }
+}
+
+window.dzvApplySimplifiedBatchStore = function (batch, attrName) {
+  attrName = attrName || "data-dzv-d-orig";
+  for (let i = 0; i < batch.length; i++) {
+    const r = batch[i];
+    if (!r || !r.el) continue;
+    r.el.setAttribute(attrName, r.d);
+    r.el.setAttribute("d", r.d_simplified);
+  }
+}
+
+
 
 
 let wheelBlocked = true;       // start blocked during loader
@@ -6200,10 +9639,13 @@ function dzvGetVisualBBoxInSvgUnits(el, svgRoot) {
 	    return window.dzv.warpingFactor === 1;
 	};
 
-	function warpPathD(d, viewBoxStr, warpFn, warpingFactor) {
+	function warpPathDD(d, viewBoxStr, warpFn, warpingFactor) {
 	    if (!d) return d;
 	    const vb = viewBoxStr.trim().split(/\s+/).map(Number);
-	    if (vb.length !== 4 || !isFinite(vb[0]) || !isFinite(vb[2])) return d;
+	    if (vb.length !== 4 || !isFinite(vb[0]) || !isFinite(vb[2])) {
+			   console.log("error -1");
+			   return d;
+			  } 
 	    const [vbX, , vbW] = vb;
 
 	    function warpX(x) {
@@ -6213,7 +9655,11 @@ function dzvGetVisualBBoxInSvgUnits(el, svgRoot) {
 	        return vbX + vbW * uMix;
 	    }
 	    const raw = d.replace(/,/g, " ").trim().split(/\s+/);
-	    if (!raw.length) return d;
+	    if (!raw.length) {
+			   console.log("error 0");
+			   return d;
+			  } 
+			  
 	    const chunks = [];
 	    let i = 0;
 	    while (i < raw.length) {
@@ -6262,14 +9708,22 @@ function dzvGetVisualBBoxInSvgUnits(el, svgRoot) {
 	        }
 	        of chunks) {
 	        const step = stepMap[cmd];
-	        if (step === undefined) return d;
+	        if (step === undefined) 
+			  {
+			   console.log("error 1");
+			   return d;
+			  } 
 	        if (step === 0) {
 	            out.push(cmd);
 	            cx = sx;
 	            cy = sy;
 	            continue;
 	        }
-	        if (params.length % step !== 0) return d;
+	        if (params.length % step !== 0) 
+			{
+			   console.log("error 2");
+			   return d;
+			  } 
 	        const isRel = (cmd === cmd.toLowerCase());
 	        const baseCmd = cmd.toUpperCase();
 	        for (let j = 0; j < params.length; j += step) {
@@ -6368,6 +9822,227 @@ function dzvGetVisualBBoxInSvgUnits(el, svgRoot) {
 	    }
 	    return out.join(" ");
 	}
+
+
+function warpPathD(d, viewBoxStr, warpFn, warpingFactor) {
+    if (!d) return d;
+
+    const vb = String(viewBoxStr).trim().split(/\s+/).map(Number);
+    if (vb.length !== 4 || !isFinite(vb[0]) || !isFinite(vb[2]) || vb[2] === 0) {
+        //console.log("error -1");
+        return d;
+    }
+    const [vbX, , vbW] = vb;
+
+    function warpX(x) {
+        const u = (x - vbX) / vbW;
+        const uw = warpFn(u);
+        const uMix = u + warpingFactor * (uw - u);
+        return vbX + vbW * uMix;
+    }
+
+    const tokens = String(d).match(/[AaCcHhLlMmQqSsTtVvZz]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g);
+    if (!tokens || !tokens.length) {
+        //console.log("error 0");
+        return d;
+    }
+
+    const stepMap = {
+        M: 2, L: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, T: 2, A: 7, Z: 0,
+        m: 2, l: 2, h: 1, v: 1, c: 6, s: 4, q: 4, t: 2, a: 7, z: 0
+    };
+
+    function isCmd(t) {
+        return /^[AaCcHhLlMmQqSsTtVvZz]$/.test(t);
+    }
+
+    const chunks = [];
+    let i = 0;
+    while (i < tokens.length) {
+        const cmd = tokens[i++];
+        if (!isCmd(cmd)) {
+            //console.log("error 1");
+            return d;
+        }
+        const params = [];
+        while (i < tokens.length && !isCmd(tokens[i])) {
+            const v = Number(tokens[i++]);
+            if (!Number.isFinite(v)) {
+                //console.log("error 2");
+                return d;
+            }
+            params.push(v);
+        }
+        chunks.push({ cmd, params });
+    }
+
+    let out = [];
+
+    let cx0 = 0, cy0 = 0;
+    let sx0 = 0, sy0 = 0;
+
+    let cxw = 0, cyw = 0;
+    let sxw = 0, syw = 0;
+
+    for (const { cmd, params } of chunks) {
+        const step = stepMap[cmd];
+        if (step === undefined) {
+            //console.log("error 3");
+            return d;
+        }
+
+        if (step === 0) {
+            out.push(cmd);
+            cx0 = sx0; cy0 = sy0;
+            cxw = sxw; cyw = syw;
+            continue;
+        }
+
+        if (params.length % step !== 0) {
+            //console.log("error 4");
+            return d;
+        }
+
+        const isRel = (cmd === cmd.toLowerCase());
+        const baseCmd = cmd.toUpperCase();
+
+        for (let j = 0; j < params.length; j += step) {
+            if (baseCmd === "M" || baseCmd === "L" || baseCmd === "T") {
+                const dx = params[j];
+                const dy = params[j + 1];
+
+                const x0 = isRel ? (cx0 + dx) : dx;
+                const y0 = isRel ? (cy0 + dy) : dy;
+
+                const xw = warpX(x0);
+                const yw = y0;
+
+                const cmdOut = (j === 0) ? cmd : (baseCmd === "M" ? (isRel ? "l" : "L") : cmd);
+
+                if (isRel) out.push(cmdOut, xw - cxw, yw - cyw);
+                else out.push(cmdOut, xw, yw);
+
+                cx0 = x0; cy0 = y0;
+                cxw = xw; cyw = yw;
+
+                if (baseCmd === "M" && j === 0) {
+                    sx0 = cx0; sy0 = cy0;
+                    sxw = cxw; syw = cyw;
+                }
+
+            } else if (baseCmd === "H") {
+                const dx = params[j];
+                const x0 = isRel ? (cx0 + dx) : dx;
+                const xw = warpX(x0);
+
+                if (isRel) out.push(cmd, xw - cxw);
+                else out.push(cmd, xw);
+
+                cx0 = x0;
+                cxw = xw;
+
+            } else if (baseCmd === "V") {
+                const dy = params[j];
+                const y0 = isRel ? (cy0 + dy) : dy;
+
+                if (isRel) out.push(cmd, y0 - cyw);
+                else out.push(cmd, y0);
+
+                cy0 = y0;
+                cyw = y0;
+
+            } else if (baseCmd === "C") {
+                const dx1 = params[j],     dy1 = params[j + 1];
+                const dx2 = params[j + 2], dy2 = params[j + 3];
+                const dx  = params[j + 4], dy  = params[j + 5];
+
+                const x1_0 = isRel ? (cx0 + dx1) : dx1;
+                const y1_0 = isRel ? (cy0 + dy1) : dy1;
+                const x2_0 = isRel ? (cx0 + dx2) : dx2;
+                const y2_0 = isRel ? (cy0 + dy2) : dy2;
+                const x0   = isRel ? (cx0 + dx)  : dx;
+                const y0   = isRel ? (cy0 + dy)  : dy;
+
+                const x1w = warpX(x1_0);
+                const x2w = warpX(x2_0);
+                const xw  = warpX(x0);
+
+                if (isRel) {
+                    out.push(
+                        cmd,
+                        x1w - cxw, y1_0 - cyw,
+                        x2w - cxw, y2_0 - cyw,
+                        xw  - cxw, y0   - cyw
+                    );
+                } else {
+                    out.push(
+                        cmd,
+                        x1w, y1_0,
+                        x2w, y2_0,
+                        xw,  y0
+                    );
+                }
+
+                cx0 = x0; cy0 = y0;
+                cxw = xw; cyw = y0;
+
+            } else if (baseCmd === "S" || baseCmd === "Q") {
+                const dx1 = params[j],     dy1 = params[j + 1];
+                const dx  = params[j + 2], dy  = params[j + 3];
+
+                const x1_0 = isRel ? (cx0 + dx1) : dx1;
+                const y1_0 = isRel ? (cy0 + dy1) : dy1;
+                const x0   = isRel ? (cx0 + dx)  : dx;
+                const y0   = isRel ? (cy0 + dy)  : dy;
+
+                const x1w = warpX(x1_0);
+                const xw  = warpX(x0);
+
+                if (isRel) {
+                    out.push(
+                        cmd,
+                        x1w - cxw, y1_0 - cyw,
+                        xw  - cxw, y0   - cyw
+                    );
+                } else {
+                    out.push(
+                        cmd,
+                        x1w, y1_0,
+                        xw,  y0
+                    );
+                }
+
+                cx0 = x0; cy0 = y0;
+                cxw = xw; cyw = y0;
+
+            } else if (baseCmd === "A") {
+                const rx = params[j];
+                const ry = params[j + 1];
+                const rot = params[j + 2];
+                const largeArc = params[j + 3];
+                const sweep = params[j + 4];
+                const dx = params[j + 5];
+                const dy = params[j + 6];
+
+                const x0 = isRel ? (cx0 + dx) : dx;
+                const y0 = isRel ? (cy0 + dy) : dy;
+                const xw = warpX(x0);
+
+                if (isRel) {
+                    out.push(cmd, rx, ry, rot, largeArc, sweep, xw - cxw, y0 - cyw);
+                } else {
+                    out.push(cmd, rx, ry, rot, largeArc, sweep, xw, y0);
+                }
+
+                cx0 = x0; cy0 = y0;
+                cxw = xw; cyw = y0;
+            }
+        }
+    }
+
+    return out.join(" ");
+}
+
 
 	function compileNumberPattern(pattern, opts = {}) {
 	    const interpretPercent = !!opts.interpretPercent;
@@ -6939,50 +10614,18 @@ function dzvGetVisualBBoxInSvgUnits(el, svgRoot) {
 	// unchanged API; now robust to packed vs expanded path syntax
 	const lerpPathDCache = new Map();
 
-	function lerpPathD_orig(p, t) {
-	    const cacheKey = String(p.id) + "XX" + String(Math.round(t * 100));
-	    if (lerpPathDCache.has(cacheKey)) {
-	        return lerpPathDCache.get(cacheKey);
-	    }
-	    let d0 = p.getAttribute("lin-d");
-	    let d1 = p.getAttribute("warp-d");
-	    d0 = normalizePathDStrict(d0);
-	    d1 = normalizePathDStrict(d1);
-	    const tok0 = d0.match(/[A-Za-z]|[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?/g);
-	    const tok1 = d1.match(/[A-Za-z]|[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?/g);
-	    if (!tok0 || !tok1 || tok0.length !== tok1.length) {
-	        throw new Error("Path mismatch");
-	    }
-	    const out = new Array(tok0.length);
-	    for (let i = 0; i < tok0.length; i++) {
-	        const a = tok0[i],
-	            b = tok1[i];
-	        const ca = a.charCodeAt(0),
-	            cb = b.charCodeAt(0);
-	        const aIsCmd = (ca >= 65 && ca <= 90) || (ca >= 97 && ca <= 122);
-	        const bIsCmd = (cb >= 65 && cb <= 90) || (cb >= 97 && cb <= 122);
-	        if (aIsCmd || bIsCmd) {
-	            if (a !== b) throw new Error("Command mismatch");
-	            out[i] = a;
-	        } else {
-	            out[i] = String(lerp(+a, +b, t));
-	        }
-	    }
-	    const oo = out.join(" ");
-	    lerpPathDCache.set(cacheKey, oo);
-	    return oo;
-	}
 
-	function lerpPathD(p, t) {
+	function lerpPathD(p, t, lind="lin-d", warpd = "warp-d") {
 	    // Fast path morph: parse + normalize once per element, cache per quantized step.
 	    // Preserves original semantics: still uses normalizePathDStrict and token structure matching.
+		
 	    const k = Math.max(0, Math.min(100, Math.round(t * 100)));
 	    if (!lerpPathD._parsed) lerpPathD._parsed = new WeakMap();
 	    const wm = lerpPathD._parsed;
 	    let st = wm.get(p);
 	    if (!st) {
-	        let d0 = p.getAttribute("lin-d");
-	        let d1 = p.getAttribute("warp-d");
+	        let d0 = p.getAttribute(lind);
+	        let d1 = p.getAttribute(warpd);
 	        if (!d0 || !d1) return "";
 	        d0 = normalizePathDStrict(d0);
 	        d1 = normalizePathDStrict(d1);
@@ -7101,11 +10744,29 @@ function dzvGetVisualBBoxInSvgUnits(el, svgRoot) {
 	    if (typeof warpPathD !== "function") throw new Error("dzvPathWarpRegister: warpPathD is not defined");
 	    let count = 0;
 	    const paths = root.querySelectorAll(pathSelector);
+		/*
+		const globalSimplifier = window.dzvSimplifierLin;
+		let batch = globalSimplifier.run(paths);
+		for (let i = 0; i < batch.length; i++) {
+			const r = batch[i];
+			if (!r || !r.el) continue;
+			r.el.setAttribute("d-simple", r.d_simplified);
+			//console.log(r.d_simplified);
+		}
+		*/
+
 	    paths.forEach((p) => {
 	        if (filter && !filter(p)) return;
 	        dzvElementRegisterWarp(p, "d", viewBoxStr, force);
+			//dzvElementRegisterWarp(p, "d-simple", viewBoxStr, force);
+			//p.removeAttribute("d-simple");
 	        count++;
 	    });
+		
+		
+		
+		
+  
 	    return count;
 	}
 	dzvRegisterGeom(svg);
@@ -7616,66 +11277,6 @@ function dzvGetVisualBBoxInSvgUnits(el, svgRoot) {
 		  
 		  (function(){
  
-	function setSEFilterO(lgt, str, ctr){
-	  let st = document.getElementById("se_override");
-	  if (!st){
-		st = document.createElement("style");
-		st.id = "se_override";
-		document.head.appendChild(st);
-	  }
-	  st.textContent =
-	`g.s_e * {
-	  -webkit-filter: brightness(${lgt}) saturate(${str}) contrast(${ctr});
-	  filter:         brightness(${lgt}) saturate(${str}) contrast(${ctr});
-	}`;
-	}
-	
-function setSEFilterOO(svg, lgt, str, ctr) {
-  //let svg = document.querySelector("svg"); // Adjust if needed
-  //if (!svg) return;
-
-  let filter = svg.querySelector("#dzv_se_filter");
-  if (!filter) {
-    filter = document.createElementNS("http://www.w3.org/2000/svg", "filter");
-    filter.setAttribute("id", "dzv_se_filter");
-    let colorMatrix = document.createElementNS("http://www.w3.org/2000/svg", "feColorMatrix");
-    colorMatrix.setAttribute("type", "saturate");
-    colorMatrix.setAttribute("values", "1");
-    filter.appendChild(colorMatrix);
-
-    const compTransfer = document.createElementNS("http://www.w3.org/2000/svg", "feComponentTransfer");
-    ["R", "G", "B"].forEach(channel => {
-      const func = document.createElementNS("http://www.w3.org/2000/svg", "feFunc" + channel);
-      func.setAttribute("type", "linear");
-      func.setAttribute("slope", "1");
-      func.setAttribute("intercept", "0");
-      compTransfer.appendChild(func);
-    });
-    filter.appendChild(compTransfer);
-    svg.querySelector("defs")?.appendChild(filter);
-  }
-
-  // Set saturation (1 means no change)
-  filter.querySelector("feColorMatrix").setAttribute("values", str);
-
-  // Set brightness/contrast
-  const slope = Number(ctr);
-  const intercept = Number(lgt) - slope;
-
-  filter.querySelectorAll("feFuncR, feFuncG, feFuncB").forEach(func => {
-    func.setAttribute("slope", slope);
-    func.setAttribute("intercept", intercept);
-  });
-
-  // Apply filter via class
-  let st = document.getElementById("se_override");
-  if (!st) {
-    st = document.createElement("style");
-    st.id = "se_override";
-    document.head.appendChild(st);
-  }
-  st.textContent = `g.s_e * { filter: url(#dzv_se_filter); }`;
-}
 
 
 // Direct replacement for your setSEFilter(lgt,str,ctr) that:
@@ -7751,6 +11352,34 @@ function setSEFilter(svg, lgt, str, ctr){
 `g.s_e *:not(.${SKIP}):not(.${SKIP} *){ filter: url(#dzv_se_filter); }`;
 }
 
+function setSEFilter111(svg, lgt, str, ctr){
+  const skipEl = (typeof window !== "undefined") ? window._dzvSESkipEl : null;
+  const nodes = svg.querySelectorAll("g.s_e *");
+
+  const f = `brightness(${lgt}) saturate(${str}) contrast(${ctr})`;
+
+  // kill previous SVG-filter override if present
+  const st = document.getElementById("se_override");
+  if (st) st.remove();
+
+  // remove old shared SVG filter application if present
+  const oldDefs = svg.querySelector("defs");
+  if (oldDefs){
+    const oldFilter = oldDefs.querySelector("#dzv_se_filter");
+    if (oldFilter) oldFilter.remove();
+  }
+
+  for (let i = 0; i < nodes.length; i++) {
+    const el = nodes[i];
+    if (skipEl && (el === skipEl || skipEl.contains(el))) {
+      el.style.removeProperty("filter");
+      el.removeAttribute("filter");
+      continue;
+    }
+    el.style.filter = f;
+    el.removeAttribute("filter");
+  }
+}
 
 // Apply brightness/saturate/contrast to ONE specific SVG element (path/use/g/etc)
 // Creates a unique SVG <filter> per element (or reuses it), updates values, applies it.
@@ -7822,6 +11451,16 @@ window.dzv.dzv_set_lsc = function (svg, el, lgt, str, ctr){
   // apply to this element only
   el.setAttribute("filter", "url(#" + fid + ")");
 }
+
+window.dzv.dzv_set_lsc111 = function (svg, el, lgt, str, ctr){
+  if (window.dzv.dzv_set_lsc_lock > 0) return;
+  if (!el) return;
+
+  const f = `brightness(${lgt}) saturate(${str}) contrast(${ctr})`;
+
+  el.style.filter = f;
+  el.removeAttribute("filter");
+};
 
 
  svg.style.setProperty("--lgt", String(window.dzv.dzvLoadVariable("--lgt", 1)));
@@ -19271,8 +22910,17 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            const a = (N_FRAMES === 1) ? 0 : (fi / (N_FRAMES - 1));
 	            const tt = frame_t0 + a * denom;
 	            const ds = new Array(listp.length);
-	            for (let j = 0; j < listp.length; j++) ds[j] = lerpPathD(listp[j], tt);
-	            frames_d[fi] = ds;
+	            for (let j = 0; j < listp.length; j++) 
+				  {
+				    if (fi === 0)
+					  ds[j] = listp[j].getAttribute("lin-d");
+					else if (fi === N_FRAMES - 1) 
+					  ds[j] = listp[j].getAttribute("warp-d");
+					else 
+				      //ds[j] = lerpPathD(listp[j], tt, "lin-d-simple", "warp-d-simple");
+					  ds[j] = lerpPathD(listp[j], tt, "lin-d", "warp-d");
+	                frames_d[fi] = ds;
+				  }
 	            if (frames_x) {
 	                const xs = new Array(listt.length);
 	                for (let j = 0; j < listt.length; j++) {
@@ -19411,7 +23059,12 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    }
 		
 		window.dzvSkipMirrorHidePropagation = true;
-		const axes = svg.querySelector("g#axes_1");
+		/*
+		const axes = window.dzvFocusMajor ? 
+		svg.querySelector('g#dzv-focus-wrapper g.s_e use') :
+		svg.querySelector("g#axes_1 g.s_e use");
+		*/
+		const axes = svg.querySelector('g#axes_1 g.s_e use');
 		const patch2 = axes.querySelector('g#patch_2');
 
 		const hFull = window.dzvHideFullyInvisibleDeep(
@@ -19449,7 +23102,10 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                const p = cache.listp[j];
 	                if (setp && !setp.has(p)) continue;
 	                const d = ds[j];
-	                if (d != null && p.getAttribute("d") !== d) p.setAttribute("d", d);
+	                if (d != null && p.getAttribute("d") !== d) 
+					 {
+					   p.setAttribute("d", d);
+					 }
 	            }
 	        }
 	        if (cache.frames_x) {
@@ -19471,9 +23127,14 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            window.dzv.stackTrack.updateBandRect();
 	        return fi;
 	    }
-
+// Cached mode needs visible sets for speed
+	    let [setp, sett] = useCachedFrames ? dzvVisibleSets(svg, false) : [null, null];
+		let ticcnt = 0;
 	    function finalizeCommon() {
-	        dzvApplyWarpingMeta(svg, tTarget);
+	        //dzvApplyWarpingMeta(svg, tTarget);
+			applyCachedFrame(tTarget, null, null);
+			ticcnt++;
+			
 	        if (dzv._warpHideRestore) {
 	            try {
 	                dzv._warpHideRestore();
@@ -19485,11 +23146,10 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        window.dzv.now_warping = false;
 			hFull.restore();
 			window.dzvSkipMirrorHidePropagation = false;
-
+			console.log(ticcnt);
 
 	    }
-	    // Cached mode needs visible sets for speed
-	    let [setp, sett] = useCachedFrames ? dzvVisibleSets(svg, false) : [null, null];
+	    
 	    // Reset per-run painted index history
 	    if (useCachedFrames && cache) cache.fis = [];
 
@@ -19575,17 +23235,19 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                return;
 	            }
 	            applyCachedFrame(fi / (N_FRAMES - 1), setp, sett);
+				ticcnt+=1;
 	            requestAnimationFrame(step);
 	        }
 	        requestAnimationFrame(step);
 	    }
 
-		//let ticcnt = 0;
+		
 	    function tick(now) {
 	        const u = Math.max(0, Math.min(1, (now - tStart) / dur));
 	        let tt = t0 + (t1 - t0) * easeInOut(u);
 	        if (tt < 0) tt = 0;
 	        if (tt > 1) tt = 1;
+			
 
 	        if (u < 1) {
 				//console.log(++ticcnt);
@@ -19597,12 +23259,14 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	                dzvApplyWarpingMeta(svg, tt);
 	                if (window.dzv.scale_warp) window.dzv.scale_warp(tt);
 	            }
+				ticcnt+=1;
 	            requestAnimationFrame(tick);
 	            return;
 	        }
 	        // end
 	        if (!useCachedFrames) {
 	            //dzvApplyWarpingMeta(svg, tTarget);
+				console.log(ticcnt);
 	            finalizeCommon();
 	            return;
 	        }
@@ -19618,6 +23282,8 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	window.dzv.warpingFactor = window.dzv.warpingFactor ?? 0;
 	window.dzv.isWarping = () => window.dzv.warpingFactor > 0 && window.dzv.warpingFactor < 1;
 	window.dzv.isWarped = () => window.dzv.warpingFactor === 1;
+	
+	/*
 	// hard set (instant swap / or set intermediate)
 	function dzvSetWarp(svg, t) {
 	    dzvApplyWarpingMeta(svg, t);
@@ -19629,6 +23295,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    const t = (+dzv.warpingFactor === 1) ? 0 : 1;
 	    dzvSetWarp(svg, t);
 	}
+	*/
 	// animated swap (0 <-> 1)
 	function dzvToggleWarpAnimated(svg, ms = 500) {
 	    const dzv = window.dzv || {};
@@ -22305,6 +25972,9 @@ function applyLayout(items) {
   }
 
   let hFull = null;
+  let paths = [];
+  let batch = null;
+  
   function _beginGestureIfReady() {
     if (gActive) return;
     if (pointers.size !== 2) return;
@@ -22323,24 +25993,46 @@ function applyLayout(items) {
 
     gActive = true;
     state._gesture2Active = true;
+	
+	//const t0 = performance.now();
 	window.dzvSkipMirrorHidePropagation = true;
-	const axes = svg.querySelector("g#axes_1");
+	const axes = svg.querySelector("g#axes_1 g.s_e use");
 	const patch2 = axes.querySelector('g#patch_2');
 
 	hFull = window.dzvHideFullyInvisibleDeep(
 	  Array.from(axes.children).filter(el => el !== patch2)
 	);
-	window.dzvPathMirror.forEach(api => {api.sync();api.stop_observer();});
+	
+	//let t1 = performance.now();
+	//console.log("1. ms =", t1 - t0);
+	
+	paths = [];
+	window.dzvPathMirror.forEach(api => {api.sync();api.stop_observer();paths.push(api.getMirrorPath());});
+	//t1 = performance.now();
+	//console.log("2. ms =", t1 - t0);
+	batch = window.dzvSimplifier.run(paths);
+	//t1 = performance.now();
+	//console.log("3. ms =", t1 - t0);
+	window.dzvApplySimplifiedBatch(batch);
+	
+	//t1 = performance.now();
+	//console.log("4. ms =", t1 - t0);
 		
   }
 
   function _endGesture() {
     gActive = false;
     state._gesture2Active = false;
-	hFull.restore();
-	window.dzvSkipMirrorHidePropagation = false;
-	hFull = null;		
-	window.dzvPathMirror.forEach(api => {api.start_observer();});
+	if (hFull)
+	  {
+		hFull.restore();
+		window.dzvSkipMirrorHidePropagation = false;
+		hFull = null;		
+		
+		window.dzvPathMirror.forEach(api => {api.start_observer();});
+		}
+    if (batch)
+	  batch = null;
   }
 
   function onPointerDown(ev) {
