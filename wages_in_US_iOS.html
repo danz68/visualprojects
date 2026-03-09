@@ -22890,7 +22890,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	}
 	let times_run = 0;
 	window.dzv.now_warping = false;
-	const TOTAL_STEPS = 21;
+	const TOTAL_STEPS = 16;
 
 	function dzvPrecacheWarpFrames(svg, N_FRAMES = 10) {
 	    try {
@@ -23015,7 +23015,9 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	}
 	const all_to_hide = hidden_cache();
 
-	 function dzvAnimateWarp(svg, tTarget, ms = 350) {
+
+
+	 function dzvAnimateWarpEx(svg, tTarget, ms = 350) {
 	   if (window.dzv.now_warping) return;
 	
 	    const dzv = (window.dzv = window.dzv || {});
@@ -23146,7 +23148,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	        window.dzv.now_warping = false;
 			hFull.restore();
 			window.dzvSkipMirrorHidePropagation = false;
-			console.log(ticcnt);
+			//console.log(ticcnt);
 
 	    }
 	    
@@ -23278,6 +23280,811 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	    requestAnimationFrame(tick);
 	}
 	// status helpers (you already had these earlier)
+
+function dzvAnimateWarpPrevOK(svg, tTarget, ms = 350) {
+  if (window.dzv.now_warping) return;
+
+  const dzv = (window.dzv = window.dzv || {});
+  const t0 = Math.max(0, Math.min(1, +dzv.warpingFactor || 0));
+  const t1 = Math.max(0, Math.min(1, +tTarget || 0));
+  const dur = Math.max(1, +ms || 350);
+  let tStart;
+
+  if (dzv._warpHideRestore) {
+    try { dzv._warpHideRestore(); } catch (_) {}
+    dzv._warpHideRestore = null;
+  }
+
+  const inFocusMode = (window.dzvFocusMajor != null) || (window.dzvFocusMajorId != null);
+  if (!inFocusMode && (t0 !== t1)) {
+    const hidden = [];
+    for (let k = 0; k < all_to_hide.length; k++) {
+      const el = all_to_hide[k];
+      const rec = {
+        el: el,
+        display: el.style.display,
+        pointerEvents: el.style.pointerEvents,
+        visibility: el.style.visibility,
+        opacity: el.style.opacity
+      };
+      hidden.push(rec);
+      el.style.display = "none";
+    }
+    dzv._warpHideRestore = function () {
+      for (let i = 0; i < hidden.length; i++) {
+        const r = hidden[i];
+        r.el.style.display = r.display || "";
+        r.el.style.pointerEvents = r.pointerEvents || "";
+        r.el.style.visibility = r.visibility || "";
+        r.el.style.opacity = r.opacity || "";
+      }
+    };
+  }
+
+  window.dzvSkipMirrorHidePropagation = true;
+
+  const axes = svg.querySelector('g#axes_1 g.s_e use');
+  const patch2 = axes.querySelector('g#patch_2');
+
+  const hFull = window.dzvHideFullyInvisibleDeep(
+    Array.from(axes.children).filter(el => el !== patch2)
+  );
+
+  function easeInOut(x) {
+    return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+  }
+
+  const cache = (dzv && dzv._warpPrecache) ? dzv._warpPrecache : null;
+  const useCachedFrames = ((t0 !== t1) && cache && cache.ready && cache.frames_d && cache.frames_d.length);
+
+  function fiFromTT(tt) {
+    const cache = dzv._warpPrecache;
+    if (!cache || !cache.ready) return 0;
+    const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
+    const denom = (cache.frame_t1 - cache.frame_t0) || 1;
+    let a = (tt - cache.frame_t0) / denom;
+    if (a < 0) a = 0;
+    if (a > 1) a = 1;
+    let fi = 0;
+    if (N_FRAMES > 1) fi = Math.round(a * (N_FRAMES - 1));
+    if (fi < 0) fi = 0;
+    if (fi > (N_FRAMES - 1)) fi = (N_FRAMES - 1);
+    return fi;
+  }
+
+  function applyCachedFrame(tt, setp, sett) {
+    const dzv = (window.dzv = window.dzv || {});
+    const cache = dzv._warpPrecache;
+    if (!cache || !cache.ready) return 0;
+    if (!((tt > 0) && (tt < 1))) {
+      if (window.dzv.hide_tip) window.dzv.hide_tip();
+      if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+    }
+    const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
+    const denom = (cache.frame_t1 - cache.frame_t0) || 1;
+    let a = (tt - cache.frame_t0) / denom;
+    if (a < 0) a = 0;
+    if (a > 1) a = 1;
+    let fi = 0;
+    if (N_FRAMES > 1) fi = Math.round(a * (N_FRAMES - 1));
+    if (fi < 0) fi = 0;
+    if (fi > (N_FRAMES - 1)) fi = (N_FRAMES - 1);
+    const ds = cache.frames_d[fi];
+    if (ds) {
+      for (let j = 0; j < cache.listp.length; j++) {
+        const p = cache.listp[j];
+        if (setp && !setp.has(p)) continue;
+        const d = ds[j];
+        if (d != null && p.getAttribute("d") !== d) {
+          p.setAttribute("d", d);
+        }
+      }
+    }
+    if (cache.frames_x) {
+      const xs = cache.frames_x[fi];
+      if (xs) {
+        for (let j = 0; j < cache.listt.length; j++) {
+          const tx = cache.listt[j];
+          if (sett && !sett.has(tx)) continue;
+          const x = xs[j];
+          if (x != null && isFinite(x) && tx.getAttribute("x") !== String(x)) tx.setAttribute("x", String(x));
+        }
+      }
+    }
+    const tt2 = cache.frame_t0 + ((N_FRAMES > 1 ? (fi / (N_FRAMES - 1)) : 0) * denom);
+    dzv.warpingFactor = Math.max(cache.frame_t0, Math.min(cache.frame_t1, tt2));
+    if (window.dzv && window.dzv.dzvLabelsOnWarpFrame) window.dzv.dzvLabelsOnWarpFrame();
+    if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
+    if (window.dzv.stackTrack && window.dzv.stackTrack.isActive()) window.dzv.stackTrack.updateBandRect();
+    return fi;
+  }
+
+  function applyCachedFrameByFi(fi, setp, sett) {
+    const dzv = (window.dzv = window.dzv || {});
+    const cache = dzv._warpPrecache;
+    if (!cache || !cache.ready) return 0;
+
+    const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
+    if (fi < 0) fi = 0;
+    if (fi > (N_FRAMES - 1)) fi = (N_FRAMES - 1);
+
+    const tt2 = cache.frame_t0 + ((N_FRAMES > 1 ? (fi / (N_FRAMES - 1)) : 0) * ((cache.frame_t1 - cache.frame_t0) || 1));
+    if (!((tt2 > 0) && (tt2 < 1))) {
+      if (window.dzv.hide_tip) window.dzv.hide_tip();
+      if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+    }
+
+    const ds = cache.frames_d[fi];
+    if (ds) {
+      for (let j = 0; j < cache.listp.length; j++) {
+        const p = cache.listp[j];
+        if (setp && !setp.has(p)) continue;
+        const d = ds[j];
+        if (d != null && p.getAttribute("d") !== d) {
+          p.setAttribute("d", d);
+        }
+      }
+    }
+    if (cache.frames_x) {
+      const xs = cache.frames_x[fi];
+      if (xs) {
+        for (let j = 0; j < cache.listt.length; j++) {
+          const tx = cache.listt[j];
+          if (sett && !sett.has(tx)) continue;
+          const x = xs[j];
+          if (x != null && isFinite(x) && tx.getAttribute("x") !== String(x)) tx.setAttribute("x", String(x));
+        }
+      }
+    }
+
+    dzv.warpingFactor = Math.max(cache.frame_t0, Math.min(cache.frame_t1, tt2));
+    if (window.dzv && window.dzv.dzvLabelsOnWarpFrame) window.dzv.dzvLabelsOnWarpFrame();
+    if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
+    if (window.dzv.stackTrack && window.dzv.stackTrack.isActive()) window.dzv.stackTrack.updateBandRect();
+    return fi;
+  }
+
+  let [setp, sett] = useCachedFrames ? dzvVisibleSets(svg, false) : [null, null];
+  let ticcnt = 0;
+
+  function finalizeCommon() {
+    applyCachedFrame(tTarget, null, null);
+    ticcnt++;
+
+    if (dzv._warpHideRestore) {
+      try { dzv._warpHideRestore(); } catch (_) {}
+      dzv._warpHideRestore = null;
+    }
+    if (window.dzv.scale_warp) window.dzv.scale_warp(tTarget);
+    if (window.dzv.swap_axis_warp) window.dzv.swap_axis_warp();
+    window.dzv.now_warping = false;
+    hFull.restore();
+    window.dzvSkipMirrorHidePropagation = false;
+	console.log(ticcnt);
+  }
+
+  if (useCachedFrames && cache) cache.fis = [];
+
+  function mirroredTailList() {
+    const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
+    const targetFi = (t1 <= 0) ? 0 : (N_FRAMES - 1);
+    const fis = (cache.fis || []).slice();
+
+    const used = [];
+    const seen = new Set();
+    for (let i = 0; i < fis.length; i++) {
+      const v = fis[i] | 0;
+      if (!seen.has(v)) {
+        seen.add(v);
+        used.push(v);
+      }
+    }
+
+    if (!used.length) return null;
+
+    const mirror = (fi) => (N_FRAMES - 1) - fi;
+
+    let tail = used.map(mirror);
+    if (targetFi === 0) tail.sort((a, b) => b - a);
+    else tail.sort((a, b) => a - b);
+
+    const lastPaintedFi = used[used.length - 1];
+    const dir = (targetFi > lastPaintedFi) ? +1 : -1;
+    const filtered = [];
+    const seen2 = new Set();
+
+    for (let i = 0; i < tail.length; i++) {
+      const fi = tail[i];
+      if (fi < 0 || fi > (N_FRAMES - 1)) continue;
+      if (seen2.has(fi)) continue;
+      if (dir > 0) {
+        if (fi >= lastPaintedFi && fi <= targetFi) {
+          seen2.add(fi);
+          filtered.push(fi);
+        }
+      } else {
+        if (fi <= lastPaintedFi && fi >= targetFi) {
+          seen2.add(fi);
+          filtered.push(fi);
+        }
+      }
+    }
+
+    if (!seen2.has(targetFi)) filtered.push(targetFi);
+    return filtered;
+  }
+
+  function mirroredTailAndCommit() {
+    const filtered = mirroredTailList();
+    if (!filtered || !filtered.length) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(finalizeCommon);
+      });
+      return;
+    }
+
+    let idx = 0;
+    function step() {
+      const fi = filtered[idx++];
+      if (fi == null) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(finalizeCommon);
+        });
+        return;
+      }
+      applyCachedFrameByFi(fi, setp, sett);
+      ticcnt += 1;
+      requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  function tick(now) {
+    const u = Math.max(0, Math.min(1, (now - tStart) / dur));
+    let tt = t0 + (t1 - t0) * easeInOut(u);
+    if (tt < 0) tt = 0;
+    if (tt > 1) tt = 1;
+
+    if (u < 1) {
+      if (useCachedFrames) {
+        const fi = applyCachedFrame(tt, setp, sett);
+        if (cache && cache.fis) cache.fis.push(fi);
+      } else {
+        dzvApplyWarpingMeta(svg, tt);
+        if (window.dzv.scale_warp) window.dzv.scale_warp(tt);
+      }
+      ticcnt += 1;
+      requestAnimationFrame(tick);
+      return;
+    }
+
+    if (!useCachedFrames) {
+      finalizeCommon();
+      return;
+    }
+
+    mirroredTailAndCommit();
+  }
+
+  function playBufferedCached() {
+    const PLAY_FPS = 24;
+    const DT = 1000 / PLAY_FPS;
+
+    const plannedFis = [];
+    const fisForTail = [];
+
+    const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
+    const mainSteps = Math.max(1, Math.round(dur / DT));
+
+    for (let s = 0; s < mainSteps; s++) {
+      const elapsed = s * DT;
+      const u = Math.max(0, Math.min(1, elapsed / dur));
+      let tt = t0 + (t1 - t0) * easeInOut(u);
+      if (tt < 0) tt = 0;
+      if (tt > 1) tt = 1;
+      const fi = fiFromTT(tt);
+      plannedFis.push(fi);
+      fisForTail.push(fi);
+    }
+
+    cache.fis = fisForTail.slice();
+
+    const tailFis = mirroredTailList();
+    const allFis = tailFis && tailFis.length ? plannedFis.concat(tailFis) : plannedFis.slice();
+
+    let idx = 0;
+    let nextAt = performance.now();
+
+    function step() {
+      if (idx >= allFis.length) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(finalizeCommon);
+        });
+        return;
+      }
+      applyCachedFrameByFi(allFis[idx], setp, sett);
+      ticcnt += 1;
+      idx += 1;
+      nextAt += DT;
+      const wait = Math.max(0, nextAt - performance.now());
+      setTimeout(() => {
+        requestAnimationFrame(step);
+      }, wait);
+    }
+
+    requestAnimationFrame(step);
+  }
+
+  window.dzv.now_warping = true;
+  tStart = performance.now();
+
+  if (useCachedFrames) {
+    playBufferedCached();
+  } else {
+    requestAnimationFrame(tick);
+  }
+}
+
+
+function dzvAnimateWarp(svg, tTarget, ms = 350) {
+  if (window.dzv.now_warping) return;
+
+  const dzv = (window.dzv = window.dzv || {});
+  const t0 = Math.max(0, Math.min(1, +dzv.warpingFactor || 0));
+  const t1 = Math.max(0, Math.min(1, +tTarget || 0));
+  const dur = Math.max(1, +ms || 350);
+  const BUFFER_WARM = 3;
+  const PLAY_FPS = 11;
+
+  let tStart;
+
+  if (dzv._warpHideRestore) {
+    try { dzv._warpHideRestore(); } catch (_) {}
+    dzv._warpHideRestore = null;
+  }
+
+  const inFocusMode = (window.dzvFocusMajor != null) || (window.dzvFocusMajorId != null);
+  if (!inFocusMode && (t0 !== t1)) {
+    const hidden = [];
+    for (let k = 0; k < all_to_hide.length; k++) {
+      const el = all_to_hide[k];
+      const rec = {
+        el: el,
+        display: el.style.display,
+        pointerEvents: el.style.pointerEvents,
+        visibility: el.style.visibility,
+        opacity: el.style.opacity
+      };
+      hidden.push(rec);
+      el.style.display = "none";
+    }
+    dzv._warpHideRestore = function () {
+      for (let i = 0; i < hidden.length; i++) {
+        const r = hidden[i];
+        r.el.style.display = r.display || "";
+        r.el.style.pointerEvents = r.pointerEvents || "";
+        r.el.style.visibility = r.visibility || "";
+        r.el.style.opacity = r.opacity || "";
+      }
+    };
+  }
+
+  window.dzvSkipMirrorHidePropagation = true;
+
+  const axes = svg.querySelector('g#axes_1 g.s_e use');
+  const patch2 = axes.querySelector('g#patch_2');
+
+  const hFull = window.dzvHideFullyInvisibleDeep(
+    Array.from(axes.children).filter(el => el !== patch2)
+  );
+
+  function easeInOut(x) {
+    return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+  }
+
+  const cache = (dzv && dzv._warpPrecache) ? dzv._warpPrecache : null;
+  const useCachedFrames = ((t0 !== t1) && cache && cache.ready && cache.frames_d && cache.frames_d.length);
+
+  function applyCachedFrame(tt, setp, sett) {
+    const dzv = (window.dzv = window.dzv || {});
+    const cache = dzv._warpPrecache;
+    if (!cache || !cache.ready) return 0;
+    if (!((tt > 0) && (tt < 1))) {
+      if (window.dzv.hide_tip) window.dzv.hide_tip();
+      if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+    }
+    const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
+    const denom = (cache.frame_t1 - cache.frame_t0) || 1;
+    let a = (tt - cache.frame_t0) / denom;
+    if (a < 0) a = 0;
+    if (a > 1) a = 1;
+    let fi = 0;
+    if (N_FRAMES > 1) fi = Math.round(a * (N_FRAMES - 1));
+    if (fi < 0) fi = 0;
+    if (fi > (N_FRAMES - 1)) fi = (N_FRAMES - 1);
+    const ds = cache.frames_d[fi];
+    if (ds) {
+      for (let j = 0; j < cache.listp.length; j++) {
+        const p = cache.listp[j];
+        if (setp && !setp.has(p)) continue;
+        const d = ds[j];
+        if (d != null && p.getAttribute("d") !== d) {
+          p.setAttribute("d", d);
+        }
+      }
+    }
+    if (cache.frames_x) {
+      const xs = cache.frames_x[fi];
+      if (xs) {
+        for (let j = 0; j < cache.listt.length; j++) {
+          const tx = cache.listt[j];
+          if (sett && !sett.has(tx)) continue;
+          const x = xs[j];
+          if (x != null && isFinite(x) && tx.getAttribute("x") !== String(x)) tx.setAttribute("x", String(x));
+        }
+      }
+    }
+    const tt2 = cache.frame_t0 + ((N_FRAMES > 1 ? (fi / (N_FRAMES - 1)) : 0) * denom);
+    dzv.warpingFactor = Math.max(cache.frame_t0, Math.min(cache.frame_t1, tt2));
+    if (window.dzv && window.dzv.dzvLabelsOnWarpFrame) window.dzv.dzvLabelsOnWarpFrame();
+    if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
+    if (window.dzv.stackTrack && window.dzv.stackTrack.isActive())
+      window.dzv.stackTrack.updateBandRect();
+    return fi;
+  }
+
+  let [setp, sett] = useCachedFrames ? dzvVisibleSets(svg, false) : [null, null];
+  let ticcnt = 0;
+
+  function finalizeCommon() {
+    applyCachedFrame(tTarget, null, null);
+    ticcnt++;
+
+    if (dzv._warpHideRestore) {
+      try { dzv._warpHideRestore(); } catch (_) {}
+      dzv._warpHideRestore = null;
+    }
+    if (window.dzv.scale_warp) window.dzv.scale_warp(tTarget);
+    if (window.dzv.swap_axis_warp) window.dzv.swap_axis_warp();
+    window.dzv.now_warping = false;
+    hFull.restore();
+    window.dzvSkipMirrorHidePropagation = false;
+	console.log(ticcnt);
+  }
+
+  if (useCachedFrames && cache) cache.fis = [];
+
+  function mirroredTailAndCommit() {
+    const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
+    const targetFi = (t1 <= 0) ? 0 : (N_FRAMES - 1);
+    const fis = (cache.fis || []).slice();
+    const used = [];
+    const seen = new Set();
+    for (let i = 0; i < fis.length; i++) {
+      const v = fis[i] | 0;
+      if (!seen.has(v)) {
+        seen.add(v);
+        used.push(v);
+      }
+    }
+    if (!used.length) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(finalizeCommon);
+      });
+      return;
+    }
+    const mirror = (fi) => (N_FRAMES - 1) - fi;
+    let tail = used.map(mirror);
+    if (targetFi === 0) tail.sort((a, b) => b - a);
+    else tail.sort((a, b) => a - b);
+
+    const lastPaintedFi = used[used.length - 1];
+    const dir = (targetFi > lastPaintedFi) ? +1 : -1;
+    const filtered = [];
+    const seen2 = new Set();
+    for (let i = 0; i < tail.length; i++) {
+      const fi = tail[i];
+      if (fi < 0 || fi > (N_FRAMES - 1)) continue;
+      if (seen2.has(fi)) continue;
+      if (dir > 0) {
+        if (fi >= lastPaintedFi && fi <= targetFi) {
+          seen2.add(fi);
+          filtered.push(fi);
+        }
+      } else {
+        if (fi <= lastPaintedFi && fi >= targetFi) {
+          seen2.add(fi);
+          filtered.push(fi);
+        }
+      }
+    }
+    if (!seen2.has(targetFi)) filtered.push(targetFi);
+
+    let idx = 0;
+    function step() {
+      const fi = filtered[idx++];
+      if (fi == null) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(finalizeCommon);
+        });
+        return;
+      }
+      applyBufferedFi(fi);
+      ticcnt += 1;
+      requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  function tick(now) {
+    const u = Math.max(0, Math.min(1, (now - tStart) / dur));
+    let tt = t0 + (t1 - t0) * easeInOut(u);
+    if (tt < 0) tt = 0;
+    if (tt > 1) tt = 1;
+
+    if (u < 1) {
+      if (useCachedFrames) {
+        const fi = applyCachedFrame(tt, setp, sett);
+        if (cache && cache.fis) cache.fis.push(fi);
+      } else {
+        dzvApplyWarpingMeta(svg, tt);
+        if (window.dzv.scale_warp) window.dzv.scale_warp(tt);
+      }
+      ticcnt += 1;
+      requestAnimationFrame(tick);
+      return;
+    }
+    if (!useCachedFrames) {
+      finalizeCommon();
+      return;
+    }
+    mirroredTailAndCommit();
+  }
+
+  if (!useCachedFrames) {
+    window.dzv.now_warping = true;
+    tStart = performance.now();
+    requestAnimationFrame(tick);
+    return;
+  }
+
+  const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
+  const denom = (cache.frame_t1 - cache.frame_t0) || 1;
+  const dt = 1000 / PLAY_FPS;
+
+  const visPathIdx = [];
+  const visPathEls = [];
+  for (let j = 0; j < cache.listp.length; j++) {
+    const p = cache.listp[j];
+    if (setp && !setp.has(p)) continue;
+    visPathIdx.push(j);
+    visPathEls.push(p);
+  }
+
+  const visTextIdx = [];
+  const visTextEls = [];
+  for (let j = 0; j < cache.listt.length; j++) {
+    const tx = cache.listt[j];
+    if (sett && !sett.has(tx)) continue;
+    visTextIdx.push(j);
+    visTextEls.push(tx);
+  }
+
+  function ttToFi(tt) {
+    let a = (tt - cache.frame_t0) / denom;
+    if (a < 0) a = 0;
+    if (a > 1) a = 1;
+    let fi = 0;
+    if (N_FRAMES > 1) fi = Math.round(a * (N_FRAMES - 1));
+    if (fi < 0) fi = 0;
+    if (fi > (N_FRAMES - 1)) fi = (N_FRAMES - 1);
+    return fi;
+  }
+
+  const plannedFis = [];
+  const plannedFisForMirror = [];
+  const stepsMain = Math.max(1, Math.round(dur / dt));
+  for (let s = 0; s < stepsMain; s++) {
+    const elapsed = s * dt;
+    const u = Math.max(0, Math.min(1, elapsed / dur));
+    let tt = t0 + (t1 - t0) * easeInOut(u);
+    if (tt < 0) tt = 0;
+    if (tt > 1) tt = 1;
+    const fi = ttToFi(tt);
+    plannedFis.push(fi);
+    plannedFisForMirror.push(fi);
+  }
+  cache.fis = plannedFisForMirror.slice();
+
+  const targetFi = (t1 <= 0) ? 0 : (N_FRAMES - 1);
+  const used = [];
+  {
+    const seen = new Set();
+    for (let i = 0; i < plannedFisForMirror.length; i++) {
+      const v = plannedFisForMirror[i] | 0;
+      if (!seen.has(v)) {
+        seen.add(v);
+        used.push(v);
+      }
+    }
+  }
+
+  let tailFiltered = [];
+  if (used.length) {
+    const mirror = (fi) => (N_FRAMES - 1) - fi;
+    let tail = used.map(mirror);
+    if (targetFi === 0) tail.sort((a, b) => b - a);
+    else tail.sort((a, b) => a - b);
+
+    const lastPaintedFi = used[used.length - 1];
+    const dir = (targetFi > lastPaintedFi) ? +1 : -1;
+    const seen2 = new Set();
+    for (let i = 0; i < tail.length; i++) {
+      const fi = tail[i];
+      if (fi < 0 || fi > (N_FRAMES - 1)) continue;
+      if (seen2.has(fi)) continue;
+      if (dir > 0) {
+        if (fi >= lastPaintedFi && fi <= targetFi) {
+          seen2.add(fi);
+          tailFiltered.push(fi);
+        }
+      } else {
+        if (fi <= lastPaintedFi && fi >= targetFi) {
+          seen2.add(fi);
+          tailFiltered.push(fi);
+        }
+      }
+    }
+    if (!seen2.has(targetFi)) tailFiltered.push(targetFi);
+  }
+
+  const fiPlan = plannedFis.concat(tailFiltered);
+
+  function buildEntry(fi, prevFi) {
+    const entry = {
+      fi: fi,
+      pathEls: [],
+      pathVals: [],
+      textEls: [],
+      textVals: []
+    };
+
+    const ds = cache.frames_d[fi];
+    const prevDs = (prevFi != null ? cache.frames_d[prevFi] : null);
+
+    for (let k = 0; k < visPathIdx.length; k++) {
+      const srcIdx = visPathIdx[k];
+      const d = ds ? ds[srcIdx] : null;
+      const pd = prevDs ? prevDs[srcIdx] : null;
+      if (prevFi == null || d !== pd) {
+        entry.pathEls.push(visPathEls[k]);
+        entry.pathVals.push(d);
+      }
+    }
+
+    if (cache.frames_x) {
+      const xs = cache.frames_x[fi];
+      const prevXs = (prevFi != null ? cache.frames_x[prevFi] : null);
+      for (let k = 0; k < visTextIdx.length; k++) {
+        const srcIdx = visTextIdx[k];
+        const x = (xs && xs[srcIdx] != null && isFinite(xs[srcIdx])) ? String(xs[srcIdx]) : null;
+        const px = (prevXs && prevXs[srcIdx] != null && isFinite(prevXs[srcIdx])) ? String(prevXs[srcIdx]) : null;
+        if (prevFi == null || x !== px) {
+          entry.textEls.push(visTextEls[k]);
+          entry.textVals.push(x);
+        }
+      }
+    }
+
+    return entry;
+  }
+
+  function applyBufferedFi(fi) {
+    const tt2 = cache.frame_t0 + ((N_FRAMES > 1 ? (fi / (N_FRAMES - 1)) : 0) * denom);
+    return applyBufferedEntry(buildEntry(fi, null), tt2);
+  }
+
+  function applyBufferedEntry(entry, tt2) {
+    if (!((tt2 > 0) && (tt2 < 1))) {
+      if (window.dzv.hide_tip) window.dzv.hide_tip();
+      if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+    }
+
+    for (let i = 0; i < entry.pathEls.length; i++) {
+      const el = entry.pathEls[i];
+      const d = entry.pathVals[i];
+      if (d != null && el.getAttribute("d") !== d) el.setAttribute("d", d);
+    }
+
+    for (let i = 0; i < entry.textEls.length; i++) {
+      const el = entry.textEls[i];
+      const x = entry.textVals[i];
+      if (x != null && el.getAttribute("x") !== x) el.setAttribute("x", x);
+    }
+
+    dzv.warpingFactor = Math.max(cache.frame_t0, Math.min(cache.frame_t1, tt2));
+    if (window.dzv && window.dzv.dzvLabelsOnWarpFrame) window.dzv.dzvLabelsOnWarpFrame();
+    if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
+    if (window.dzv.stackTrack && window.dzv.stackTrack.isActive()) window.dzv.stackTrack.updateBandRect();
+    return entry.fi;
+  }
+
+  const built = new Array(fiPlan.length);
+  let buildNext = 0;
+  let playNext = 0;
+  let prevBuiltFi = null;
+  let playing = false;
+  let cancelled = false;
+
+  function buildOne() {
+    if (cancelled) return;
+    if (buildNext >= fiPlan.length) return;
+    const fi = fiPlan[buildNext];
+    built[buildNext] = buildEntry(fi, prevBuiltFi);
+    prevBuiltFi = fi;
+    buildNext++;
+  }
+
+  function buildChunk(n) {
+    for (let i = 0; i < n && buildNext < fiPlan.length; i++) buildOne();
+  }
+
+  function scheduleBuild() {
+    if (cancelled) return;
+    if (buildNext >= fiPlan.length) return;
+    setTimeout(function () {
+      buildChunk(1);
+      scheduleBuild();
+    }, 0);
+  }
+
+  function maybeStartPlayback() {
+    if (playing) return;
+    if (buildNext >= Math.min(BUFFER_WARM, fiPlan.length)) {
+      playing = true;
+      let nextAt = performance.now();
+
+      function step() {
+        if (cancelled) return;
+
+        if (playNext >= fiPlan.length) {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(finalizeCommon);
+          });
+          return;
+        }
+
+        if (!built[playNext]) {
+          setTimeout(function () {
+            requestAnimationFrame(step);
+          }, 0);
+          return;
+        }
+
+        const fi = fiPlan[playNext];
+        const tt2 = cache.frame_t0 + ((N_FRAMES > 1 ? (fi / (N_FRAMES - 1)) : 0) * denom);
+        applyBufferedEntry(built[playNext], tt2);
+        ticcnt += 1;
+        playNext++;
+
+        nextAt += dt;
+        const wait = Math.max(0, nextAt - performance.now());
+        setTimeout(function () {
+          requestAnimationFrame(step);
+        }, wait);
+      }
+
+      requestAnimationFrame(step);
+    }
+  }
+
+  window.dzv.now_warping = true;
+
+  buildChunk(Math.min(BUFFER_WARM, fiPlan.length));
+  maybeStartPlayback();
+  scheduleBuild();
+}
+
 	window.dzv = window.dzv || {};
 	window.dzv.warpingFactor = window.dzv.warpingFactor ?? 0;
 	window.dzv.isWarping = () => window.dzv.warpingFactor > 0 && window.dzv.warpingFactor < 1;
@@ -29496,7 +30303,6 @@ runWhenFullyLoaded(() => {
 });
 
 </script> 
-
 
 
 	<!-- ====== U.S. Wages Guide Overlay (injected) ====== -->
