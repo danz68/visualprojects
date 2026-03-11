@@ -23635,7 +23635,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
   const t1 = Math.max(0, Math.min(1, +tTarget || 0));
   const dur = Math.max(1, +ms || 350);
 
-  let tStart;
+  let tStart = null;
 
   if (dzv._warpHideRestore) {
     try { dzv._warpHideRestore(); } catch (_) {}
@@ -23700,7 +23700,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
 
 	  const overlay = svg.cloneNode(false);//document.createElementNS(NS, "svg"); 
 	  overlay.removeAttribute("id");
-	  overlay.style.zIndex = String(opts.zIndex != null ? opts.zIndex : 9999);
+	  overlay.style.zIndex = String(opts.zIndex != null ? opts.zIndex : 9998);
 	  overlay.style.position = "absolute";
 	  overlay.style.pointerEvents = "none";
 
@@ -23787,7 +23787,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
 	  };
 	}
 	
-  const labels_overly = dzvMakeLayerReparenter(svg, 'dzv-labels', { zIndex: 99999 });
+  const labels_overly = dzvMakeLayerReparenter(svg, 'dzv-labels', { zIndex: 9998 });
 
 
   function applyCachedFrame(tt, setp, sett) {
@@ -23959,7 +23959,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
       canvas.style.width = "0px";
       canvas.style.height = "0px";
       canvas.style.pointerEvents = "none";
-      canvas.style.zIndex = "9998";
+      canvas.style.zIndex = "9997";
       canvas.style.display = "none";
       canvas.style.background = "transparent";
       document.body.appendChild(canvas);
@@ -24705,11 +24705,15 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
     return;
   }
 
-  const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
-  const denom = (cache.frame_t1 - cache.frame_t0) || 1;
+  //const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
+  //const denom = (cache.frame_t1 - cache.frame_t0) || 1;
+  const N_FRAMES = 24;
 
+
+  
   function ttToFi(tt) {
-    let a = (tt - cache.frame_t0) / denom;
+    //let a = (tt - cache.frame_t0) / denom;
+	let a = tt;
     if (a < 0) a = 0;
     if (a > 1) a = 1;
 
