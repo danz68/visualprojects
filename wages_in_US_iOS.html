@@ -24718,7 +24718,7 @@ function updateTextAtFi(fi) {
 
     commitFi(tt);
 
-    if (u < 0.5) {
+    if (u < 0.75) {
       requestAnimationFrame(tick);
       return;
     }
@@ -24762,7 +24762,7 @@ function updateTextAtFi(fi) {
 	}
 
 	function dzvToggleWarpAnimatedDef() {
-	    dzvToggleWarpAnimated(svg, 500);
+	    dzvToggleWarpAnimated(svg, 750);
 	}
 	window.dzv.swap_warp = dzvToggleWarpAnimatedDef;
 	// ---------------------------------------------------------------------------
