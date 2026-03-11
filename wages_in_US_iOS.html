@@ -22890,7 +22890,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	}
 	let times_run = 0;
 	window.dzv.now_warping = false;
-	const TOTAL_STEPS = 16;
+	const TOTAL_STEPS = 24;
 
 	function dzvPrecacheWarpFrames(svg, N_FRAMES = 10) {
 	    try {
@@ -22986,7 +22986,7 @@ const _grip_drag = { active:false, pid:null, x0:0, y0:0, l0:0, t0:0 };
 	            keep.add(tmp[i].id);
 	            www += tmp[i].w;
 	            if (www > 0.8 * ww) break;
-	            // exceeded 80% of workers
+	            // exceeded 80% of workers dzv
 	        }
 	    }
 	    const all_hidden = [];
@@ -23626,6 +23626,7 @@ function dzvAnimateWarpPrevOK(svg, tTarget, ms = 350) {
 }
 
 
+
 function dzvAnimateWarp(svg, tTarget, ms = 350) {
   if (window.dzv.now_warping) return;
 
@@ -23633,8 +23634,6 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
   const t0 = Math.max(0, Math.min(1, +dzv.warpingFactor || 0));
   const t1 = Math.max(0, Math.min(1, +tTarget || 0));
   const dur = Math.max(1, +ms || 350);
-  const BUFFER_WARM = 3;
-  const PLAY_FPS = 11;
 
   let tStart;
 
@@ -23684,24 +23683,135 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
 
   const cache = (dzv && dzv._warpPrecache) ? dzv._warpPrecache : null;
   const useCachedFrames = ((t0 !== t1) && cache && cache.ready && cache.frames_d && cache.frames_d.length);
+  
+  function dzvMakeLayerReparenter(svg, layerRef, opts) {
+	  opts = opts || {};
+
+
+	  const layerEl = (typeof layerRef === "string") ? document.getElementById(layerRef) : layerRef;
+	  if (!layerEl) throw new Error("dzvMakeLayerReparenter: layer not found");
+
+	  const container = opts.container || svg.parentNode;
+	  if (!container) throw new Error("dzvMakeLayerReparenter: missing container");
+
+	  if (getComputedStyle(container).position === "static") {
+		container.style.position = "relative";
+	  }
+
+	  const overlay = svg.cloneNode(false);//document.createElementNS(NS, "svg"); 
+	  overlay.removeAttribute("id");
+	  overlay.style.zIndex = String(opts.zIndex != null ? opts.zIndex : 9999);
+	  overlay.style.position = "absolute";
+	  overlay.style.pointerEvents = "none";
+
+      const overlayRoot = overlay;
+	  container.appendChild(overlay);
+
+	  function copySvgBox() {
+		const sr = svg.getBoundingClientRect();
+		const pr = svg.parentNode.getBoundingClientRect();
+
+		overlay.style.left = (sr.left - pr.left) + "px";
+		overlay.style.top  = (sr.top  - pr.top ) + "px";
+		overlay.style.width  = sr.width + "px";
+		overlay.style.height = sr.height + "px";
+
+		const vb = svg.getAttribute("viewBox");
+		if (vb != null) overlay.setAttribute("viewBox", vb);
+		else overlay.removeAttribute("viewBox");
+
+		const par = svg.getAttribute("preserveAspectRatio");
+		if (par != null) overlay.setAttribute("preserveAspectRatio", par);
+		else overlay.removeAttribute("preserveAspectRatio");
+	  }
+
+	  function copyDefs() {
+	  
+	    const NS = "http://www.w3.org/2000/svg";
+		
+		const overlayDefs = document.createElementNS(NS, "defs");
+		overlay.appendChild(overlayDefs);
+	   
+		while (overlayDefs.firstChild) overlayDefs.removeChild(overlayDefs.firstChild);
+		const defs = svg.querySelector(":scope > defs");
+		if (!defs) return;
+		for (let n = defs.firstChild; n; n = n.nextSibling) {
+		  overlayDefs.appendChild(n.cloneNode(true));
+		}
+	  }
+
+	  copySvgBox();
+	  //copyDefs();
+
+	  const homeParent = layerEl.parentNode;
+	  if (!homeParent) throw new Error("dzvMakeLayerReparenter: layer has no parent");
+
+	  const homeMarker = document.createComment("dzv-layer-home");
+	  homeParent.insertBefore(homeMarker, layerEl);
+
+	  let inOverlay = false;
+
+	  function moveToOverlay() {
+		if (inOverlay) return;
+		//copySvgBox();
+		if (layerEl.parentNode) layerEl.parentNode.removeChild(layerEl);
+		overlayRoot.appendChild(layerEl);
+		inOverlay = true;
+	  }
+
+	  function moveBack() {
+		if (!inOverlay) return;
+		if (!homeMarker.parentNode) throw new Error("dzvMakeLayerReparenter: home marker missing");
+		//overlayRoot.removeChild(layerEl);
+		if (layerEl.parentNode) layerEl.parentNode.removeChild(layerEl);
+		homeMarker.parentNode.insertBefore(layerEl, homeMarker.nextSibling);
+		inOverlay = false;
+	  }
+
+	  function destroy() {
+		moveBack();
+		if (homeMarker.parentNode) homeMarker.parentNode.removeChild(homeMarker);
+		if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+	  }
+
+	  return {
+		moveToOverlay,
+		moveBack,
+		syncOverlayBox: copySvgBox,
+		syncDefs: copyDefs,
+		overlaySvg: overlay,
+		overlayRoot: overlayRoot,
+		layerEl: layerEl,
+		inOverlay: function () { return inOverlay; },
+		destroy
+	  };
+	}
+	
+  const labels_overly = dzvMakeLayerReparenter(svg, 'dzv-labels', { zIndex: 99999 });
+
 
   function applyCachedFrame(tt, setp, sett) {
     const dzv = (window.dzv = window.dzv || {});
     const cache = dzv._warpPrecache;
     if (!cache || !cache.ready) return 0;
+
     if (!((tt > 0) && (tt < 1))) {
       if (window.dzv.hide_tip) window.dzv.hide_tip();
       if (window.dzv.hide_highlight) window.dzv.hide_highlight();
     }
+
     const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
     const denom = (cache.frame_t1 - cache.frame_t0) || 1;
+
     let a = (tt - cache.frame_t0) / denom;
     if (a < 0) a = 0;
     if (a > 1) a = 1;
+
     let fi = 0;
     if (N_FRAMES > 1) fi = Math.round(a * (N_FRAMES - 1));
     if (fi < 0) fi = 0;
     if (fi > (N_FRAMES - 1)) fi = (N_FRAMES - 1);
+
     const ds = cache.frames_d[fi];
     if (ds) {
       for (let j = 0; j < cache.listp.length; j++) {
@@ -23713,6 +23823,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
         }
       }
     }
+
     if (cache.frames_x) {
       const xs = cache.frames_x[fi];
       if (xs) {
@@ -23720,24 +23831,711 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
           const tx = cache.listt[j];
           if (sett && !sett.has(tx)) continue;
           const x = xs[j];
-          if (x != null && isFinite(x) && tx.getAttribute("x") !== String(x)) tx.setAttribute("x", String(x));
+          if (x != null && isFinite(x) && tx.getAttribute("x") !== String(x)) {
+            tx.setAttribute("x", String(x));
+          }
         }
       }
     }
+
     const tt2 = cache.frame_t0 + ((N_FRAMES > 1 ? (fi / (N_FRAMES - 1)) : 0) * denom);
     dzv.warpingFactor = Math.max(cache.frame_t0, Math.min(cache.frame_t1, tt2));
+
     if (window.dzv && window.dzv.dzvLabelsOnWarpFrame) window.dzv.dzvLabelsOnWarpFrame();
+
+
+	
     if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
     if (window.dzv.stackTrack && window.dzv.stackTrack.isActive())
       window.dzv.stackTrack.updateBandRect();
+
     return fi;
   }
 
   let [setp, sett] = useCachedFrames ? dzvVisibleSets(svg, false) : [null, null];
   let ticcnt = 0;
+  
+  function dzvBuildWarpSimplifiedBaseBatch(cache, setp) {
+  const srcSet = setp || new Set(cache.listp);
+  const list = [];
+  const idxByPath = new Map();
+
+  for (let i = 0; i < cache.listp.length; i++) {
+    const p = cache.listp[i];
+    if (!srcSet.has(p)) continue;
+    list.push(p);
+    idxByPath.set(p, i);
+  }
+
+  if (!list.length) {
+    return {
+      bySrcIdx: new Map(),
+      list: []
+    };
+  }
+
+  const simplifier = createArcLengthSegmentBatchSimplifier({
+    d_attrib: "d",
+    tolerancePx: 1,
+    lengthSlackPx: 1,
+    maxDepth: 18,
+    curveLutN: 2
+  });
+
+  const originalD = new Array(list.length);
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i];
+    const srcIdx = idxByPath.get(p);
+    const d0 = cache.frames_d && cache.frames_d[0] ? cache.frames_d[0][srcIdx] : null;
+    originalD[i] = p.getAttribute("d");
+    if (d0 != null) p.setAttribute("d", d0);
+  }
+
+  let simplified;
+  try {
+    simplified = simplifier.run(list);
+  } finally {
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      const dOld = originalD[i];
+      if (dOld == null) p.removeAttribute("d");
+      else p.setAttribute("d", dOld);
+    }
+  }
+
+  const bySrcIdx = new Map();
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i];
+    const srcIdx = idxByPath.get(p);
+    const rec = simplified && simplified[i] ? simplified[i] : null;
+    const d0 = cache.frames_d && cache.frames_d[0] ? cache.frames_d[0][srcIdx] : null;
+    const dSimple = rec && rec.d_simplified ? rec.d_simplified : d0;
+
+    bySrcIdx.set(srcIdx, {
+      srcIdx: srcIdx,
+      base_d0: d0,
+      base_d0_simplified: dSimple
+    });
+  }
+
+  return {
+    bySrcIdx: bySrcIdx,
+    list: list
+  };
+}
+
+  const simplify = false;
+  function makeCanvasProxyRenderer(svg, setp) {
+    const XLINK_NS = "http://www.w3.org/1999/xlink";
+    const MIRROR_ATTR = "data-dzv-use-mirror-path";
+    let canvas = null;
+    let ctx = null;
+    let active = false;
+    let hidden = [];
+    let mirrorPaths = [];
+    let currentFi = 0;
+	
+	let simplifiedBaseBatch;
+    if (simplify) simplifiedBaseBatch = dzvBuildWarpSimplifiedBaseBatch(cache, setp);
+	
+	
+
+    function getHrefValue(useEl) {
+      return (
+        useEl.getAttribute("href") ||
+        useEl.getAttributeNS(XLINK_NS, "href") ||
+        useEl.getAttribute("xlink:href") ||
+        ""
+      );
+    }
+
+    function ensureCanvas() {
+      if (canvas) return canvas;
+      canvas = document.createElement("canvas");
+      canvas.id = "dzv-canvas-warp-overlay";
+      canvas.style.position = "fixed";
+      canvas.style.left = "0px";
+      canvas.style.top = "0px";
+      canvas.style.width = "0px";
+      canvas.style.height = "0px";
+      canvas.style.pointerEvents = "none";
+      canvas.style.zIndex = "9998";
+      canvas.style.display = "none";
+      canvas.style.background = "transparent";
+      document.body.appendChild(canvas);
+      ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
+      return canvas;
+    }
+
+    function syncCanvas() {
+      const r = svg.getBoundingClientRect();
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const pxW = Math.max(1, Math.round(r.width * dpr));
+      const pxH = Math.max(1, Math.round(r.height * dpr));
+      if (canvas.width !== pxW || canvas.height !== pxH) {
+        canvas.width = pxW;
+        canvas.height = pxH;
+      }
+      canvas.style.left = r.left + "px";
+      canvas.style.top = r.top + "px";
+      canvas.style.width = Math.max(1, Math.round(r.width)) + "px";
+      canvas.style.height = Math.max(1, Math.round(r.height)) + "px";
+      return { rect: r, dpr: dpr };
+    }
+
+    function collectMirrorPaths() {
+      const out = [];
+      const seen = new Set();
+      const srcSet = setp || new Set(cache.listp);
+
+      const srcIndex = new Map();
+      for (let i = 0; i < cache.listp.length; i++) srcIndex.set(cache.listp[i], i);
+
+      const uses = svg.querySelectorAll('g.s_e use[href], g.s_e use[xlink\\:href]');
+      for (let i = 0; i < uses.length; i++) {
+        const useEl = uses[i];
+        const href = getHrefValue(useEl);
+        if (!href || href.charAt(0) !== "#") continue;
+
+        const refId = href.slice(1);
+        let target = null;
+        if (svg.getElementById) target = svg.getElementById(refId);
+        if (!target) target = document.getElementById(refId);
+        if (!target || !srcSet.has(target)) continue;
+
+        let mirror = useEl.nextElementSibling;
+        while (mirror) {
+          if (
+            mirror.tagName &&
+            mirror.tagName.toLowerCase() === "path" &&
+            mirror.getAttribute(MIRROR_ATTR) === "1"
+          ) break;
+          mirror = mirror.nextElementSibling;
+        }
+        if (!mirror) continue;
+        if (seen.has(mirror)) continue;
+        seen.add(mirror);
+
+        out.push({
+          el: mirror,
+          srcIdx: srcIndex.get(target)
+        });
+      }
+
+      return out;
+    }
+
+    function hideMirrors() {
+      requestAnimationFrame(() => { requestAnimationFrame(() => {
+        hidden.length = 0;
+        for (let i = 0; i < mirrorPaths.length; i++) {
+          const el = mirrorPaths[i].el;
+          hidden.push({
+            el: el,
+            visibility: el.style.display
+          });
+          el.style.display = "none";
+        }
+      }); });
+    }
+
+    function showMirrors() {
+      for (let i = 0; i < hidden.length; i++) {
+        const r = hidden[i];
+        r.el.style.display = r.visibility || "";
+      }
+      hidden.length = 0;
+    }
+
+    function numOr(v, dflt) {
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n : dflt;
+    }
+
+    function drawNow() {
+      if (!active) return;
+
+      const sync = syncCanvas();
+      const rect = sync.rect;
+      const dpr = sync.dpr;
+      const ds = cache.frames_d[currentFi];
+
+      let dc = drawNow._cache;
+      if (!dc) {
+        dc = {
+          listRef: null,
+          n: 0,
+          rows: [],
+          xbbox: new Map(),
+          filterByRef: new Map()
+        };
+        drawNow._cache = dc;
+      }
+
+      function clamp01(x) {
+        return x < 0 ? 0 : (x > 1 ? 1 : x);
+      }
+
+      function clamp255(x) {
+        return x < 0 ? 0 : (x > 255 ? 255 : x);
+      }
+
+      function parsePercentOrNumber(s, defVal) {
+        s = String(s || "").trim().toLowerCase();
+        if (!s) return defVal;
+        if (s.endsWith("%")) return (parseFloat(s) || 0) / 100;
+        const v = parseFloat(s);
+        return Number.isFinite(v) ? v : defVal;
+      }
+
+      function parseColor(str) {
+        str = String(str || "").trim().toLowerCase();
+        if (!str || str === "none" || str === "transparent") return null;
+
+        let m;
+
+        if ((m = str.match(/^#([0-9a-f]{3})$/i))) {
+          const h = m[1];
+          return {
+            r: parseInt(h[0] + h[0], 16),
+            g: parseInt(h[1] + h[1], 16),
+            b: parseInt(h[2] + h[2], 16),
+            a: 1
+          };
+        }
+
+        if ((m = str.match(/^#([0-9a-f]{4})$/i))) {
+          const h = m[1];
+          return {
+            r: parseInt(h[0] + h[0], 16),
+            g: parseInt(h[1] + h[1], 16),
+            b: parseInt(h[2] + h[2], 16),
+            a: parseInt(h[3] + h[3], 16) / 255
+          };
+        }
+
+        if ((m = str.match(/^#([0-9a-f]{6})$/i))) {
+          const h = m[1];
+          return {
+            r: parseInt(h.slice(0, 2), 16),
+            g: parseInt(h.slice(2, 4), 16),
+            b: parseInt(h.slice(4, 6), 16),
+            a: 1
+          };
+        }
+
+        if ((m = str.match(/^#([0-9a-f]{8})$/i))) {
+          const h = m[1];
+          return {
+            r: parseInt(h.slice(0, 2), 16),
+            g: parseInt(h.slice(2, 4), 16),
+            b: parseInt(h.slice(4, 6), 16),
+            a: parseInt(h.slice(6, 8), 16) / 255
+          };
+        }
+
+        if ((m = str.match(/^rgba?\((.+)\)$/i))) {
+          const parts = m[1].split(",").map(s => s.trim());
+          if (parts.length < 3) return null;
+
+          const r = parts[0].endsWith("%") ? 255 * parseFloat(parts[0]) / 100 : parseFloat(parts[0]);
+          const g = parts[1].endsWith("%") ? 255 * parseFloat(parts[1]) / 100 : parseFloat(parts[1]);
+          const b = parts[2].endsWith("%") ? 255 * parseFloat(parts[2]) / 100 : parseFloat(parts[2]);
+          const a = parts.length >= 4 ? parsePercentOrNumber(parts[3], 1) : 1;
+
+          return {
+            r: clamp255(r),
+            g: clamp255(g),
+            b: clamp255(b),
+            a: clamp01(a)
+          };
+        }
+
+        return null;
+      }
+
+      function colorToCss(c) {
+        return "rgba(" +
+          Math.round(clamp255(c.r)) + "," +
+          Math.round(clamp255(c.g)) + "," +
+          Math.round(clamp255(c.b)) + "," +
+          clamp01(c.a) + ")";
+      }
+
+      function mul3(M, v) {
+        return [
+          M[0] * v[0] + M[1] * v[1] + M[2] * v[2],
+          M[3] * v[0] + M[4] * v[1] + M[5] * v[2],
+          M[6] * v[0] + M[7] * v[1] + M[8] * v[2]
+        ];
+      }
+
+      function saturateMatrix(s) {
+        return [
+          0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s,
+          0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s,
+          0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s
+        ];
+      }
+
+      function parseUrlRef(filterStr) {
+        const m = String(filterStr || "").match(/url\((['"]?)(#[^)'" ]+)\1\)/i);
+        return m ? m[2] : null;
+      }
+
+      function getFilterParams(filterStr) {
+        const ref = parseUrlRef(filterStr);
+        if (!ref) return null;
+        if (dc.filterByRef.has(ref)) return dc.filterByRef.get(ref);
+
+        const filterEl = document.querySelector(ref);
+        if (!filterEl) {
+          dc.filterByRef.set(ref, null);
+          return null;
+        }
+
+        let sat = 1;
+
+        const satEl =
+          filterEl.querySelector('feColorMatrix[data-role="sat"]') ||
+          filterEl.querySelector('feColorMatrix[type="saturate"]');
+
+        if (satEl) {
+          sat = parseFloat(satEl.getAttribute("values"));
+          if (!Number.isFinite(sat)) sat = 1;
+        }
+
+        let slopeR = 1, slopeG = 1, slopeB = 1;
+        let intR = 0, intG = 0, intB = 0;
+
+        const bc =
+          filterEl.querySelector('feComponentTransfer[data-role="bc"]') ||
+          filterEl.querySelector("feComponentTransfer");
+
+        if (bc) {
+          const fr = bc.querySelector("feFuncR");
+          const fg = bc.querySelector("feFuncG");
+          const fb = bc.querySelector("feFuncB");
+
+          if (fr) {
+            slopeR = parseFloat(fr.getAttribute("slope"));
+            intR = parseFloat(fr.getAttribute("intercept"));
+            if (!Number.isFinite(slopeR)) slopeR = 1;
+            if (!Number.isFinite(intR)) intR = 0;
+          }
+          if (fg) {
+            slopeG = parseFloat(fg.getAttribute("slope"));
+            intG = parseFloat(fg.getAttribute("intercept"));
+            if (!Number.isFinite(slopeG)) slopeG = 1;
+            if (!Number.isFinite(intG)) intG = 0;
+          }
+          if (fb) {
+            slopeB = parseFloat(fb.getAttribute("slope"));
+            intB = parseFloat(fb.getAttribute("intercept"));
+            if (!Number.isFinite(slopeB)) slopeB = 1;
+            if (!Number.isFinite(intB)) intB = 0;
+          }
+        }
+
+        const out = {
+          sat: sat,
+          slopeR: slopeR, slopeG: slopeG, slopeB: slopeB,
+          intR: intR, intG: intG, intB: intB
+        };
+
+        dc.filterByRef.set(ref, out);
+        return out;
+      }
+
+      function applyFilterToColor(colorStr, filterStr) {
+        const c = parseColor(colorStr);
+        if (!c) return colorStr;
+
+        const fp = getFilterParams(filterStr);
+        if (!fp) return colorStr;
+
+        let rgb = [c.r / 255, c.g / 255, c.b / 255];
+        rgb = mul3(saturateMatrix(fp.sat), rgb);
+        rgb = [
+          clamp01(rgb[0] * fp.slopeR + fp.intR),
+          clamp01(rgb[1] * fp.slopeG + fp.intG),
+          clamp01(rgb[2] * fp.slopeB + fp.intB)
+        ];
+
+        return colorToCss({
+          r: rgb[0] * 255,
+          g: rgb[1] * 255,
+          b: rgb[2] * 255,
+          a: c.a
+        });
+      }
+
+      function parseXBBox_MLCZ(d) {
+        let rec = dc.xbbox.get(d);
+        if (rec) return rec;
+
+        const toks = String(d || "").match(/[A-Za-z]|[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?/g) || [];
+        let i = 0, cmd = "";
+        let minX = Infinity, maxX = -Infinity;
+
+        function takeX(x, y) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;          
+        }
+
+        while (i < toks.length) {
+          const t = toks[i++];
+          if (/^[A-Za-z]$/.test(t)) cmd = t;
+          else i--;
+
+          if (cmd === "M" || cmd === "L") {
+            const x = +toks[i++], y = +toks[i++];
+            takeX(x, y);
+          } else if (cmd === "C") {
+            const x1 = +toks[i++], y1 = +toks[i++];
+            const x2 = +toks[i++], y2 = +toks[i++];
+            const x  = +toks[i++], y  = +toks[i++];
+            takeX(x1,y1); takeX(x2,y2); takeX(x,y);
+          } else if (cmd === "Z" || cmd === "z") {
+          } else {
+            rec = null;
+            dc.xbbox.set(d, rec);
+            return rec;
+          }
+        }
+
+        if (!isFinite(minX) || !isFinite(maxX)) {
+          rec = null;
+          dc.xbbox.set(d, rec);
+          return rec;
+        }
+
+        rec = { minX, maxX};
+        dc.xbbox.set(d, rec);
+        return rec;
+      }
+
+      if (dc.listRef !== mirrorPaths || dc.n !== mirrorPaths.length) {
+        dc.listRef = mirrorPaths;
+        dc.n = mirrorPaths.length;
+        dc.rows = new Array(mirrorPaths.length);
+		
+        for (let i = 0; i < mirrorPaths.length; i++) {
+          const mp = mirrorPaths[i];
+          const el = mp.el;
+          const m = el.getScreenCTM && el.getScreenCTM();
+          const cs = getComputedStyle(el);
+          const bb = el.getBBox && el.getBBox();
+
+          if (!m || !bb) {
+            dc.rows[i] = null;
+            continue;
+          }
+
+          const opacity = numOr(cs.opacity, 1);
+          const fillOpacity = numOr(cs.fillOpacity, 1);
+          const strokeOpacity = numOr(cs.strokeOpacity, 1);
+          const strokeWidthPx = numOr(cs.strokeWidth, 0);
+
+          const dash = (cs.strokeDasharray && cs.strokeDasharray !== "none")
+            ? cs.strokeDasharray.split(/[ ,]+/).map(v => parseFloat(v) || 0).filter(v => v > 0)
+            : [];
+
+          const filterStr = cs.filter || "";
+		  
+		 
+		
+		let baseRec;
+		if (simplifiedBaseBatch) baseRec = simplifiedBaseBatch.bySrcIdx.get(mp.srcIdx);
+		
+          dc.rows[i] = {
+            srcIdx: mp.srcIdx,
+            a: m.a, b: m.b, c: m.c, d: m.d, e: m.e, f: m.f,
+            opacity: opacity,
+            fill: (cs.fill && cs.fill !== "none") ? applyFilterToColor(cs.fill, filterStr) : cs.fill,
+            fillOpacity: fillOpacity,
+            fillRule: (cs.fillRule === "evenodd") ? "evenodd" : "nonzero",
+            stroke: (cs.stroke && cs.stroke !== "none") ? applyFilterToColor(cs.stroke, filterStr) : cs.stroke,
+            strokeOpacity: strokeOpacity,
+            strokeWidth: strokeWidthPx * dpr,
+            lineCap: cs.strokeLinecap || "butt",
+            lineJoin: cs.strokeLinejoin || "miter",
+            miterLimit: numOr(cs.strokeMiterlimit, 4),
+            dash: dash.length ? dash.map(v => v * dpr) : [],
+            dashOffset: numOr(cs.strokeDashoffset, 0) * dpr,
+            y0: bb.y,
+            y1: bb.y + bb.height,
+			  base_d0: baseRec && baseRec.base_d0 ? baseRec.base_d0 : null,
+			  base_d0_simplified: baseRec && baseRec.base_d0_simplified ? baseRec.base_d0_simplified : null
+
+          };
+        }
+      }
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (!ds) return;
+
+      for (let i = 0; i < dc.rows.length; i++) {
+        const row = dc.rows[i];
+        if (!row) continue;
+        if (row.opacity <= 0) continue;
+		
+		let d;
+/*
+        const d = ds[row.srcIdx];
+        if (!d) continue;
+*/      
+        if (!simplify ) d = ds[row.srcIdx];
+		else
+		{
+		const d0s = row.base_d0_simplified || row.base_d0;
+		if (!d0s) continue;
+
+		 d = warpPathD(
+		  d0s,
+		  window.dzv.viewBoxStr,
+		  window.dzv.warp,
+		  dzv.warpingFactor
+		);
+		}
+		if (!d) continue;
+
+        const m00 = row.a * dpr, m01 = row.c * dpr, m02 = (row.e - rect.left) * dpr;
+        const m10 = row.b * dpr, m11 = row.d * dpr, m12 = (row.f - rect.top) * dpr;
+
+        function tx(x, y) { return m00 * x + m01 * y + m02; }
+        function ty(x, y) { return m10 * x + m11 * y + m12; }
+
+		const mima = row.mima;
+		let xbb = null;
+		
+		if (mima === null || mima === 1)
+		  {
+		    xbb = parseXBBox_MLCZ(d);
+			if (mima === null)
+			   row.mima = 0; 
+		  }
+		
+        
+        let usedThinRect = false;
+
+        if (xbb) {
+          const p00 = { x: tx(xbb.minX, row.y0), y: ty(xbb.minX, row.y0) };
+          const p01 = { x: tx(xbb.minX, row.y1), y: ty(xbb.minX, row.y1) };
+          const p10 = { x: tx(xbb.maxX, row.y0), y: ty(xbb.maxX, row.y0) };
+          const p11 = { x: tx(xbb.maxX, row.y1), y: ty(xbb.maxX, row.y1) };
+
+          const minY = Math.min(p00.y, p01.y, p10.y, p11.y);
+          const maxY = Math.max(p00.y, p01.y, p10.y, p11.y);
+          const minX = Math.min(p00.x, p01.x, p10.x, p11.x);
+          const maxX = Math.max(p00.x, p01.x, p10.x, p11.x);
+
+          const hPx = maxY - minY;
+
+          if (hPx < 1) {
+		    row.mima = 1; 
+            const yMid = 0.5 * (minY + maxY);
+            const rectY = Math.round(yMid) - 0.5;
+            const rectH = 1;
+            const rectW = Math.max(1, maxX - minX);
+
+            if (row.fill && row.fill !== "none" && row.fillOpacity > 0) {
+              ctx.globalAlpha = row.opacity * row.fillOpacity;
+              ctx.fillStyle = row.fill;
+              ctx.fillRect(minX, rectY, rectW, rectH);
+            }
+
+            if (row.stroke && row.stroke !== "none" && row.strokeOpacity > 0) {
+              ctx.globalAlpha = row.opacity * row.strokeOpacity;
+              ctx.strokeStyle = row.stroke;
+              ctx.lineWidth = 1;
+              ctx.lineCap = row.lineCap;
+              ctx.lineJoin = row.lineJoin;
+              ctx.miterLimit = row.miterLimit;
+              ctx.setLineDash([]);
+              ctx.lineDashOffset = 0;
+              ctx.strokeRect(minX, rectY, rectW, rectH);
+            }
+
+            usedThinRect = true;
+          }
+        }
+
+        if (usedThinRect) continue;
+
+        const p0 = new Path2D(d);
+        const p = new Path2D();
+        p.addPath(
+          p0,
+          new DOMMatrix([
+            m00, m10,
+            m01, m11,
+            m02, m12
+          ])
+        );
+
+        if (row.fill && row.fill !== "none" && row.fillOpacity > 0) {
+          ctx.globalAlpha = row.opacity * row.fillOpacity;
+          ctx.fillStyle = row.fill;
+          ctx.fill(p, row.fillRule);
+        }
+
+        if (row.stroke && row.stroke !== "none" && row.strokeWidth > 0 && row.strokeOpacity > 0) {
+          ctx.globalAlpha = row.opacity * row.strokeOpacity;
+          ctx.strokeStyle = row.stroke;
+          ctx.lineWidth = row.strokeWidth;
+          ctx.lineCap = row.lineCap;
+          ctx.lineJoin = row.lineJoin;
+          ctx.miterLimit = row.miterLimit;
+          ctx.setLineDash(row.dash);
+          ctx.lineDashOffset = row.dashOffset;
+          ctx.stroke(p);
+        }
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([]);
+    }
+
+    function setFrame(fi) {
+      currentFi = fi;
+      drawNow();
+    }
+
+    return {
+      activated: function () { return active; },
+      enable: function (fi0) {
+        ensureCanvas();
+        mirrorPaths = collectMirrorPaths();
+        if (!mirrorPaths.length) return;
+        active = true;
+        if (fi0 != null) setFrame(fi0);
+        canvas.style.display = "block";
+        hideMirrors();
+      },
+      renderFi: function (fi) {
+        if (!active) return;
+        setFrame(fi);
+      },
+      disable: function () {
+        active = false;
+        showMirrors();
+        if (ctx && canvas) {
+          canvas.style.display = "none";
+        }
+      }
+    };
+  }
+
+  const proxyCanvas = useCachedFrames ? makeCanvasProxyRenderer(svg, setp) : null;
 
   function finalizeCommon() {
     applyCachedFrame(tTarget, null, null);
+    if (proxyCanvas) proxyCanvas.disable();
+	labels_overly.destroy();
+
     ticcnt++;
 
     if (dzv._warpHideRestore) {
@@ -23749,32 +24547,69 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
     window.dzv.now_warping = false;
     hFull.restore();
     window.dzvSkipMirrorHidePropagation = false;
-	console.log(ticcnt);
+    console.log(ticcnt);
   }
 
-  if (useCachedFrames && cache) cache.fis = [];
+  function updateTextAtFi(fi) {
+    if (!cache.frames_x) return;
+    const xs = cache.frames_x[fi];
+    if (!xs) return;
 
-  function mirroredTailAndCommit() {
+    for (let j = 0; j < cache.listt.length; j++) {
+      const tx = cache.listt[j];
+      if (sett && !sett.has(tx)) continue;
+      const x = xs[j];
+      if (x != null && isFinite(x) && tx.getAttribute("x") !== String(x)) {
+        tx.setAttribute("x", String(x));
+      }
+    }
+  }
+
+  function updateStateAtFi(fi) {
+    const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
+    const denom = (cache.frame_t1 - cache.frame_t0) || 1;
+    const tt2 = cache.frame_t0 + ((N_FRAMES > 1 ? (fi / (N_FRAMES - 1)) : 0) * denom);
+
+    if (!((tt2 > 0) && (tt2 < 1))) {
+      if (window.dzv.hide_tip) window.dzv.hide_tip();
+      if (window.dzv.hide_highlight) window.dzv.hide_highlight();
+    }
+
+    updateTextAtFi(fi);
+
+    dzv.warpingFactor = Math.max(cache.frame_t0, Math.min(cache.frame_t1, tt2));
+	labels_overly.moveBack();
+    if (window.dzv && window.dzv.dzvLabelsOnWarpFrame) window.dzv.dzvLabelsOnWarpFrame();
+	labels_overly.moveToOverlay();
+    if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
+    if (window.dzv.stackTrack && window.dzv.stackTrack.isActive())
+      window.dzv.stackTrack.updateBandRect();
+  }
+
+  function mirroredTailAndCommit(actualFis) {
     const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
     const targetFi = (t1 <= 0) ? 0 : (N_FRAMES - 1);
-    const fis = (cache.fis || []).slice();
+
     const used = [];
     const seen = new Set();
-    for (let i = 0; i < fis.length; i++) {
-      const v = fis[i] | 0;
+    for (let i = 0; i < actualFis.length; i++) {
+      const v = actualFis[i] | 0;
       if (!seen.has(v)) {
         seen.add(v);
         used.push(v);
       }
     }
+
     if (!used.length) {
       requestAnimationFrame(() => {
         requestAnimationFrame(finalizeCommon);
       });
       return;
     }
+
     const mirror = (fi) => (N_FRAMES - 1) - fi;
     let tail = used.map(mirror);
+
     if (targetFi === 0) tail.sort((a, b) => b - a);
     else tail.sort((a, b) => a - b);
 
@@ -23782,10 +24617,12 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
     const dir = (targetFi > lastPaintedFi) ? +1 : -1;
     const filtered = [];
     const seen2 = new Set();
+
     for (let i = 0; i < tail.length; i++) {
       const fi = tail[i];
       if (fi < 0 || fi > (N_FRAMES - 1)) continue;
       if (seen2.has(fi)) continue;
+
       if (dir > 0) {
         if (fi >= lastPaintedFi && fi <= targetFi) {
           seen2.add(fi);
@@ -23798,6 +24635,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
         }
       }
     }
+
     if (!seen2.has(targetFi)) filtered.push(targetFi);
 
     let idx = 0;
@@ -23809,71 +24647,49 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
         });
         return;
       }
-      applyBufferedFi(fi);
+
+      updateStateAtFi(fi);
+      if (proxyCanvas) proxyCanvas.renderFi(fi);
       ticcnt += 1;
       requestAnimationFrame(step);
     }
+
     requestAnimationFrame(step);
   }
 
-  function tick(now) {
-    const u = Math.max(0, Math.min(1, (now - tStart) / dur));
-    let tt = t0 + (t1 - t0) * easeInOut(u);
-    if (tt < 0) tt = 0;
-    if (tt > 1) tt = 1;
+  if (!useCachedFrames) {
+    function tick(now) {
+      if (tStart == null) tStart = now;
 
-    if (u < 1) {
-      if (useCachedFrames) {
-        const fi = applyCachedFrame(tt, setp, sett);
-        if (cache && cache.fis) cache.fis.push(fi);
-      } else {
+      const u = Math.max(0, Math.min(1, (now - tStart) / dur));
+      let tt = t0 + (t1 - t0) * easeInOut(u);
+      if (tt < 0) tt = 0;
+      if (tt > 1) tt = 1;
+
+      if (u < 1) {
         dzvApplyWarpingMeta(svg, tt);
         if (window.dzv.scale_warp) window.dzv.scale_warp(tt);
+        ticcnt += 1;
+        requestAnimationFrame(tick);
+        return;
       }
-      ticcnt += 1;
-      requestAnimationFrame(tick);
-      return;
-    }
-    if (!useCachedFrames) {
-      finalizeCommon();
-      return;
-    }
-    mirroredTailAndCommit();
-  }
 
-  if (!useCachedFrames) {
+      finalizeCommon();
+    }
+
     window.dzv.now_warping = true;
-    tStart = performance.now();
     requestAnimationFrame(tick);
     return;
   }
 
   const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
   const denom = (cache.frame_t1 - cache.frame_t0) || 1;
-  const dt = 1000 / PLAY_FPS;
-
-  const visPathIdx = [];
-  const visPathEls = [];
-  for (let j = 0; j < cache.listp.length; j++) {
-    const p = cache.listp[j];
-    if (setp && !setp.has(p)) continue;
-    visPathIdx.push(j);
-    visPathEls.push(p);
-  }
-
-  const visTextIdx = [];
-  const visTextEls = [];
-  for (let j = 0; j < cache.listt.length; j++) {
-    const tx = cache.listt[j];
-    if (sett && !sett.has(tx)) continue;
-    visTextIdx.push(j);
-    visTextEls.push(tx);
-  }
 
   function ttToFi(tt) {
     let a = (tt - cache.frame_t0) / denom;
     if (a < 0) a = 0;
     if (a > 1) a = 1;
+
     let fi = 0;
     if (N_FRAMES > 1) fi = Math.round(a * (N_FRAMES - 1));
     if (fi < 0) fi = 0;
@@ -23881,208 +24697,46 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
     return fi;
   }
 
-  const plannedFis = [];
-  const plannedFisForMirror = [];
-  const stepsMain = Math.max(1, Math.round(dur / dt));
-  for (let s = 0; s < stepsMain; s++) {
-    const elapsed = s * dt;
-    const u = Math.max(0, Math.min(1, elapsed / dur));
+  const actuallyRenderedFis = [];
+  let lastRenderedFi = null;
+
+  function commitFi(fi) {
+    if (fi == null) return;
+    if (lastRenderedFi === fi) return;
+
+    updateStateAtFi(fi);
+
+    if (proxyCanvas) {
+      if (!proxyCanvas.activated()) proxyCanvas.enable(fi);
+      else proxyCanvas.renderFi(fi);
+    }
+
+    lastRenderedFi = fi;
+    actuallyRenderedFis.push(fi);
+    ticcnt += 1;
+  }
+
+  function tick(now) {
+    if (tStart == null) tStart = now;
+
+    const u = Math.max(0, Math.min(1, (now - tStart) / dur));
     let tt = t0 + (t1 - t0) * easeInOut(u);
     if (tt < 0) tt = 0;
     if (tt > 1) tt = 1;
+
     const fi = ttToFi(tt);
-    plannedFis.push(fi);
-    plannedFisForMirror.push(fi);
-  }
-  cache.fis = plannedFisForMirror.slice();
+    commitFi(fi);
 
-  const targetFi = (t1 <= 0) ? 0 : (N_FRAMES - 1);
-  const used = [];
-  {
-    const seen = new Set();
-    for (let i = 0; i < plannedFisForMirror.length; i++) {
-      const v = plannedFisForMirror[i] | 0;
-      if (!seen.has(v)) {
-        seen.add(v);
-        used.push(v);
-      }
-    }
-  }
-
-  let tailFiltered = [];
-  if (used.length) {
-    const mirror = (fi) => (N_FRAMES - 1) - fi;
-    let tail = used.map(mirror);
-    if (targetFi === 0) tail.sort((a, b) => b - a);
-    else tail.sort((a, b) => a - b);
-
-    const lastPaintedFi = used[used.length - 1];
-    const dir = (targetFi > lastPaintedFi) ? +1 : -1;
-    const seen2 = new Set();
-    for (let i = 0; i < tail.length; i++) {
-      const fi = tail[i];
-      if (fi < 0 || fi > (N_FRAMES - 1)) continue;
-      if (seen2.has(fi)) continue;
-      if (dir > 0) {
-        if (fi >= lastPaintedFi && fi <= targetFi) {
-          seen2.add(fi);
-          tailFiltered.push(fi);
-        }
-      } else {
-        if (fi <= lastPaintedFi && fi >= targetFi) {
-          seen2.add(fi);
-          tailFiltered.push(fi);
-        }
-      }
-    }
-    if (!seen2.has(targetFi)) tailFiltered.push(targetFi);
-  }
-
-  const fiPlan = plannedFis.concat(tailFiltered);
-
-  function buildEntry(fi, prevFi) {
-    const entry = {
-      fi: fi,
-      pathEls: [],
-      pathVals: [],
-      textEls: [],
-      textVals: []
-    };
-
-    const ds = cache.frames_d[fi];
-    const prevDs = (prevFi != null ? cache.frames_d[prevFi] : null);
-
-    for (let k = 0; k < visPathIdx.length; k++) {
-      const srcIdx = visPathIdx[k];
-      const d = ds ? ds[srcIdx] : null;
-      const pd = prevDs ? prevDs[srcIdx] : null;
-      if (prevFi == null || d !== pd) {
-        entry.pathEls.push(visPathEls[k]);
-        entry.pathVals.push(d);
-      }
+    if (u < 1) {
+      requestAnimationFrame(tick);
+      return;
     }
 
-    if (cache.frames_x) {
-      const xs = cache.frames_x[fi];
-      const prevXs = (prevFi != null ? cache.frames_x[prevFi] : null);
-      for (let k = 0; k < visTextIdx.length; k++) {
-        const srcIdx = visTextIdx[k];
-        const x = (xs && xs[srcIdx] != null && isFinite(xs[srcIdx])) ? String(xs[srcIdx]) : null;
-        const px = (prevXs && prevXs[srcIdx] != null && isFinite(prevXs[srcIdx])) ? String(prevXs[srcIdx]) : null;
-        if (prevFi == null || x !== px) {
-          entry.textEls.push(visTextEls[k]);
-          entry.textVals.push(x);
-        }
-      }
-    }
-
-    return entry;
-  }
-
-  function applyBufferedFi(fi) {
-    const tt2 = cache.frame_t0 + ((N_FRAMES > 1 ? (fi / (N_FRAMES - 1)) : 0) * denom);
-    return applyBufferedEntry(buildEntry(fi, null), tt2);
-  }
-
-  function applyBufferedEntry(entry, tt2) {
-    if (!((tt2 > 0) && (tt2 < 1))) {
-      if (window.dzv.hide_tip) window.dzv.hide_tip();
-      if (window.dzv.hide_highlight) window.dzv.hide_highlight();
-    }
-
-    for (let i = 0; i < entry.pathEls.length; i++) {
-      const el = entry.pathEls[i];
-      const d = entry.pathVals[i];
-      if (d != null && el.getAttribute("d") !== d) el.setAttribute("d", d);
-    }
-
-    for (let i = 0; i < entry.textEls.length; i++) {
-      const el = entry.textEls[i];
-      const x = entry.textVals[i];
-      if (x != null && el.getAttribute("x") !== x) el.setAttribute("x", x);
-    }
-
-    dzv.warpingFactor = Math.max(cache.frame_t0, Math.min(cache.frame_t1, tt2));
-    if (window.dzv && window.dzv.dzvLabelsOnWarpFrame) window.dzv.dzvLabelsOnWarpFrame();
-    if (window.dzv.scale_warp) window.dzv.scale_warp(dzv.warpingFactor);
-    if (window.dzv.stackTrack && window.dzv.stackTrack.isActive()) window.dzv.stackTrack.updateBandRect();
-    return entry.fi;
-  }
-
-  const built = new Array(fiPlan.length);
-  let buildNext = 0;
-  let playNext = 0;
-  let prevBuiltFi = null;
-  let playing = false;
-  let cancelled = false;
-
-  function buildOne() {
-    if (cancelled) return;
-    if (buildNext >= fiPlan.length) return;
-    const fi = fiPlan[buildNext];
-    built[buildNext] = buildEntry(fi, prevBuiltFi);
-    prevBuiltFi = fi;
-    buildNext++;
-  }
-
-  function buildChunk(n) {
-    for (let i = 0; i < n && buildNext < fiPlan.length; i++) buildOne();
-  }
-
-  function scheduleBuild() {
-    if (cancelled) return;
-    if (buildNext >= fiPlan.length) return;
-    setTimeout(function () {
-      buildChunk(1);
-      scheduleBuild();
-    }, 0);
-  }
-
-  function maybeStartPlayback() {
-    if (playing) return;
-    if (buildNext >= Math.min(BUFFER_WARM, fiPlan.length)) {
-      playing = true;
-      let nextAt = performance.now();
-
-      function step() {
-        if (cancelled) return;
-
-        if (playNext >= fiPlan.length) {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(finalizeCommon);
-          });
-          return;
-        }
-
-        if (!built[playNext]) {
-          setTimeout(function () {
-            requestAnimationFrame(step);
-          }, 0);
-          return;
-        }
-
-        const fi = fiPlan[playNext];
-        const tt2 = cache.frame_t0 + ((N_FRAMES > 1 ? (fi / (N_FRAMES - 1)) : 0) * denom);
-        applyBufferedEntry(built[playNext], tt2);
-        ticcnt += 1;
-        playNext++;
-
-        nextAt += dt;
-        const wait = Math.max(0, nextAt - performance.now());
-        setTimeout(function () {
-          requestAnimationFrame(step);
-        }, wait);
-      }
-
-      requestAnimationFrame(step);
-    }
+    mirroredTailAndCommit(actuallyRenderedFis);
   }
 
   window.dzv.now_warping = true;
-
-  buildChunk(Math.min(BUFFER_WARM, fiPlan.length));
-  maybeStartPlayback();
-  scheduleBuild();
+  requestAnimationFrame(tick);
 }
 
 	window.dzv = window.dzv || {};
