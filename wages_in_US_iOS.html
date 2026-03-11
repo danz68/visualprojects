@@ -23935,7 +23935,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
     let mirrorPaths = [];
     let currentFi = 0;
 	
-	let simplifiedBaseBatch;
+	let simplifiedBaseBatch=null;
     if (simplify) simplifiedBaseBatch = dzvBuildWarpSimplifiedBaseBatch(cache, setp);
 	
 	
@@ -24345,7 +24345,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
 		  
 		 
 		
-		let baseRec;
+		let baseRec=null;
 		if (simplifiedBaseBatch) baseRec = simplifiedBaseBatch.bySrcIdx.get(mp.srcIdx);
 		
           dc.rows[i] = {
@@ -24371,6 +24371,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
           };
         }
       }
+		
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -24440,7 +24441,10 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
             const rectY = Math.round(yMid) - 0.5;
             const rectH = 1;
             const rectW = Math.max(1, maxX - minX);
-
+			
+			ctx.save();
+			ctx.setTransform(1, 0, 0, 1, 0, 0);
+			
             if (row.fill && row.fill !== "none" && row.fillOpacity > 0) {
               ctx.globalAlpha = row.opacity * row.fillOpacity;
               ctx.fillStyle = row.fill;
@@ -24458,6 +24462,8 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
               ctx.lineDashOffset = 0;
               ctx.strokeRect(minX, rectY, rectW, rectH);
             }
+			
+			ctx.restore();
 
             usedThinRect = true;
           }
@@ -24475,7 +24481,9 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
             m02, m12
           ])
         );
-
+		
+		ctx.save();
+		ctx.setTransform(1, 0, 0, 1, 0, 0);
         if (row.fill && row.fill !== "none" && row.fillOpacity > 0) {
           ctx.globalAlpha = row.opacity * row.fillOpacity;
           ctx.fillStyle = row.fill;
@@ -24493,10 +24501,12 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
           ctx.lineDashOffset = row.dashOffset;
           ctx.stroke(p);
         }
+		ctx.restore();
       }
 
       ctx.globalAlpha = 1;
       ctx.setLineDash([]);
+	  
     }
 
     function setFrame(fi) {
