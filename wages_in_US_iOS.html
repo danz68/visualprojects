@@ -24039,7 +24039,8 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
     }
 
     function hideMirrors() {
-      requestAnimationFrame(() => { requestAnimationFrame(() => {
+       //requestAnimationFrame(() => 
+	   {
         hidden.length = 0;
         for (let i = 0; i < mirrorPaths.length; i++) {
           const el = mirrorPaths[i].el;
@@ -24049,7 +24050,8 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
           });
           el.style.display = "none";
         }
-      }); });
+      }
+	  //); 
     }
 
     function showMirrors() {
@@ -24071,7 +24073,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
       const sync = syncCanvas();
       const rect = sync.rect;
       const dpr = sync.dpr;
-      const ds = cache.frames_d[currentFi];
+      const ds = cache.frames_d[0];
 
       let dc = drawNow._cache;
       if (!dc) {
@@ -24396,15 +24398,12 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
         if (!row) continue;
         if (row.opacity <= 0) continue;
 		
-		let d;
-/*
-        const d = ds[row.srcIdx];
-        if (!d) continue;
-*/      
-        if (!simplify ) d = ds[row.srcIdx];
+		let d, d0s;
+  
+        if (!simplify ) 
+		   d0s = ds[row.srcIdx];
 		else
-		{
-		const d0s = row.base_d0_simplified || row.base_d0;
+		   d0s = row.base_d0_simplified || row.base_d0;
 		if (!d0s) continue;
 
 		 d = warpPathD(
@@ -24413,7 +24412,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
 		  window.dzv.warp,
 		  dzv.warpingFactor
 		);
-		}
+		
 		if (!d) continue;
 
         const m00 = row.a * dpr, m01 = row.c * dpr, m02 = (row.e - rect.left) * dpr;
@@ -24522,25 +24521,26 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
 	  
     }
 
-    function setFrame(fi) {
-      currentFi = fi;
+    function setFrame(tt) {
+
       drawNow();
     }
 
     return {
       activated: function () { return active; },
-      enable: function (fi0) {
+      enable: function () {
         ensureCanvas();
         mirrorPaths = collectMirrorPaths();
         if (!mirrorPaths.length) return;
         active = true;
-        if (fi0 != null) setFrame(fi0);
+        setFrame(0);
+		hideMirrors();
         canvas.style.display = "block";
-        hideMirrors();
+        
       },
-      renderFi: function (fi) {
+      renderFi: function (tt) {
         if (!active) return;
-        setFrame(fi);
+        setFrame(tt);
       },
       disable: function () {
         active = false;
@@ -24554,7 +24554,8 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
 
   const proxyCanvas = useCachedFrames ? makeCanvasProxyRenderer(svg, setp) : null;
 
-  function finalizeCommon() {
+function finalizeCommon() {
+    dzv.warpingFactor = tTarget;
     applyCachedFrame(tTarget, null, null);
     if (proxyCanvas) proxyCanvas.disable();
 	labels_overly.destroy();
@@ -24573,7 +24574,7 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
     console.log(ticcnt);
   }
 
-  function updateTextAtFi(fi) {
+function updateTextAtFi(fi) {
     if (!cache.frames_x) return;
     const xs = cache.frames_x[fi];
     if (!xs) return;
@@ -24588,19 +24589,13 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
     }
   }
 
-  function updateStateAtFi(fi) {
-    const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
-    const denom = (cache.frame_t1 - cache.frame_t0) || 1;
-    const tt2 = cache.frame_t0 + ((N_FRAMES > 1 ? (fi / (N_FRAMES - 1)) : 0) * denom);
 
-    if (!((tt2 > 0) && (tt2 < 1))) {
-      if (window.dzv.hide_tip) window.dzv.hide_tip();
-      if (window.dzv.hide_highlight) window.dzv.hide_highlight();
-    }
+  function updateStateAt(tt) {
+    if (window.dzv.hide_tip) window.dzv.hide_tip();
+    if (window.dzv.hide_highlight) window.dzv.hide_highlight();
 
-    updateTextAtFi(fi);
 
-    dzv.warpingFactor = Math.max(cache.frame_t0, Math.min(cache.frame_t1, tt2));
+    dzv.warpingFactor = tt;
 	labels_overly.moveBack();
     if (window.dzv && window.dzv.dzvLabelsOnWarpFrame) window.dzv.dzvLabelsOnWarpFrame();
 	labels_overly.moveToOverlay();
@@ -24610,69 +24605,56 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
   }
 
   function mirroredTailAndCommit(actualFis) {
-    const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
-    const targetFi = (t1 <= 0) ? 0 : (N_FRAMES - 1);
+    if ( (actualFis.length <= 1)  )
+	  {
+	    requestAnimationFrame(finalizeCommon);
+		return;
+	  }
 
-    const used = [];
-    const seen = new Set();
-    for (let i = 0; i < actualFis.length; i++) {
-      const v = actualFis[i] | 0;
-      if (!seen.has(v)) {
-        seen.add(v);
-        used.push(v);
-      }
-    }
+	const rest = Math.abs(tTarget - actualFis[actualFis.length-1]);
 
-    if (!used.length) {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(finalizeCommon);
-      });
-      return;
-    }
-
-    const mirror = (fi) => (N_FRAMES - 1) - fi;
-    let tail = used.map(mirror);
-
-    if (targetFi === 0) tail.sort((a, b) => b - a);
-    else tail.sort((a, b) => a - b);
-
-    const lastPaintedFi = used[used.length - 1];
-    const dir = (targetFi > lastPaintedFi) ? +1 : -1;
-    const filtered = [];
-    const seen2 = new Set();
-
-    for (let i = 0; i < tail.length; i++) {
-      const fi = tail[i];
-      if (fi < 0 || fi > (N_FRAMES - 1)) continue;
-      if (seen2.has(fi)) continue;
-
-      if (dir > 0) {
-        if (fi >= lastPaintedFi && fi <= targetFi) {
-          seen2.add(fi);
-          filtered.push(fi);
-        }
-      } else {
-        if (fi <= lastPaintedFi && fi >= targetFi) {
-          seen2.add(fi);
-          filtered.push(fi);
-        }
-      }
-    }
-
-    if (!seen2.has(targetFi)) filtered.push(targetFi);
-
+	
+	const dorest = [];
+	
+	
+	let parsed = 0;
+	let i = 0;
+	if (tTarget>0.5)
+	  while (true)
+	  {
+	   const tt =actualFis[i++];
+	   if (tt > rest) break;
+	   dorest.push(1 - tt);
+	   
+	  }
+	else
+	  while (true)
+	  {
+	   const tt =actualFis[i++];
+	   if (1-tt > rest) break;
+	   dorest.push( 1 - tt);
+	   
+	  }
+	if (dorest.length===0)
+	  {
+	    requestAnimationFrame(finalizeCommon);
+		return;
+	  }
+	if (tTarget>0.5)
+	  dorest.sort((a, b) => a - b);
+	else
+	  dorest.sort((a, b) => b - a);
+	  
     let idx = 0;
     function step() {
-      const fi = filtered[idx++];
-      if (fi == null) {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(finalizeCommon);
-        });
+      
+      if (idx >= dorest.length) {
+        requestAnimationFrame(finalizeCommon);
         return;
       }
-
-      updateStateAtFi(fi);
-      if (proxyCanvas) proxyCanvas.renderFi(fi);
+	  const tt = dorest[idx++];
+      updateStateAt(tt);
+      if (proxyCanvas) proxyCanvas.renderFi(tt);
       ticcnt += 1;
       requestAnimationFrame(step);
     }
@@ -24701,45 +24683,27 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
     }
 
     window.dzv.now_warping = true;
+	
     requestAnimationFrame(tick);
     return;
   }
 
-  //const N_FRAMES = cache.N_FRAMES || (cache.frames_d ? cache.frames_d.length : 1) || 1;
-  //const denom = (cache.frame_t1 - cache.frame_t0) || 1;
-  const N_FRAMES = 24;
-
-
-  
-  function ttToFi(tt) {
-    //let a = (tt - cache.frame_t0) / denom;
-	let a = tt;
-    if (a < 0) a = 0;
-    if (a > 1) a = 1;
-
-    let fi = 0;
-    if (N_FRAMES > 1) fi = Math.round(a * (N_FRAMES - 1));
-    if (fi < 0) fi = 0;
-    if (fi > (N_FRAMES - 1)) fi = (N_FRAMES - 1);
-    return fi;
-  }
 
   const actuallyRenderedFis = [];
-  let lastRenderedFi = null;
 
-  function commitFi(fi) {
-    if (fi == null) return;
-    if (lastRenderedFi === fi) return;
 
-    updateStateAtFi(fi);
+  function commitFi(tt) {
+    if (tt === null) return;
+
+
+    updateStateAt(tt);
 
     if (proxyCanvas) {
-      if (!proxyCanvas.activated()) proxyCanvas.enable(fi);
-      else proxyCanvas.renderFi(fi);
+      if (!proxyCanvas.activated()) proxyCanvas.enable(0);
+      else proxyCanvas.renderFi(tt);
     }
 
-    lastRenderedFi = fi;
-    actuallyRenderedFis.push(fi);
+    actuallyRenderedFis.push(tt);
     ticcnt += 1;
   }
 
@@ -24751,19 +24715,22 @@ function dzvAnimateWarp(svg, tTarget, ms = 350) {
     if (tt < 0) tt = 0;
     if (tt > 1) tt = 1;
 
-    const fi = ttToFi(tt);
-    commitFi(fi);
 
-    if (u < 1) {
+    commitFi(tt);
+
+    if (u < 0.5) {
       requestAnimationFrame(tick);
       return;
     }
 
     mirroredTailAndCommit(actuallyRenderedFis);
+	
   }
 
   window.dzv.now_warping = true;
+  //console.log(t0,t1);
   requestAnimationFrame(tick);
+
 }
 
 	window.dzv = window.dzv || {};
