@@ -26546,8 +26546,7 @@ function applyLayout(items) {
 //     // preventDefault: true,
 //   });
 //
-//   // later, move it:
-//   overlay.setAnchorLB(200, 120);
+
 //
 //   // later, change its SVG:
 //   overlay.setSVG(`<svg ...>...</svg>`);
@@ -26566,25 +26565,11 @@ function applyLayout(items) {
   }
 
   // Convert base SVG user coords to pixels relative to hostEl
-  function _svgPointToHostPx(baseSvgEl, hostEl, xSvg, ySvg) {
-    const ctm = baseSvgEl.getScreenCTM && baseSvgEl.getScreenCTM();
-    if (!ctm) return { x: 0, y: 0 };
-
-    const p = new DOMPoint(xSvg, ySvg).matrixTransform(ctm);
-    const r = hostEl.getBoundingClientRect();
-    return { x: p.x - r.left, y: p.y - r.top };
-  }
 
   function _getInjectedSvg(overlayDiv) {
     return overlayDiv ? overlayDiv.querySelector("svg") : null;
   }
 
-  function _measureInjectedSvgPx(overlayDiv) {
-    const s = _getInjectedSvg(overlayDiv);
-    if (!s) return { w: 0, h: 0 };
-    const r = s.getBoundingClientRect();
-    return { w: r.width || 0, h: r.height || 0 };
-  }
 
   function dzvCreateSvgOverlay(cfg) {
     const baseSvgEl = _asEl(cfg.baseSvgEl);
@@ -26599,8 +26584,8 @@ function applyLayout(items) {
     const overlayDiv = document.createElement("div");
     overlayDiv.className = cfg.className || "overlaySvgDiv";
     overlayDiv.style.position = "absolute";
-    overlayDiv.style.left = "0px";
-    overlayDiv.style.top = "0px";
+    overlayDiv.style.left = "1.5%";
+    overlayDiv.style.bottom = "5%";
     overlayDiv.style.pointerEvents = "auto";
     overlayDiv.style.userSelect = "none";
     overlayDiv.style.touchAction = "manipulation";
@@ -26626,7 +26611,6 @@ function applyLayout(items) {
       hostEl,
       baseSvgEl,
       overlayDiv,
-      anchorLB: { x: (cfg.anchorLB && +cfg.anchorLB.x) || 0, y: (cfg.anchorLB && +cfg.anchorLB.y) || 0 },
       onAction: (typeof cfg.onAction === "function") ? cfg.onAction : null,
       stopPropagation: cfg.stopPropagation !== false,
       preventDefault: cfg.preventDefault !== false,
@@ -26637,30 +26621,9 @@ function applyLayout(items) {
       _onBaseSvgWheel: null,
     };
 
-    function positionNow() {
-      const p = _svgPointToHostPx(state.baseSvgEl, state.hostEl, state.anchorLB.x, state.anchorLB.y);
-      const sz = _measureInjectedSvgPx(state.overlayDiv);
-      state.overlayDiv.style.left = p.x + "px";
-      state.overlayDiv.style.top = (p.y - sz.h) + "px";
-    }
 
-    function schedule() {
-      if (state.destroyed) return;
-      if (state._rafId) cancelAnimationFrame(state._rafId);
-      state._rafId = requestAnimationFrame(() => {
-        state._rafId = 0;
-        positionNow();
-      });
-    }
 
-    schedule();
 
-    function onWinChange() { schedule(); }
-    window.addEventListener("resize", onWinChange, { passive: true });
-    window.addEventListener("scroll", onWinChange, { passive: true, capture: true });
-
-    const ro = (window.ResizeObserver) ? new ResizeObserver(() => schedule()) : null;
-    if (ro) { ro.observe(hostEl); ro.observe(baseSvgEl); }
 
     function _findAllowedAncestorId(target, stopEl) {
       let el = target;
@@ -27965,7 +27928,6 @@ function applyLayout(items) {
       allowedSet,
       el: overlayDiv,
       hostEl,
-      setAnchorLB(x, y) { state.anchorLB.x = +x || 0; state.anchorLB.y = +y || 0; schedule(); },
       setSVG(html) { overlayDiv.innerHTML = String(html == null ? "" : html); _setupOverlayHitTest(); schedule(); },
       repositionNow() { if (!state.destroyed) positionNow(); },
       DefaultZoomPan,
@@ -27988,6 +27950,8 @@ function applyLayout(items) {
 
         window.removeEventListener("resize", onWinChange, { passive: true });
         window.removeEventListener("scroll", onWinChange, { passive: true, capture: true });
+		
+
         if (ro) ro.disconnect();
         if (overlayDiv.parentNode) overlayDiv.parentNode.removeChild(overlayDiv);
 		if (state._pinchDispose) { state._pinchDispose(); state._pinchDispose = null; }
@@ -28017,7 +27981,6 @@ window.dzv.create_zoom_controls = function (how) {
 
   window.dzv.zoom_controls = dzvCreateSvgOverlay({
     baseSvgEl: document.getElementById("dzv_gen"),
-    anchorLB: { x: 8, y: 479 }, // LEFT-BOTTOM in base SVG user coords
     svgInnerHTML: `
 <svg xmlns="http://www.w3.org/2000/svg" id="svg_zoom_pan"  width="8em" height="8em" version="1.1" viewBox="0 0 82.584 82.461">
   <path id="corner_buttons" d="M0 0v82.46h82.584l-.006-19.2H18.58V0Z" style="fill:#fafafa;stroke:none;stroke-width:0;stroke-miterlimit:0;fill-opacity:0.2"/>
@@ -30758,12 +30721,20 @@ btn.innerHTML = '<img src="data:image/gif;base64,'
 	   
 
 	    function fit(doitanyway=false) {
+		      
 	        //const cw = window.innerWidth, ch = window.innerHeight;
 	        const parent = svg.parentElement;
 	        if (!parent) return;
 	        const rect = parent.getBoundingClientRect();
 	        const cw = rect.width;
 	        const ch = rect.height;
+			const ctm = svg.getScreenCTM && svg.getScreenCTM();
+			if (ctm) 
+			  {
+				const p = new DOMPoint(100, 100).matrixTransform(ctm);
+				const r = parent.getBoundingClientRect();
+				//console.log({ x: p.x - r.left, y: p.y - r.top });
+			  }
 	        if (cw <= 0 || ch <= 0) return;
 	        let todo = doitanyway ? 1:0;
 	        if (one === 0) {
@@ -30828,6 +30799,7 @@ btn.innerHTML = '<img src="data:image/gif;base64,'
 	                });
 	            }
 	        }
+			//console.log("bbox", svg.getBBox());
 	    }
 		window.dzv.recomputeAndApply = fit;
 	    /*
@@ -30843,6 +30815,23 @@ btn.innerHTML = '<img src="data:image/gif;base64,'
 	    window.addEventListener("resize", fit, {
 	        passive: true
 	    });
+		function dolater()
+		{
+		// console.log(window.matchMedia('print'));
+		//console.log("aa");fit();console.log("zz");
+		
+		
+
+    
+	
+		
+		
+		}
+		
+		window.addEventListener("beforeprint", dolater, {
+	        passive: true
+	    });
+		
 	    window.addEventListener("orientationchange", fit, {
 	        passive: true
 	    });
