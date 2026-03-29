@@ -27932,9 +27932,12 @@ function applyLayout(items) {
       repositionNow() { if (!state.destroyed) positionNow(); },
       DefaultZoomPan,
       destroy() {
-        if (state.destroyed) return;
-        state.destroyed = true;
-        if (state._rafId) cancelAnimationFrame(state._rafId);
+        if (!state.destroyed) 
+		 {
+			state.destroyed = true;
+			if (state._rafId) cancelAnimationFrame(state._rafId);
+			state._rafId = 0;
+		
 
         overlayDiv.removeEventListener("pointerdown", handleAction);
         overlayDiv.removeEventListener("pointerdown", forwardIfNotAllowed);
@@ -27948,13 +27951,10 @@ function applyLayout(items) {
           state._onBaseSvgWheel = null;
         }
 
-        window.removeEventListener("resize", onWinChange, { passive: true });
-        window.removeEventListener("scroll", onWinChange, { passive: true, capture: true });
-		
-
-        if (ro) ro.disconnect();
-        if (overlayDiv.parentNode) overlayDiv.parentNode.removeChild(overlayDiv);
+        
+        hostEl.removeChild(overlayDiv);
 		if (state._pinchDispose) { state._pinchDispose(); state._pinchDispose = null; }
+		}
       }
     };
   }
@@ -28861,7 +28861,7 @@ if (window.dzv.show_zoom_controls)
 	        zoomconCheckbox.id = "zoomconCheckbox";
 	        zoomconCheckbox.type = "checkbox";
 	        zoomconCheckbox.checked = window.dzv.show_zoom_controls;
-			const [tr_zoomcon, tspan_soomcon] = makeCheckboxRow(zoomconCheckbox, "Zoom controls");
+			const [tr_zoomcon, tspan_zoomcon] = makeCheckboxRow(zoomconCheckbox, "Zoom controls");
 
 	        const [tr_stack_tracking, tspan_stack_tracking] = makeCheckboxRow(stackingCheckbox, "Stack Tracking");
 
