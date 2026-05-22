@@ -541,16 +541,100 @@ class PeriodView {
     this.labelOverlay.appendChild(this.yAxisLabelEl);
   }
 
-  _setupInteraction() {
-    this._isDragging = false;
-    this._lastMouse = { x: 0, y: 0 };
-    this._quat = new THREE.Quaternion();
-    this._panOffset = new THREE.Vector3();
-    this._applyQuat();
-    const el = this.renderer.domElement;
-    el.addEventListener('mousedown', e => this._onMouseDown(e));
-    el.addEventListener('wheel',     e => this._onWheel(e), { passive: false });
+_setupInteraction() {
+  this._isDragging = false;
+  this._lastMouse = { x: 0, y: 0 };
+  this._quat = new THREE.Quaternion();
+  this._panOffset = new THREE.Vector3();
+  this._applyQuat();
+  const el = this.renderer.domElement;
+  el.addEventListener('mousedown', e => this._onMouseDown(e));
+  el.addEventListener('wheel',     e => this._onWheel(e), { passive: false });
+
+  // Touch
+  this._touches = {};
+  this._lastPinchDist = null;
+  this._lastTouchMid = null;
+  el.addEventListener('touchstart',  e => this._onTouchStart(e),  { passive: false });
+  el.addEventListener('touchmove',   e => this._onTouchMove(e),   { passive: false });
+  el.addEventListener('touchend',    e => this._onTouchEnd(e),    { passive: false });
+  el.addEventListener('touchcancel', e => this._onTouchEnd(e),    { passive: false });
+}
+
+_touchDist(t1, t2) {
+  const dx = t1.clientX - t2.clientX;
+  const dy = t1.clientY - t2.clientY;
+  return Math.hypot(dx, dy);
+}
+
+_touchMid(t1, t2) {
+  return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
+}
+
+_onTouchStart(e) {
+  e.preventDefault();
+  this._lastPinchDist = null;
+  this._lastTouchMid  = null;
+  this._lastSingleTouch = e.touches.length === 1
+    ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+    : null;
+  if (this.onDragStart) this.onDragStart();
+}
+
+_onTouchMove(e) {
+  e.preventDefault();
+  const touches = e.touches;
+
+  if (touches.length === 1) {
+    // One finger — rotate
+    if (this._lastSingleTouch) {
+      const dx = touches[0].clientX - this._lastSingleTouch.x;
+      const dy = touches[0].clientY - this._lastSingleTouch.y;
+      this._rotate(dx, dy);
+      if (this.onRotate) this.onRotate();
+    }
+    this._lastSingleTouch = { x: touches[0].clientX, y: touches[0].clientY };
+    this._lastPinchDist = null;
+    this._lastTouchMid  = null;
+
+  } else if (touches.length === 2) {
+    this._lastSingleTouch = null;
+    const t1 = touches[0], t2 = touches[1];
+    const dist = this._touchDist(t1, t2);
+    const mid  = this._touchMid(t1, t2);
+
+    // Pinch — zoom
+    if (this._lastPinchDist !== null) {
+      const ratio = dist / this._lastPinchDist;
+      this.camera.zoom = Math.max(0.3, Math.min(10, this.camera.zoom * ratio));
+      this.camera.updateProjectionMatrix();
+      if (this.onZoom) this.onZoom(this.camera.zoom);
+    }
+
+    // Two finger pan
+    if (this._lastTouchMid !== null) {
+      const dx = mid.x - this._lastTouchMid.x;
+      const dy = mid.y - this._lastTouchMid.y;
+      this._pan(dx, dy);
+      if (this.onPan) this.onPan();
+    }
+
+    this._lastPinchDist = dist;
+    this._lastTouchMid  = mid;
   }
+}
+
+_onTouchEnd(e) {
+  e.preventDefault();
+  this._lastPinchDist   = null;
+  this._lastTouchMid    = null;
+  this._lastSingleTouch = e.touches.length === 1
+    ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+    : null;
+  if (e.touches.length === 0) {
+    if (this.onDragEnd) this.onDragEnd();
+  }
+}
 
   _applyQuat() {
     const r = 10;
