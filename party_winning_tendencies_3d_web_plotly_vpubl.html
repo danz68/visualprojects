@@ -547,18 +547,38 @@ _setupInteraction() {
   this._quat = new THREE.Quaternion();
   this._panOffset = new THREE.Vector3();
   this._applyQuat();
+
   const el = this.renderer.domElement;
   el.addEventListener('mousedown', e => this._onMouseDown(e));
   el.addEventListener('wheel',     e => this._onWheel(e), { passive: false });
 
   // Touch
-  this._touches = {};
   this._lastPinchDist = null;
   this._lastTouchMid = null;
+  this._lastSingleTouch = null;
+  this._touchStart = null;
+  this._touchHoldTimer = 0;
+  this._touchDragActive = false;
+
   el.addEventListener('touchstart',  e => this._onTouchStart(e),  { passive: false });
   el.addEventListener('touchmove',   e => this._onTouchMove(e),   { passive: false });
   el.addEventListener('touchend',    e => this._onTouchEnd(e),    { passive: false });
   el.addEventListener('touchcancel', e => this._onTouchEnd(e),    { passive: false });
+}
+
+_clearTouchHold() {
+  if (this._touchHoldTimer) {
+    clearTimeout(this._touchHoldTimer);
+    this._touchHoldTimer = 0;
+  }
+}
+
+_beginTouchDrag() {
+  if (!this._touchDragActive) {
+    this._touchDragActive = true;
+    if (typeof cancelTouchTooltip === 'function') cancelTouchTooltip();
+    if (this.onDragStart) this.onDragStart();
+  }
 }
 
 _touchDist(t1, t2) {
@@ -573,12 +593,30 @@ _touchMid(t1, t2) {
 
 _onTouchStart(e) {
   e.preventDefault();
+
   this._lastPinchDist = null;
   this._lastTouchMid  = null;
-  this._lastSingleTouch = e.touches.length === 1
-    ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
-    : null;
-  if (this.onDragStart) this.onDragStart();
+  this._touchMoved = false;
+  this._touchDragging = false;
+
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    this._lastSingleTouch = { x: t.clientX, y: t.clientY };
+    this._touchStart = { x: t.clientX, y: t.clientY };
+
+    if (typeof showTouchTooltipAt === 'function') {
+      showTouchTooltipAt(t.clientX, t.clientY);
+    }
+
+  } else if (e.touches.length === 2) {
+    this._lastSingleTouch = null;
+    this._touchStart = null;
+    this._touchMoved = true;
+    this._touchDragging = true;
+
+    if (typeof cancelTouchTooltip === 'function') cancelTouchTooltip();
+    if (this.onDragStart) this.onDragStart();
+  }
 }
 
 _onTouchMove(e) {
@@ -586,24 +624,51 @@ _onTouchMove(e) {
   const touches = e.touches;
 
   if (touches.length === 1) {
-    // One finger — rotate
-    if (this._lastSingleTouch) {
-      const dx = touches[0].clientX - this._lastSingleTouch.x;
-      const dy = touches[0].clientY - this._lastSingleTouch.y;
-      this._rotate(dx, dy);
-      if (this.onRotate) this.onRotate();
+    const t = touches[0];
+    const p = { x: t.clientX, y: t.clientY };
+
+    if (this._lastSingleTouch && this._touchStart) {
+      const totalMove = Math.hypot(p.x - this._touchStart.x, p.y - this._touchStart.y);
+
+      if (totalMove > 8) {
+        this._touchMoved = true;
+
+        if (typeof cancelTouchTooltip === 'function') cancelTouchTooltip();
+
+        if (!this._touchDragging) {
+          this._touchDragging = true;
+          if (this.onDragStart) this.onDragStart();
+        }
+
+        const dx = p.x - this._lastSingleTouch.x;
+        const dy = p.y - this._lastSingleTouch.y;
+
+        this._rotate(dx, dy);
+        if (this.onRotate) this.onRotate();
+      }
     }
-    this._lastSingleTouch = { x: touches[0].clientX, y: touches[0].clientY };
+
+    this._lastSingleTouch = p;
     this._lastPinchDist = null;
     this._lastTouchMid  = null;
 
   } else if (touches.length === 2) {
+    this._touchMoved = true;
+
+    if (typeof cancelTouchTooltip === 'function') cancelTouchTooltip();
+
+    if (!this._touchDragging) {
+      this._touchDragging = true;
+      if (this.onDragStart) this.onDragStart();
+    }
+
     this._lastSingleTouch = null;
+    this._touchStart = null;
+
     const t1 = touches[0], t2 = touches[1];
     const dist = this._touchDist(t1, t2);
     const mid  = this._touchMid(t1, t2);
 
-    // Pinch — zoom
     if (this._lastPinchDist !== null) {
       const ratio = dist / this._lastPinchDist;
       this.camera.zoom = Math.max(0.3, Math.min(10, this.camera.zoom * ratio));
@@ -611,7 +676,6 @@ _onTouchMove(e) {
       if (this.onZoom) this.onZoom(this.camera.zoom);
     }
 
-    // Two finger pan
     if (this._lastTouchMid !== null) {
       const dx = mid.x - this._lastTouchMid.x;
       const dy = mid.y - this._lastTouchMid.y;
@@ -626,13 +690,16 @@ _onTouchMove(e) {
 
 _onTouchEnd(e) {
   e.preventDefault();
-  this._lastPinchDist   = null;
-  this._lastTouchMid    = null;
-  this._lastSingleTouch = e.touches.length === 1
-    ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
-    : null;
+
+  this._lastPinchDist = null;
+  this._lastTouchMid  = null;
+  this._lastSingleTouch = null;
+  this._touchStart = null;
+
   if (e.touches.length === 0) {
-    if (this.onDragEnd) this.onDragEnd();
+    if (this._touchDragging && this.onDragEnd) this.onDragEnd();
+    this._touchDragging = false;
+    this._touchMoved = false;
   }
 }
 
@@ -858,62 +925,128 @@ viewB.renderer.domElement.addEventListener('contextmenu', e => e.preventDefault(
 // ---- HOVER ----
 const tooltipA = document.getElementById('tooltipA');
 const tooltipB = document.getElementById('tooltipB');
+
 let lastMouseX = 0, lastMouseY = 0;
+let touchTooltipActive = false;
+let touchTooltipX = 0;
+let touchTooltipY = 0;
+
+const TOOLTIP_WINDOW_PAD = 8;
 
 document.addEventListener('mousemove', e => {
+  touchTooltipActive = false;
   lastMouseX = e.clientX;
   lastMouseY = e.clientY;
 });
 
+function hideTooltips() {
+  tooltipA.style.display = 'none';
+  tooltipB.style.display = 'none';
+}
+
+function cancelTouchTooltip() {
+  touchTooltipActive = false;
+  hideTooltips();
+}
+
+function showTouchTooltipAt(x, y) {
+  touchTooltipActive = true;
+  touchTooltipX = x;
+  touchTooltipY = y;
+  updateTooltips();
+}
+
+function placeTooltipInWindow(el, left, top) {
+  const pad = TOOLTIP_WINDOW_PAD;
+  const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+  const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+
+  el.style.display = 'block';
+  el.style.left = '0px';
+  el.style.top = '0px';
+
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+
+  let x = left;
+  let y = top;
+
+  if (w + pad * 2 <= vw) {
+    x = Math.max(pad, Math.min(x, vw - pad - w));
+  } else {
+    x = pad;
+  }
+
+  if (h + pad * 2 <= vh) {
+    y = Math.max(pad, Math.min(y, vh - pad - h));
+  } else {
+    y = pad;
+  }
+
+  el.style.left = x + 'px';
+  el.style.top  = y + 'px';
+}
+
 function updateTooltips() {
-  if (isDragging) {
-    tooltipA.style.display = 'none';
-    tooltipB.style.display = 'none';
+  const x = touchTooltipActive ? touchTooltipX : lastMouseX;
+  const y = touchTooltipActive ? touchTooltipY : lastMouseY;
+
+  if (isDragging && !touchTooltipActive) {
+    hideTooltips();
     return;
   }
+
   const rectA = viewA.renderer.domElement.getBoundingClientRect();
   const rectB = viewB.renderer.domElement.getBoundingClientRect();
-  const overA = lastMouseX >= rectA.left && lastMouseX <= rectA.right && lastMouseY >= rectA.top && lastMouseY <= rectA.bottom;
-  const overB = lastMouseX >= rectB.left && lastMouseX <= rectB.right && lastMouseY >= rectB.top && lastMouseY <= rectB.bottom;
+
+  const overA = x >= rectA.left && x <= rectA.right && y >= rectA.top && y <= rectA.bottom;
+  const overB = x >= rectB.left && x <= rectB.right && y >= rectB.top && y <= rectB.bottom;
 
   if (overA) {
-    const hit = viewA.getHitPoint(lastMouseX, lastMouseY);
+    const hit = viewA.getHitPoint(x, y);
     if (hit) {
       tooltipA.innerHTML = makeTooltipHTML('2021-24', hit);
-      tooltipA.style.left = (lastMouseX + 8) + 'px';
-      tooltipA.style.top  = (lastMouseY + 8) + 'px';
-      tooltipA.style.display = 'block';
-      const relX = lastMouseX - rectA.left;
-      const relY = lastMouseY - rectA.top;
       tooltipB.innerHTML = makeTooltipHTML('2026', hit);
-      tooltipB.style.left = (rectB.left + (relX / rectA.width) * rectB.width + 8) + 'px';
-      tooltipB.style.top  = (rectB.top  + (relY / rectA.height) * rectB.height + 8) + 'px';
-      tooltipB.style.display = 'block';
+
+      placeTooltipInWindow(tooltipA, x + 8, y + 8);
+
+      const relX = x - rectA.left;
+      const relY = y - rectA.top;
+
+      placeTooltipInWindow(
+        tooltipB,
+        rectB.left + (relX / rectA.width) * rectB.width + 8,
+        rectB.top  + (relY / rectA.height) * rectB.height + 8
+      );
     } else {
-      tooltipA.style.display = 'none';
-      tooltipB.style.display = 'none';
+      hideTooltips();
     }
-  } else if (overB) {
-    const hit = viewB.getHitPoint(lastMouseX, lastMouseY);
-    if (hit) {
-      tooltipB.innerHTML = makeTooltipHTML('2026', hit);
-      tooltipB.style.left = (lastMouseX + 8) + 'px';
-      tooltipB.style.top  = (lastMouseY + 8) + 'px';
-      tooltipB.style.display = 'block';
-      const relX = lastMouseX - rectB.left;
-      const relY = lastMouseY - rectB.top;
-      tooltipA.innerHTML = makeTooltipHTML('2021-24', hit);
-      tooltipA.style.left = (rectA.left + (relX / rectB.width) * rectA.width + 8) + 'px';
-      tooltipA.style.top  = (rectA.top  + (relY / rectB.height) * rectA.height + 8) + 'px';
-      tooltipA.style.display = 'block';
-    } else {
-      tooltipA.style.display = 'none';
-      tooltipB.style.display = 'none';
-    }
-  } else {
-    tooltipA.style.display = 'none';
-    tooltipB.style.display = 'none';
+    return;
   }
+
+  if (overB) {
+    const hit = viewB.getHitPoint(x, y);
+    if (hit) {
+      tooltipB.innerHTML = makeTooltipHTML('2026', hit);
+      tooltipA.innerHTML = makeTooltipHTML('2021-24', hit);
+
+      placeTooltipInWindow(tooltipB, x + 8, y + 8);
+
+      const relX = x - rectB.left;
+      const relY = y - rectB.top;
+
+      placeTooltipInWindow(
+        tooltipA,
+        rectA.left + (relX / rectB.width) * rectA.width + 8,
+        rectA.top  + (relY / rectB.height) * rectA.height + 8
+      );
+    } else {
+      hideTooltips();
+    }
+    return;
+  }
+
+  hideTooltips();
 }
 
 // ---- CONTROLS ----
