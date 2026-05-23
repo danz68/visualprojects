@@ -453,12 +453,12 @@ class PeriodView {
   _setupScene() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xffffff);
-    const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.95);
     this.scene.add(ambient);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    const dirLight = new THREE.DirectionalLight(0x808080, 0.15);
     dirLight.position.set(0, 0, 1);
     this.scene.add(dirLight);
-    const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+    const dirLight2 = new THREE.DirectionalLight(0xa0a0a0, 0.15);
     dirLight2.position.set(0, 0, -1);
     this.scene.add(dirLight2);
   }
