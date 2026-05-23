@@ -255,15 +255,12 @@ const OY = -1;
 const OZ = 0;
 
 const TOUCH_GUIDE_ENABLED = true;
-
 const TOUCH_GUIDE_TO_X_AXIS = true;
 const TOUCH_GUIDE_TO_Y_AXIS = true;
-
 const TOUCH_GUIDE_X_AXIS_MIN_GAP = 2;
 const TOUCH_GUIDE_X_AXIS_MAX_GAP = 2;
 const TOUCH_GUIDE_Y_AXIS_MIN_GAP = 2;
 const TOUCH_GUIDE_Y_AXIS_MAX_GAP = 2;
-
 const TOUCH_GUIDE_Z = 0;
 const TOUCH_GUIDE_COLOR = 0xc0c0c0;
 const TOUCH_GUIDE_OPACITY = 0.90;
@@ -355,6 +352,56 @@ function makeTooltipHTML(period, p) {
     `</div></div>`;
 }
 
+// Smooth vertex positions — Laplacian smoothing passes
+function smoothGeometry(geo, passes=2) {
+  const pos = geo.attributes.position;
+  const idx = geo.index.array;
+  const n = pos.count;
+
+  for (let pass = 0; pass < passes; pass++) {
+    const newPos = new Float32Array(n * 3);
+    const sums = new Float32Array(n * 3);
+    const neighborCounts = new Uint32Array(n);
+
+    for (let f = 0; f < idx.length; f += 3) {
+      const a = idx[f], b = idx[f+1], c = idx[f+2];
+      sums[a*3]   += pos.getX(b) + pos.getX(c);
+      sums[a*3+1] += pos.getY(b) + pos.getY(c);
+      sums[a*3+2] += pos.getZ(b) + pos.getZ(c);
+      neighborCounts[a] += 2;
+      sums[b*3]   += pos.getX(a) + pos.getX(c);
+      sums[b*3+1] += pos.getY(a) + pos.getY(c);
+      sums[b*3+2] += pos.getZ(a) + pos.getZ(c);
+      neighborCounts[b] += 2;
+      sums[c*3]   += pos.getX(a) + pos.getX(b);
+      sums[c*3+1] += pos.getY(a) + pos.getY(b);
+      sums[c*3+2] += pos.getZ(a) + pos.getZ(b);
+      neighborCounts[c] += 2;
+    }
+
+    for (let i = 0; i < n; i++) {
+      if (neighborCounts[i] === 0) {
+        newPos[i*3]   = pos.getX(i);
+        newPos[i*3+1] = pos.getY(i);
+        newPos[i*3+2] = pos.getZ(i);
+      } else {
+        newPos[i*3]   = sums[i*3]   / neighborCounts[i];
+        newPos[i*3+1] = sums[i*3+1] / neighborCounts[i];
+        newPos[i*3+2] = sums[i*3+2] / neighborCounts[i];
+      }
+    }
+
+    for (let i = 0; i < n; i++) {
+      pos.setX(i, newPos[i*3]);
+      pos.setY(i, newPos[i*3+1]);
+      pos.setZ(i, newPos[i*3+2]);
+    }
+  }
+
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+
 // ---- VIEW CLASS ----
 class PeriodView {
   constructor(hostId, period) {
@@ -376,14 +423,11 @@ class PeriodView {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setClearColor(0xffffff, 1);
-
     if (window.getComputedStyle(this.host).position === 'static') {
       this.host.style.position = 'relative';
     }
-
     this.renderer.domElement.style.position = 'relative';
     this.renderer.domElement.style.zIndex = '0';
-
     this.host.appendChild(this.renderer.domElement);
     this._resize();
   }
@@ -409,6 +453,14 @@ class PeriodView {
   _setupScene() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xffffff);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+    this.scene.add(ambient);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirLight.position.set(0, 0, 1);
+    this.scene.add(dirLight);
+    const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirLight2.position.set(0, 0, -1);
+    this.scene.add(dirLight2);
   }
 
   _setupCamera() {
@@ -430,36 +482,54 @@ class PeriodView {
 
   _buildMesh() {
     const m = DATA[this.period].mesh;
-    const nFaces = m.i.length;
-    const positions = new Float32Array(nFaces * 3 * 3);
-    const colors    = new Float32Array(nFaces * 3 * 3);
+    const n = m.x.length;
     const vertColors = recolorMeshVertices(m);
-    for (let f = 0; f < nFaces; f++) {
-      const vi = [m.i[f], m.j[f], m.k[f]];
-      for (let v = 0; v < 3; v++) {
-        const idx = vi[v];
-        const p = dataToScene(m.x[idx], m.y[idx], m.z[idx]);
-        const base = f*9 + v*3;
-        positions[base]   = p.x;
-        positions[base+1] = p.y;
-        positions[base+2] = p.z;
-        colors[base]   = vertColors[idx*3];
-        colors[base+1] = vertColors[idx*3+1];
-        colors[base+2] = vertColors[idx*3+2];
-      }
+
+    // Indexed geometry — shared vertices enable smoothing and smooth normals
+    const positions = new Float32Array(n * 3);
+    const colors    = new Float32Array(n * 3);
+
+    for (let i = 0; i < n; i++) {
+      const p = dataToScene(m.x[i], m.y[i], m.z[i]);
+      positions[i*3]   = p.x;
+      positions[i*3+1] = p.y;
+      positions[i*3+2] = p.z;
+      colors[i*3]   = vertColors[i*3];
+      colors[i*3+1] = vertColors[i*3+1];
+      colors[i*3+2] = vertColors[i*3+2];
     }
+
+    // Face index buffer
+    const indices = new Uint32Array(m.i.length * 3);
+    for (let f = 0; f < m.i.length; f++) {
+      indices[f*3]   = m.i[f];
+      indices[f*3+1] = m.j[f];
+      indices[f*3+2] = m.k[f];
+    }
+
+    this._originalColors = new Float32Array(colors);
+
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
-    geo.computeVertexNormals();
-    const mat = new THREE.MeshBasicMaterial({
+    geo.setIndex(new THREE.BufferAttribute(indices, 1));
+
+    // Laplacian smoothing — reduce noise in surface normals
+    smoothGeometry(geo, 25);
+
+    //const mat = new THREE.MeshBasicMaterial({
+    //MeshPhongMaterial
+    //MeshLambertMaterial
+    //MeshStandardMaterial
+    const mat = new THREE.MeshLambertMaterial({
       vertexColors: true,
       transparent: false,
       opacity: 1.0,
       depthWrite: true,
       depthTest: true,
-      side: THREE.FrontSide,
+      side: THREE.DoubleSide,
     });
+
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.renderOrder = 2;
     this.scene.add(this.mesh);
@@ -515,7 +585,7 @@ class PeriodView {
     ];
     const positions = new Float32Array(points.length * 3);
     points.forEach((p, i) => {
-      positions[i*3] = p.x;
+      positions[i*3]   = p.x;
       positions[i*3+1] = p.y;
       positions[i*3+2] = p.z;
     });
@@ -529,7 +599,6 @@ class PeriodView {
   _buildTouchGuide() {
     const svgNS = 'http://www.w3.org/2000/svg';
     const stroke = '#' + (TOUCH_GUIDE_COLOR & 0xffffff).toString(16).padStart(6, '0');
-
     this.touchGuide = document.createElementNS(svgNS, 'svg');
     this.touchGuide.setAttribute('width', '100%');
     this.touchGuide.setAttribute('height', '100%');
@@ -543,10 +612,8 @@ class PeriodView {
     this.touchGuide.style.overflow = 'visible';
     this.touchGuide.style.display = 'none';
     this.touchGuide.style.zIndex = '50';
-
     this.touchGuideToXAxis = document.createElementNS(svgNS, 'line');
     this.touchGuideToYAxis = document.createElementNS(svgNS, 'line');
-
     for (const line of [this.touchGuideToXAxis, this.touchGuideToYAxis]) {
       line.setAttribute('stroke', stroke);
       line.setAttribute('stroke-width', String(TOUCH_GUIDE_WIDTH));
@@ -554,63 +621,50 @@ class PeriodView {
       line.setAttribute('vector-effect', 'non-scaling-stroke');
       line.setAttribute('stroke-linecap', 'round');
     }
-
     this.touchGuide.appendChild(this.touchGuideToXAxis);
     this.touchGuide.appendChild(this.touchGuideToYAxis);
     this.host.appendChild(this.touchGuide);
   }
 
   setTouchGuideXY(x, y) {
-  if (!TOUCH_GUIDE_ENABLED || !this.touchGuide) return;
-
-  const xGapFromYAxis = X_MIN + TOUCH_GUIDE_X_AXIS_MIN_GAP;
-  const xMaxInside    = X_MAX - TOUCH_GUIDE_X_AXIS_MAX_GAP;
-
-  const yGapFromXAxis = Y_MIN + TOUCH_GUIDE_Y_AXIS_MIN_GAP;
-  const yMaxInside    = Y_MAX - TOUCH_GUIDE_Y_AXIS_MAX_GAP;
-
-  const px = Math.max(xGapFromYAxis, Math.min(xMaxInside, x));
-  const py = Math.max(yGapFromXAxis, Math.min(yMaxInside, y));
-
-  const z = TOUCH_GUIDE_Z;
-
-  const point = dataToScene(px, py, z);
-
-  const toXAxisStop = dataToScene(px, yGapFromXAxis, z);
-  const toYAxisStop = dataToScene(xGapFromYAxis, py, z);
-
-  const a = this._project(toXAxisStop);
-  const b = this._project(point);
-  const c = this._project(toYAxisStop);
-  const d = this._project(point);
-
-  const w = this.host.clientWidth;
-  const h = this.host.clientHeight;
-
-  this.touchGuide.setAttribute('viewBox', `0 0 ${w} ${h}`);
-
-  if (TOUCH_GUIDE_TO_X_AXIS && py > yGapFromXAxis) {
-    this.touchGuideToXAxis.setAttribute('x1', a.x);
-    this.touchGuideToXAxis.setAttribute('y1', a.y);
-    this.touchGuideToXAxis.setAttribute('x2', b.x);
-    this.touchGuideToXAxis.setAttribute('y2', b.y);
-    this.touchGuideToXAxis.style.display = 'block';
-  } else {
-    this.touchGuideToXAxis.style.display = 'none';
+    if (!TOUCH_GUIDE_ENABLED || !this.touchGuide) return;
+    const xGapFromYAxis = X_MIN + TOUCH_GUIDE_X_AXIS_MIN_GAP;
+    const xMaxInside    = X_MAX - TOUCH_GUIDE_X_AXIS_MAX_GAP;
+    const yGapFromXAxis = Y_MIN + TOUCH_GUIDE_Y_AXIS_MIN_GAP;
+    const yMaxInside    = Y_MAX - TOUCH_GUIDE_Y_AXIS_MAX_GAP;
+    const px = Math.max(xGapFromYAxis, Math.min(xMaxInside, x));
+    const py = Math.max(yGapFromXAxis, Math.min(yMaxInside, y));
+    const z = TOUCH_GUIDE_Z;
+    const point      = dataToScene(px, py, z);
+    const toXAxisStop = dataToScene(px, yGapFromXAxis, z);
+    const toYAxisStop = dataToScene(xGapFromYAxis, py, z);
+    const a = this._project(toXAxisStop);
+    const b = this._project(point);
+    const c = this._project(toYAxisStop);
+    const d = this._project(point);
+    const w = this.host.clientWidth;
+    const h = this.host.clientHeight;
+    this.touchGuide.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    if (TOUCH_GUIDE_TO_X_AXIS && py > yGapFromXAxis) {
+      this.touchGuideToXAxis.setAttribute('x1', a.x);
+      this.touchGuideToXAxis.setAttribute('y1', a.y);
+      this.touchGuideToXAxis.setAttribute('x2', b.x);
+      this.touchGuideToXAxis.setAttribute('y2', b.y);
+      this.touchGuideToXAxis.style.display = 'block';
+    } else {
+      this.touchGuideToXAxis.style.display = 'none';
+    }
+    if (TOUCH_GUIDE_TO_Y_AXIS && px > xGapFromYAxis) {
+      this.touchGuideToYAxis.setAttribute('x1', c.x);
+      this.touchGuideToYAxis.setAttribute('y1', c.y);
+      this.touchGuideToYAxis.setAttribute('x2', d.x);
+      this.touchGuideToYAxis.setAttribute('y2', d.y);
+      this.touchGuideToYAxis.style.display = 'block';
+    } else {
+      this.touchGuideToYAxis.style.display = 'none';
+    }
+    this.touchGuide.style.display = 'block';
   }
-
-  if (TOUCH_GUIDE_TO_Y_AXIS && px > xGapFromYAxis) {
-    this.touchGuideToYAxis.setAttribute('x1', c.x);
-    this.touchGuideToYAxis.setAttribute('y1', c.y);
-    this.touchGuideToYAxis.setAttribute('x2', d.x);
-    this.touchGuideToYAxis.setAttribute('y2', d.y);
-    this.touchGuideToYAxis.style.display = 'block';
-  } else {
-    this.touchGuideToYAxis.style.display = 'none';
-  }
-
-  this.touchGuide.style.display = 'block';
-}
 
   hideTouchGuide() {
     if (this.touchGuide) this.touchGuide.style.display = 'none';
@@ -669,9 +723,12 @@ class PeriodView {
   _setupInteraction() {
     this._isDragging = false;
     this._lastMouse = { x: 0, y: 0 };
-    this._quat = new THREE.Quaternion();
+
+    // Turntable rotation — two angles, no quaternion, no gimbal lock
+	this._azimuth   = Math.PI;   // flip to correct orientation
+	this._elevation = 0.01;      // nearly top-down
     this._panOffset = new THREE.Vector3();
-    this._applyQuat();
+    this._applyTurntable();
 
     const el = this.renderer.domElement;
     el.addEventListener('mousedown', e => this._onMouseDown(e));
@@ -690,10 +747,55 @@ class PeriodView {
     el.addEventListener('touchcancel', e => this._onTouchEnd(e),    { passive: false });
   }
 
+  _applyTurntable() {
+    const r = 10;
+    const az = this._azimuth;
+    const el = this._elevation;
+    const target = this._panOffset.clone();
+
+    // Camera orbits around Z axis (azimuth) and tilts by elevation
+    const x = r * Math.sin(el) * Math.sin(az);
+    const y = r * Math.sin(el) * Math.cos(az);
+    const z = r * Math.cos(el);
+
+    this.camera.position.set(target.x + x, target.y + y, target.z + z);
+
+    // Up vector always perpendicular to Z in the azimuth plane — Z stays vertical always
+    this.camera.up.set(
+      -Math.cos(el) * Math.sin(az),
+      -Math.cos(el) * Math.cos(az),
+       Math.sin(el)
+    );
+
+    this.camera.lookAt(target);
+    this.camera.updateProjectionMatrix();
+  }
+
+  _rotate(dx, dy) {
+    this._azimuth   += dx * 0.008;
+    this._elevation -= dy * 0.008;
+    // Clamp elevation so camera never flips past top or bottom
+    this._elevation  = Math.max(0.01, Math.min(Math.PI - 0.01, this._elevation));
+    this._applyTurntable();
+  }
+
+  _pan(dx, dy) {
+    const w = this.host.clientWidth;
+    const h = this.host.clientHeight;
+    const frustumWidth  = (this.camera.right - this.camera.left) / this.camera.zoom;
+    const frustumHeight = (this.camera.top - this.camera.bottom) / this.camera.zoom;
+    const panX = -(dx / w) * frustumWidth;
+    const panY =  (dy / h) * frustumHeight;
+    const camForward = new THREE.Vector3().subVectors(this._panOffset, this.camera.position).normalize();
+    const right = new THREE.Vector3().crossVectors(camForward, this.camera.up).normalize();
+    const up = this.camera.up.clone().normalize();
+    this._panOffset.addScaledVector(right, panX);
+    this._panOffset.addScaledVector(up, panY);
+    this._applyTurntable();
+  }
+
   _touchDist(t1, t2) {
-    const dx = t1.clientX - t2.clientX;
-    const dy = t1.clientY - t2.clientY;
-    return Math.hypot(dx, dy);
+    return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
   }
 
   _touchMid(t1, t2) {
@@ -702,27 +804,20 @@ class PeriodView {
 
   _onTouchStart(e) {
     e.preventDefault();
-
     this._lastPinchDist = null;
     this._lastTouchMid  = null;
     this._touchMoved = false;
     this._touchDragging = false;
-
     if (e.touches.length === 1) {
       const t = e.touches[0];
       this._lastSingleTouch = { x: t.clientX, y: t.clientY };
       this._touchStart = { x: t.clientX, y: t.clientY };
-
-      if (typeof showTouchTooltipAt === 'function') {
-        showTouchTooltipAt(t.clientX, t.clientY);
-      }
-
+      if (typeof showTouchTooltipAt === 'function') showTouchTooltipAt(t.clientX, t.clientY);
     } else if (e.touches.length === 2) {
       this._lastSingleTouch = null;
       this._touchStart = null;
       this._touchMoved = true;
       this._touchDragging = true;
-
       if (typeof cancelTouchTooltip === 'function') cancelTouchTooltip();
       if (this.onDragStart) this.onDragStart();
     }
@@ -731,67 +826,51 @@ class PeriodView {
   _onTouchMove(e) {
     e.preventDefault();
     const touches = e.touches;
-
     if (touches.length === 1) {
       const t = touches[0];
       const p = { x: t.clientX, y: t.clientY };
-
       if (this._lastSingleTouch && this._touchStart) {
         const totalMove = Math.hypot(p.x - this._touchStart.x, p.y - this._touchStart.y);
-
         if (totalMove > 8) {
           this._touchMoved = true;
-
           if (typeof cancelTouchTooltip === 'function') cancelTouchTooltip();
-
           if (!this._touchDragging) {
             this._touchDragging = true;
             if (this.onDragStart) this.onDragStart();
           }
-
           const dx = p.x - this._lastSingleTouch.x;
           const dy = p.y - this._lastSingleTouch.y;
-
           this._rotate(dx, dy);
           if (this.onRotate) this.onRotate();
         }
       }
-
       this._lastSingleTouch = p;
       this._lastPinchDist = null;
       this._lastTouchMid  = null;
-
     } else if (touches.length === 2) {
       this._touchMoved = true;
-
       if (typeof cancelTouchTooltip === 'function') cancelTouchTooltip();
-
       if (!this._touchDragging) {
         this._touchDragging = true;
         if (this.onDragStart) this.onDragStart();
       }
-
       this._lastSingleTouch = null;
       this._touchStart = null;
-
       const t1 = touches[0], t2 = touches[1];
       const dist = this._touchDist(t1, t2);
       const mid  = this._touchMid(t1, t2);
-
       if (this._lastPinchDist !== null) {
         const ratio = dist / this._lastPinchDist;
         this.camera.zoom = Math.max(0.3, Math.min(10, this.camera.zoom * ratio));
         this.camera.updateProjectionMatrix();
         if (this.onZoom) this.onZoom(this.camera.zoom);
       }
-
       if (this._lastTouchMid !== null) {
         const dx = mid.x - this._lastTouchMid.x;
         const dy = mid.y - this._lastTouchMid.y;
         this._pan(dx, dy);
         if (this.onPan) this.onPan();
       }
-
       this._lastPinchDist = dist;
       this._lastTouchMid  = mid;
     }
@@ -799,31 +878,15 @@ class PeriodView {
 
   _onTouchEnd(e) {
     e.preventDefault();
-
     this._lastPinchDist = null;
     this._lastTouchMid  = null;
     this._lastSingleTouch = null;
     this._touchStart = null;
-
     if (e.touches.length === 0) {
       if (this._touchDragging && this.onDragEnd) this.onDragEnd();
       this._touchDragging = false;
       this._touchMoved = false;
     }
-  }
-
-  _applyQuat() {
-    const r = 10;
-    const target = this._panOffset.clone();
-    const pos = new THREE.Vector3(0, 0, r).applyQuaternion(this._quat).add(target);
-    this.camera.position.copy(pos);
-    const worldZ = new THREE.Vector3(0, 0, 1);
-    const camForward = new THREE.Vector3().subVectors(target, pos).normalize();
-    const right = new THREE.Vector3().crossVectors(camForward, worldZ).normalize();
-    const up = new THREE.Vector3().crossVectors(right, camForward).normalize();
-    this.camera.up.copy(up);
-    this.camera.lookAt(target);
-    this.camera.updateProjectionMatrix();
   }
 
   _onMouseDown(e) {
@@ -856,30 +919,6 @@ class PeriodView {
     }
   }
 
-  _rotate(dx, dy) {
-    const worldZ = new THREE.Vector3(0, 0, 1);
-    const qZ = new THREE.Quaternion().setFromAxisAngle(worldZ, -dx * 0.008);
-    const localX = new THREE.Vector3(1, 0, 0).applyQuaternion(this._quat);
-    const qX = new THREE.Quaternion().setFromAxisAngle(localX, -dy * 0.008);
-    this._quat.premultiply(qZ).premultiply(qX);
-    this._applyQuat();
-  }
-
-  _pan(dx, dy) {
-    const w = this.host.clientWidth;
-    const h = this.host.clientHeight;
-    const frustumWidth  = (this.camera.right - this.camera.left) / this.camera.zoom;
-    const frustumHeight = (this.camera.top - this.camera.bottom) / this.camera.zoom;
-    const panX = -(dx / w) * frustumWidth;
-    const panY =  (dy / h) * frustumHeight;
-    const camForward = new THREE.Vector3().subVectors(this._panOffset, this.camera.position).normalize();
-    const right = new THREE.Vector3().crossVectors(camForward, this.camera.up).normalize();
-    const up = this.camera.up.clone().normalize();
-    this._panOffset.addScaledVector(right, panX);
-    this._panOffset.addScaledVector(up, panY);
-    this._applyQuat();
-  }
-
   _onWheel(e) {
     e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
@@ -895,30 +934,32 @@ class PeriodView {
 
   getCameraState() {
     return {
-      quat: this._quat.clone(),
-      zoom: this.camera.zoom,
-      pan:  this._panOffset.clone()
+      azimuth:   this._azimuth,
+      elevation: this._elevation,
+      zoom:      this.camera.zoom,
+      pan:       this._panOffset.clone()
     };
   }
 
   setCameraState(state) {
-    this._quat.copy(state.quat);
+    this._azimuth   = state.azimuth;
+    this._elevation = state.elevation;
     this._panOffset.copy(state.pan);
-    this._applyQuat();
+    this._applyTurntable();
     this.setZoom(state.zoom);
   }
 
   resetCamera() {
-    this._quat.identity();
+    this._azimuth   = Math.PI;
+    this._elevation = 0.01;
     this._panOffset.set(0, 0, 0);
     this.camera.zoom = 1.0;
-    this._applyQuat();
+    this._applyTurntable();
   }
 
   setMeshOpacity(v) {
     const opacity = Math.max(0, Math.min(1, Number(v)));
     this.meshOpacity = opacity;
-
     const mat = this.mesh.material;
     mat.opacity = opacity;
     mat.transparent = opacity < 0.999;
@@ -1044,7 +1085,6 @@ const TOOLTIP_WINDOW_PAD = 8;
 
 document.addEventListener('mousemove', e => {
   if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return;
-
   touchTooltipActive = false;
   lastMouseX = e.clientX;
   lastMouseY = e.clientY;
@@ -1083,29 +1123,17 @@ function placeTooltipInWindow(el, left, top) {
   const pad = TOOLTIP_WINDOW_PAD;
   const vw = window.innerWidth || document.documentElement.clientWidth || 0;
   const vh = window.innerHeight || document.documentElement.clientHeight || 0;
-
   el.style.display = 'block';
   el.style.left = '0px';
   el.style.top = '0px';
-
   const w = el.offsetWidth;
   const h = el.offsetHeight;
-
   let x = left;
   let y = top;
-
-  if (w + pad * 2 <= vw) {
-    x = Math.max(pad, Math.min(x, vw - pad - w));
-  } else {
-    x = pad;
-  }
-
-  if (h + pad * 2 <= vh) {
-    y = Math.max(pad, Math.min(y, vh - pad - h));
-  } else {
-    y = pad;
-  }
-
+  if (w + pad * 2 <= vw) x = Math.max(pad, Math.min(x, vw - pad - w));
+  else x = pad;
+  if (h + pad * 2 <= vh) y = Math.max(pad, Math.min(y, vh - pad - h));
+  else y = pad;
   el.style.left = x + 'px';
   el.style.top  = y + 'px';
 }
@@ -1121,28 +1149,20 @@ function updateTooltips() {
 
   const rectA = viewA.renderer.domElement.getBoundingClientRect();
   const rectB = viewB.renderer.domElement.getBoundingClientRect();
-
   const overA = x >= rectA.left && x <= rectA.right && y >= rectA.top && y <= rectA.bottom;
   const overB = x >= rectB.left && x <= rectB.right && y >= rectB.top && y <= rectB.bottom;
 
   if (overA) {
     const hit = viewA.getHitPoint(x, y);
-
     if (hit) {
       tooltipA.innerHTML = makeTooltipHTML('2021-24', hit);
       tooltipB.innerHTML = makeTooltipHTML('2026', hit);
-
       placeTooltipInWindow(tooltipA, x + 8, y + 8);
-
       const relX = x - rectA.left;
       const relY = y - rectA.top;
-
-      placeTooltipInWindow(
-        tooltipB,
+      placeTooltipInWindow(tooltipB,
         rectB.left + (relX / rectA.width) * rectB.width + 8,
-        rectB.top  + (relY / rectA.height) * rectB.height + 8
-      );
-
+        rectB.top  + (relY / rectA.height) * rectB.height + 8);
       setTouchGuides(hit);
     } else {
       hideTooltips();
@@ -1152,22 +1172,15 @@ function updateTooltips() {
 
   if (overB) {
     const hit = viewB.getHitPoint(x, y);
-
     if (hit) {
       tooltipB.innerHTML = makeTooltipHTML('2026', hit);
       tooltipA.innerHTML = makeTooltipHTML('2021-24', hit);
-
       placeTooltipInWindow(tooltipB, x + 8, y + 8);
-
       const relX = x - rectB.left;
       const relY = y - rectB.top;
-
-      placeTooltipInWindow(
-        tooltipA,
+      placeTooltipInWindow(tooltipA,
         rectA.left + (relX / rectB.width) * rectA.width + 8,
-        rectA.top  + (relY / rectB.height) * rectA.height + 8
-      );
-
+        rectA.top  + (relY / rectB.height) * rectA.height + 8);
       setTouchGuides(hit);
     } else {
       hideTooltips();
@@ -1220,9 +1233,9 @@ animate();
 function setAppHeight() {
   const h = window.innerHeight;
   document.body.style.height = h + 'px';
-  document.getElementById('charts').style.height = 
-    (h 
-    - document.getElementById('top').offsetHeight 
+  document.getElementById('charts').style.height =
+    (h
+    - document.getElementById('top').offsetHeight
     - document.getElementById('bottom').offsetHeight
     ) + 'px';
 }
