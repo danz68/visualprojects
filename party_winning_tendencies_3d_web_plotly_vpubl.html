@@ -1272,25 +1272,25 @@ _updateAxisTextLabel(el, a, b, t, offsetPx, readUpward = false) {
   }
 
   getNearestDot(mouseX, mouseY, thresholdPx = 12) {
-    if (!this.dots.visible) return null;
-    const cx = dotScreenCx[this.period];
-    const cy = dotScreenCy[this.period];
-    const valid = dotScreenValid[this.period];
-    if (!cx) return null;
-    const d = DATA[this.period].dots;
-    const n = cx.length;
-    let bestDist = thresholdPx * thresholdPx;
-    let bestIdx = -1;
-    for (let i = 0; i < n; i++) {
-      if (!valid[i]) continue;
-      const dx = cx[i] - mouseX;
-      const dy = cy[i] - mouseY;
-      const dist2 = dx*dx + dy*dy;
-      if (dist2 < bestDist) { bestDist = dist2; bestIdx = i; }
-    }
-    if (bestIdx < 0) return null;
-    return { index: bestIdx, x: d.x[bestIdx], y: d.y[bestIdx] };
+  if (!this.dots.visible) return null;
+  const cx = dotScreenCx[this.period];
+  const cy = dotScreenCy[this.period];
+  const valid = dotScreenValid[this.period];
+  if (!cx) return null;
+  const d = DATA[this.period].dots;
+  const n = cx.length;
+  let bestDist = thresholdPx * thresholdPx;
+  let bestIdx = -1;
+  for (let i = 0; i < n; i++) {
+    if (!valid[i]) continue;
+    const dx = cx[i] - mouseX;
+    const dy = cy[i] - mouseY;
+    const dist2 = dx*dx + dy*dy;
+    if (dist2 < bestDist) { bestDist = dist2; bestIdx = i; }
   }
+  if (bestIdx < 0) return null;
+  return { index: bestIdx, x: d.x[bestIdx], y: d.y[bestIdx] };
+}
 }
 
 // ---- INIT VIEWS ----
@@ -1322,8 +1322,8 @@ function rebuildDotScreenCache(view) {
   const valid = new Uint8Array(n);
   const v = new THREE.Vector3();
   const cam = view.camera;
-  const w = view.host.clientWidth;
-  const h = view.host.clientHeight;
+  const w = rect.width;
+  const h = rect.height;
   for (let i = 0; i < n; i++) {
     const p = dataToScene(d.x[i], d.y[i], d.z[i]);
     v.set(p.x, p.y, p.z);
@@ -1337,7 +1337,6 @@ function rebuildDotScreenCache(view) {
   dotScreenCy[period] = cy;
   dotScreenValid[period] = valid;
 }
-
 function rebuildBothDotCaches() {
   rebuildDotScreenCache(viewA);
   rebuildDotScreenCache(viewB);
@@ -1361,7 +1360,7 @@ viewB.onZoom   = (z) => { viewA.setZoom(z); rebuildBothDotCaches(); clearTimeout
 viewA.onPan    = () => { viewB.setCameraState(viewA.getCameraState()); };
 viewB.onPan    = () => { viewA.setCameraState(viewB.getCameraState()); };
 
-rebuildBothDotCaches();
+
 
 viewA.renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 viewB.renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
@@ -1675,6 +1674,8 @@ function setAppHeight() {
 window.addEventListener('resize', setAppHeight);
 window.addEventListener('orientationchange', () => { setTimeout(setAppHeight, 100); });
 setAppHeight();
+requestAnimationFrame(() => rebuildBothDotCaches());
+
 
 // ---- FOCUS DETECTION ----
 function getFocusedParty(view) {
