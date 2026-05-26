@@ -98,6 +98,7 @@ h1 {
   justify-content: flex-start;
   gap: 5px;
   font-size: 14px;
+  text-align: center;
 }
 #controls {
   display: flex;
@@ -181,12 +182,7 @@ h1 {
   line-height: 1.5;
   min-width: 220px;
 }
-#bottom {
-  flex: 0 0 auto;
-  box-sizing: border-box;
-  vpadding: 4px 22px 6px 22px;
-  text-align: center;
-}
+
 
 /* D-pad buttons */
 .dpad-btn {
@@ -207,6 +203,9 @@ h1 {
 }
 .dpad-btn:hover { background: #ececec; }
 .dpad-btn:active { background: #ddd; transform: scale(0.93); }
+
+/* shared custom dropdown option hover */
+.pvopt:hover, .zsopt:hover, .bwopt:hover { background: #f5f5f5; }
 </style>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 </head>
@@ -257,7 +256,7 @@ h1 {
   font-family:inherit;font-size:12px;
   box-shadow:0 2px 12px rgba(0,0,0,0.15);
   border:1px solid #ddd;
-  overflow:hidden;
+  overflow:visible;
 ">
   <!-- tab bar -->
   <div style="display:flex;">
@@ -275,38 +274,103 @@ h1 {
   <!-- Selection tab -->
   <div id="tabSelection" style="padding:12px 14px;">
     <div style="margin-bottom:10px;">
-      <div style="color:#666;margin-bottom:6px;">Party view</div>
-      <select id="partyViewSelect" style="width:100%;font-size:12px;padding:3px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;">
-        <option value="combined">Combined</option>
-        <option value="Conservative">Conservative</option>
-        <option value="Labour">Labour</option>
-        <option value="Liberal Democrat">Liberal Democrat</option>
-        <option value="Green">Green</option>
-        <option value="Reform UK">Reform UK</option>
-        <option value="Other">Other</option>
-      </select>
+      <div style="color:#666;margin-bottom:6px;">Party</div>
+      <div id="partyViewDropdown" style="position:relative;width:100%;font-size:12px;">
+        <div id="partyViewSelected" onclick="togglePartyDropdown()" style="
+          display:flex;align-items:center;gap:6px;
+          padding:4px 6px;border:1px solid #ccc;border-radius:4px;
+          background:#fff;cursor:pointer;user-select:none;
+        ">
+          <span id="partyViewDot" style="width:8px;height:8px;border-radius:50%;background:transparent;flex-shrink:0;display:none;"></span>
+          <span id="partyViewLabel" style="flex:1;">Combined</span>
+          <svg width="10" height="6" viewBox="0 0 10 6"><polyline points="1,1 5,5 9,1" fill="none" stroke="#888" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div id="partyViewList" style="
+          display:none;position:absolute;top:100%;left:0;right:0;z-index:999;
+          background:#fff;border:1px solid #ccc;border-radius:4px;
+          box-shadow:0 2px 8px rgba(0,0,0,0.12);margin-top:2px;overflow:hidden;
+        ">
+          <div class="pvopt" data-value="combined" data-color="" onclick="selectPartyView(this)" style="display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;">
+		  <svg width="8" height="8" viewBox="0 0 8 8" style="flex-shrink:0;border-radius:50%;overflow:hidden;">
+			<path d="M4,4 L4,0 A4,4 0 0,1 8,4 Z" fill="#1f77b4"/>
+			<path d="M4,4 L8,4 A4,4 0 0,1 4,8 Z" fill="#d62728"/>
+			<path d="M4,4 L4,8 A4,4 0 0,1 0,4 Z" fill="#2ca02c"/>
+			<path d="M4,4 L0,4 A4,4 0 0,1 4,0 Z" fill="#ffbf00"/>
+		  </svg>Combined
+		</div>
+          <div class="pvopt" data-value="Conservative" data-color="#1f77b4" onclick="selectPartyView(this)" style="display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#1f77b4;flex-shrink:0;"></span>Conservative
+          </div>
+          <div class="pvopt" data-value="Labour" data-color="#d62728" onclick="selectPartyView(this)" style="display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#d62728;flex-shrink:0;"></span>Labour
+          </div>
+          <div class="pvopt" data-value="Liberal Democrat" data-color="#ffbf00" onclick="selectPartyView(this)" style="display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#ffbf00;flex-shrink:0;"></span>Liberal Democrat
+          </div>
+          <div class="pvopt" data-value="Green" data-color="#2ca02c" onclick="selectPartyView(this)" style="display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#2ca02c;flex-shrink:0;"></span>Green
+          </div>
+          <div class="pvopt" data-value="Reform UK" data-color="#17becf" onclick="selectPartyView(this)" style="display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#17becf;flex-shrink:0;"></span>Reform UK
+          </div>
+          <div class="pvopt" data-value="Other" data-color="#8c8c8c" onclick="selectPartyView(this)" style="display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#8c8c8c;flex-shrink:0;"></span>Other
+          </div>
+        </div>
+      </div>
     </div>
+
     <div style="margin-bottom:10px;">
       <div style="color:#666;margin-bottom:6px;">Z scale</div>
-      <select id="zScaleSelect" style="width:100%;font-size:12px;padding:3px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;">
-        <option value="global" selected>Global</option>
-        <option value="global_context">Global Context</option>
-        <option value="common">Common</option>
-        <option value="independent">Independent</option>
-      </select>
+      <div id="zScaleDropdown" style="position:relative;width:100%;font-size:12px;">
+        <div id="zScaleSelected" onclick="toggleZScaleDropdown()" style="
+          display:flex;align-items:center;gap:6px;
+          padding:4px 6px;border:1px solid #ccc;border-radius:4px;
+          background:#fff;cursor:pointer;user-select:none;
+        ">
+          <span id="zScaleLabel" style="flex:1;">Global</span>
+          <svg width="10" height="6" viewBox="0 0 10 6"><polyline points="1,1 5,5 9,1" fill="none" stroke="#888" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div id="zScaleList" style="
+          display:none;position:absolute;top:100%;left:0;right:0;z-index:999;
+          background:#fff;border:1px solid #ccc;border-radius:4px;
+          box-shadow:0 2px 8px rgba(0,0,0,0.12);margin-top:2px;overflow:hidden;
+        ">
+          <div class="zsopt" data-value="global"         onclick="selectZScale(this)" style="padding:5px 8px;cursor:pointer;background:#f0f0f0;">Global</div>
+          <div class="zsopt" data-value="global_context" onclick="selectZScale(this)" style="padding:5px 8px;cursor:pointer;">Global Context</div>
+          <div class="zsopt" data-value="common"         onclick="selectZScale(this)" style="padding:5px 8px;cursor:pointer;">Common</div>
+          <div class="zsopt" data-value="independent"    onclick="selectZScale(this)" style="padding:5px 8px;cursor:pointer;">Independent</div>
+        </div>
+      </div>
     </div>
+
     <div style="margin-bottom:10px;">
-      <div style="color:#666;margin-bottom:6px;">Bandwidth display step</div>
-      <select id="bwStepSelect" style="width:100%;font-size:12px;padding:3px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;">
-        <option value="1">1%</option>
-        <option value="2" selected>2%</option>
-        <option value="5">5%</option>
-        <option value="10">10%</option>
-      </select>
+      <div style="color:#666;margin-bottom:6px;">Ward-count window</div>
+      <div id="bwStepDropdown" style="position:relative;width:100%;font-size:12px;">
+        <div id="bwStepSelected" onclick="toggleBwDropdown()" style="
+          display:flex;align-items:center;gap:6px;
+          padding:4px 6px;border:1px solid #ccc;border-radius:4px;
+          background:#fff;cursor:pointer;user-select:none;
+        ">
+          <span id="bwStepLabel" style="flex:1;">5%</span>
+          <svg width="10" height="6" viewBox="0 0 10 6"><polyline points="1,1 5,5 9,1" fill="none" stroke="#888" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div id="bwStepList" style="
+          display:none;position:absolute;top:100%;left:0;right:0;z-index:999;
+          background:#fff;border:1px solid #ccc;border-radius:4px;
+          box-shadow:0 2px 8px rgba(0,0,0,0.12);margin-top:2px;overflow:hidden;
+        ">
+          <div class="bwopt" data-value="1"  onclick="selectBwStep(this)" style="padding:5px 8px;cursor:pointer;">1%</div>
+          <div class="bwopt" data-value="2"  onclick="selectBwStep(this)" style="padding:5px 8px;cursor:pointer;">2%</div>
+          <div class="bwopt" data-value="5"  onclick="selectBwStep(this)" style="padding:5px 8px;cursor:pointer;background:#f0f0f0;">5%</div>
+          <div class="bwopt" data-value="10" onclick="selectBwStep(this)" style="padding:5px 8px;cursor:pointer;">10%</div>
+        </div>
+      </div>
     </div>
+
     <div style="margin-bottom:10px;">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-        <input id="matchingToggle" type="checkbox"> Matching wards
+        <input id="matchingToggle" type="checkbox"> Matched wards
       </label>
     </div>
     <div>
@@ -363,10 +427,8 @@ function switchMenuTab(tab) {
   document.getElementById('tabView').style.display      = isSel ? 'none'  : 'block';
   document.getElementById('tabSelBtn').style.background  = isSel ? '#fff' : '#f0f0f0';
   document.getElementById('tabSelBtn').style.color       = isSel ? '#666' : '#aaa';
-  //document.getElementById('tabSelBtn').style.fontWeight  = isSel ? '600' : 'normal';
   document.getElementById('tabViewBtn').style.background = isSel ? '#f0f0f0' : '#fff';
   document.getElementById('tabViewBtn').style.color      = isSel ? '#aaa' : '#666';
-  //document.getElementById('tabViewBtn').style.fontWeight = isSel ? 'normal' : '600';
 }
 switchMenuTab('selection');
 </script>
@@ -416,7 +478,7 @@ let periodA = '2021-24';
 // Party view and z scale — applied to both panels
 let currentPartyView = 'combined';
 let currentZScale    = 'global';
-let currentBwStep    = 2;
+let currentBwStep    = 5;
 
 const FIT_ZOOM_FACTOR = 0.66;
 
@@ -464,8 +526,6 @@ function quantileSorted(sorted, q) {
   if (lo===hi) return sorted[lo];
   return sorted[lo]*(1-(pos-lo)) + sorted[hi]*(pos-lo);
 }
-
-// recolorMeshVertices removed — mesh built from grid in _buildMesh
 
 function nearestIndex(arr, v) {
   let best=0, bestD=Math.abs(arr[0]-v);
@@ -523,7 +583,6 @@ function makeTooltipHTML(period, p) {
   let partyRows='';
 
   if (currentPartyView !== 'combined') {
-    // single party mode — count actual dots within ±(currentBwStep/2) of hovered point
     const party = currentPartyView;
     const color = PARTY_COLORS[party] || '#999';
     const partyColorHex = (PARTY_COLORS[party] || '').toLowerCase();
@@ -553,22 +612,22 @@ function makeTooltipHTML(period, p) {
     }
   }
 
-  // bandwidth: estimate from grid cell size * a smoothing factor
-  // grid step in each axis
   const _g = DATA[period] && DATA[period].grid;
   let bwX = 0, bwY = 0;
   if (_g && _g.x && _g.x.length > 1 && _g.y && _g.y.length > 1) {
-    // median cell spacing × ~3 gives a representative KDE bandwidth in data units
     const rawBwX = (_g.x[_g.x.length-1] - _g.x[0]) / (_g.x.length - 1) * 3;
     const rawBwY = (_g.y[_g.y.length-1] - _g.y[0]) / (_g.y.length - 1) * 3;
-    // round up to nearest multiple of currentBwStep
     bwX = Math.ceil(rawBwX / currentBwStep) * currentBwStep;
     bwY = Math.ceil(rawBwY / currentBwStep) * currentBwStep;
   }
-  const bwRow = bwX > 0
-    ? `<div style="display:flex;justify-content:space-between;font-size:10px;opacity:0.45;padding:2px 0 0;border-top:1px solid rgba(255,255,255,0.12);margin-top:4px;">` +
-      `<span>Bandwidth</span><span>±${bwX}% age · ±${bwY}% prof.</span></div>`
-    : '';
+  const countHalf = currentBwStep / 2;
+
+  //· ±${countHalf}%
+  //${currentBwStep}% × ${currentBwStep}%
+  const bwRow = currentPartyView !== 'combined'
+  ? `<div style="display:flex;justify-content:space-between;font-size:11px;opacity:0.65;border-top:1px solid rgba(255,255,255,0.25);padding-top:8px;margin-top:8px;">` +
+    `<span>Ward-count window</span><span>${currentBwStep}% × ${currentBwStep}%</span></div>`
+  : '';
 
   return `<div style="min-width:220px;">` +
     `<div style="font-size:13px;font-weight:600;padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.25);">${period}</div>` +
@@ -653,7 +712,6 @@ function computePartyMassCenters() {
       if (wsum > 0)
         centers[party] = { x: wx/wsum, y: wy/wsum, z: Math.min(1.02, wz/wsum + 0.018) };
 
-      // also compute per-party center using only that party's own height
       let pwx=0, pwy=0, pwz=0, pwsum=0;
       const ph = g.party_height[party];
       for (let iy=0; iy<g.y.length; iy++) {
@@ -748,183 +806,256 @@ class PeriodView {
     this.camera.updateProjectionMatrix();
   }
 
-  _buildMesh() {
-    const g      = DATA[this.period].grid;
-    const ny     = g.y.length;
-    const nx     = g.x.length;
-    const party  = currentPartyView;   // 'combined' or party name
-    const scaleMode = currentZScale;   // 'common' or 'independent'
+ _buildMesh() {
+  const g      = DATA[this.period].grid;
+  const ny     = g.y.length;
+  const nx     = g.x.length;
+  const party  = currentPartyView;
+  const scaleMode = currentZScale;
 
-    // ── compute z per vertex ──────────────────────────────────────────
-    const zGrid = new Float32Array(ny * nx);
-    const winnerGrid = new Uint8Array(ny * nx);
+  const zGrid = new Float32Array(ny * nx);
+  const winnerGrid = new Uint8Array(ny * nx);
 
-    if (party === 'combined') {
-      for (let iy = 0; iy < ny; iy++) {
-        for (let ix = 0; ix < nx; ix++) {
-          let best = -1, bestP = 0;
-          for (let pi = 0; pi < PARTY_ORDER.length; pi++) {
-            const v = g.party_height[PARTY_ORDER[pi]][iy][ix];
-            if (v > best) { best = v; bestP = pi; }
-          }
-          zGrid[iy * nx + ix] = best > 0 ? best : 0;
-          winnerGrid[iy * nx + ix] = bestP;
+  if (party === 'combined') {
+    for (let iy = 0; iy < ny; iy++) {
+      for (let ix = 0; ix < nx; ix++) {
+        let best = -1, bestP = 0;
+        for (let pi = 0; pi < PARTY_ORDER.length; pi++) {
+          const v = g.party_height[PARTY_ORDER[pi]][iy][ix];
+          if (v > best) { best = v; bestP = pi; }
         }
-      }
-    } else {
-      const ph = g.party_height[party];
-      const pi = PARTY_ORDER.indexOf(party);
-      for (let iy = 0; iy < ny; iy++) {
-        for (let ix = 0; ix < nx; ix++) {
-          const v = ph[iy][ix];
-          zGrid[iy * nx + ix] = v > 0 ? v : 0;
-          winnerGrid[iy * nx + ix] = pi >= 0 ? pi : 0;
-        }
+        zGrid[iy * nx + ix] = best > 0 ? best : 0;
+        winnerGrid[iy * nx + ix] = bestP;
       }
     }
-
-    // ── z normalization ───────────────────────────────────────────────
-    // Pre-compute per-period max across all parties (used by global/common/context)
-    if (!window._zMaxByPeriod) window._zMaxByPeriod = {};
-    if (!window._zMaxByPeriod[this.period]) {
-      let pm = 0;
-      for (const p of PARTY_ORDER) {
-        const ph = g.party_height[p];
-        for (let iy = 0; iy < ny; iy++)
-          for (let ix = 0; ix < nx; ix++)
-            if (ph[iy][ix] > pm) pm = ph[iy][ix];
+  } else {
+    const ph = g.party_height[party];
+    const pi = PARTY_ORDER.indexOf(party);
+    for (let iy = 0; iy < ny; iy++) {
+      for (let ix = 0; ix < nx; ix++) {
+        const v = ph[iy][ix];
+        zGrid[iy * nx + ix] = v > 0 ? v : 0;
+        winnerGrid[iy * nx + ix] = pi >= 0 ? pi : 0;
       }
-      window._zMaxByPeriod[this.period] = pm;
     }
+  }
 
-    let zMax = 0;
-    if (scaleMode === 'global') {
-      // highest value across ALL periods and parties ever loaded
-      const allPeriods = Object.keys(DATA);
-      for (const per of allPeriods) {
-        if (!DATA[per].grid) continue;
-        if (!window._zMaxByPeriod[per]) {
-          let pm = 0;
-          for (const p of PARTY_ORDER) {
-            const ph = DATA[per].grid.party_height[p];
-            if (!ph) continue;
-            for (let iy = 0; iy < ph.length; iy++)
-              for (let ix = 0; ix < ph[iy].length; ix++)
-                if (ph[iy][ix] > pm) pm = ph[iy][ix];
-          }
-          window._zMaxByPeriod[per] = pm;
+  if (!window._zMaxByPeriod) window._zMaxByPeriod = {};
+  if (!window._zMaxByPeriod[this.period]) {
+    let pm = 0;
+    for (const p of PARTY_ORDER) {
+      const ph = g.party_height[p];
+      for (let iy = 0; iy < ny; iy++)
+        for (let ix = 0; ix < nx; ix++)
+          if (ph[iy][ix] > pm) pm = ph[iy][ix];
+    }
+    window._zMaxByPeriod[this.period] = pm;
+  }
+
+  let zMax = 0;
+  if (scaleMode === 'global') {
+    const allPeriods = Object.keys(DATA);
+    for (const per of allPeriods) {
+      if (!DATA[per].grid) continue;
+      if (!window._zMaxByPeriod[per]) {
+        let pm = 0;
+        for (const p of PARTY_ORDER) {
+          const ph = DATA[per].grid.party_height[p];
+          if (!ph) continue;
+          for (let iy = 0; iy < ph.length; iy++)
+            for (let ix = 0; ix < ph[iy].length; ix++)
+              if (ph[iy][ix] > pm) pm = ph[iy][ix];
         }
-        if (window._zMaxByPeriod[per] > zMax) zMax = window._zMaxByPeriod[per];
+        window._zMaxByPeriod[per] = pm;
       }
-    } else if (scaleMode === 'global_context') {
-      // highest across the two currently displayed periods
-      // (respects matching toggle: uses periodA which may be '2021-24_matched')
-      const displayedPeriods = [periodA, '2026'];
-      for (const per of displayedPeriods) {
-        const v = window._zMaxByPeriod[per] || 0;
-        if (v > zMax) zMax = v;
-      }
-    } else if (scaleMode === 'common') {
-      // max within this period only (same as before)
-      zMax = window._zMaxByPeriod[this.period] || 0;
-    } else {
-      // independent: max of what's actually rendered in this mesh
-      for (let i = 0; i < zGrid.length; i++)
-        if (zGrid[i] > zMax) zMax = zGrid[i];
+      if (window._zMaxByPeriod[per] > zMax) zMax = window._zMaxByPeriod[per];
     }
-    if (zMax <= 0) zMax = 1;
+  } else if (scaleMode === 'global_context') {
+    const displayedPeriods = [periodA, '2026'];
+    for (const per of displayedPeriods) {
+      const v = window._zMaxByPeriod[per] || 0;
+      if (v > zMax) zMax = v;
+    }
+  } else if (scaleMode === 'common') {
+    zMax = window._zMaxByPeriod[this.period] || 0;
+  } else {
+    for (let i = 0; i < zGrid.length; i++)
+      if (zGrid[i] > zMax) zMax = zGrid[i];
+  }
 
-    // ── build triangles from support ──────────────────────────────────
-    const sf = g.support;
-    const SUPPORT_THRESH = 0.001;
-    const triA = [], triB = [], triC = [];
+  if (zMax <= 0) zMax = 1;
+  this._zMaxForMesh = zMax;
 
+  const sf = g.support;
+  const SUPPORT_THRESH = 0.001;
+  const PARTY_Z_THRESH = 1e-12;
+  const triA = [], triB = [], triC = [];
+
+  if (party === 'combined') {
     for (let r = 0; r < ny - 1; r++) {
       for (let c = 0; c < nx - 1; c++) {
-        const a = r * nx + c;
-        const b = r * nx + c + 1;
+        const a  = r * nx + c;
+        const b  = r * nx + c + 1;
         const cc = (r + 1) * nx + c;
         const d  = (r + 1) * nx + c + 1;
-        const sa = sf[r][c], sb = sf[r][c+1], sc2 = sf[r+1][c], sd = sf[r+1][c+1];
-        if (Math.max(sa, sb, sc2) > SUPPORT_THRESH) { triA.push(a); triB.push(b);  triC.push(cc); }
-        if (Math.max(sb, sd, sc2) > SUPPORT_THRESH) { triA.push(b); triB.push(d);  triC.push(cc); }
+
+        const sa = sf[r][c];
+        const sb = sf[r][c + 1];
+        const sc2 = sf[r + 1][c];
+        const sd = sf[r + 1][c + 1];
+
+        if (Math.max(sa, sb, sc2) > SUPPORT_THRESH) {
+          triA.push(a); triB.push(b); triC.push(cc);
+        }
+        if (Math.max(sb, sd, sc2) > SUPPORT_THRESH) {
+          triA.push(b); triB.push(d); triC.push(cc);
+        }
+      }
+    }
+  } else {
+    const cellRows = ny - 1;
+    const cellCols = nx - 1;
+    const keepCell = new Uint8Array(cellRows * cellCols);
+
+    for (let r = 0; r < cellRows; r++) {
+      for (let c = 0; c < cellCols; c++) {
+        const a  = r * nx + c;
+        const b  = r * nx + c + 1;
+        const cc = (r + 1) * nx + c;
+        const d  = (r + 1) * nx + c + 1;
+
+        if (Math.max(zGrid[a], zGrid[b], zGrid[cc], zGrid[d]) > PARTY_Z_THRESH) {
+          keepCell[r * cellCols + c] = 1;
+        }
       }
     }
 
-    // ── collect used vertices ─────────────────────────────────────────
-    const usedSet = new Set();
-    for (let t = 0; t < triA.length; t++) {
-      usedSet.add(triA[t]); usedSet.add(triB[t]); usedSet.add(triC[t]);
-    }
-    const used = Array.from(usedSet).sort((a, b) => a - b);
-    const remap = new Int32Array(ny * nx).fill(-1);
-    used.forEach((old, newIdx) => remap[old] = newIdx);
+    const outside = new Uint8Array(cellRows * cellCols);
+    const queue = new Int32Array(cellRows * cellCols);
+    let qh = 0, qt = 0;
 
-    const n = used.length;
-    const positions = new Float32Array(n * 3);
-    const colors    = new Float32Array(n * 3);
-
-    // vertex colors
-    const BASE_GREY = 240 / 255;
-    const zVals = used.map(i => zGrid[i]).filter(v => v > 0).sort((a, b) => a - b);
-    const zLow  = zVals[Math.floor(zVals.length * SURFACE_COLOR_Q_LOW)]  || 0;
-    const zHigh = zVals[Math.floor(zVals.length * SURFACE_COLOR_Q_HIGH)] || 1;
-    const zRange = zHigh > zLow ? zHigh - zLow : 1e-12;
-
-    for (let ni = 0; ni < n; ni++) {
-      const flat = used[ni];
-      const iy   = Math.floor(flat / nx);
-      const ix   = flat % nx;
-      const zRaw = zGrid[flat];
-      const zNorm = Math.max(0, Math.min(1, (zRaw - zLow) / zRange));
-      const intensity = SURFACE_COLOR_MIN + (SURFACE_COLOR_MAX - SURFACE_COLOR_MIN) * Math.pow(zNorm, SURFACE_COLOR_POWER);
-      const pi   = winnerGrid[flat];
-      const hex  = PARTY_COLORS[PARTY_ORDER[pi]] || '#8c8c8c';
-      const rgb  = hexToRgb255(hex);
-      const sup  = Math.max(0, Math.min(1, sf[iy][ix]));
-      const whiteMix = (1 - sup) * SURFACE_EDGE_FADE_TO_WHITE;
-      colors[ni*3]   = (BASE_GREY + (rgb[0]/255 - BASE_GREY) * intensity) * (1-whiteMix) + BASE_GREY * whiteMix;
-      colors[ni*3+1] = (BASE_GREY + (rgb[1]/255 - BASE_GREY) * intensity) * (1-whiteMix) + BASE_GREY * whiteMix;
-      colors[ni*3+2] = (BASE_GREY + (rgb[2]/255 - BASE_GREY) * intensity) * (1-whiteMix) + BASE_GREY * whiteMix;
-
-      // position — use normalized z (0..1) scaled by SZ
-      const zScene = (zRaw / zMax);
-      const p = dataToScene(g.x[ix], g.y[iy], zScene);
-      positions[ni*3]   = p.x;
-      positions[ni*3+1] = p.y;
-      positions[ni*3+2] = p.z;
+    function markOutside(r, c) {
+      if (r < 0 || r >= cellRows || c < 0 || c >= cellCols) return;
+      const k = r * cellCols + c;
+      if (keepCell[k] || outside[k]) return;
+      outside[k] = 1;
+      queue[qt++] = k;
     }
 
-    // indices
-    const indices = new Uint32Array(triA.length * 3);
-    for (let t = 0; t < triA.length; t++) {
-      indices[t*3]   = remap[triA[t]];
-      indices[t*3+1] = remap[triB[t]];
-      indices[t*3+2] = remap[triC[t]];
+    for (let c = 0; c < cellCols; c++) {
+      markOutside(0, c);
+      markOutside(cellRows - 1, c);
+    }
+    for (let r = 0; r < cellRows; r++) {
+      markOutside(r, 0);
+      markOutside(r, cellCols - 1);
     }
 
-    this._originalColors = new Float32Array(colors);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
-    geo.setIndex(new THREE.BufferAttribute(indices, 1));
-    smoothGeometry(geo, 20);
+    while (qh < qt) {
+      const k = queue[qh++];
+      const r = Math.floor(k / cellCols);
+      const c = k - r * cellCols;
 
-    const matBack = new THREE.MeshLambertMaterial({
-      vertexColors: true, transparent: false, opacity: 1.0,
-      depthWrite: true, depthTest: true, side: THREE.BackSide,
-    });
-    const matFront = new THREE.MeshLambertMaterial({
-      vertexColors: true, transparent: false, opacity: 1.0,
-      depthWrite: true, depthTest: true, side: THREE.FrontSide,
-    });
-    this.meshBack = new THREE.Mesh(geo, matBack);
-    this.meshBack.renderOrder = 1;
-    this.scene.add(this.meshBack);
-    this.mesh = new THREE.Mesh(geo, matFront);
-    this.mesh.renderOrder = 2;
-    this.scene.add(this.mesh);
+      markOutside(r - 1, c);
+      markOutside(r + 1, c);
+      markOutside(r, c - 1);
+      markOutside(r, c + 1);
+    }
+
+    for (let r = 0; r < cellRows; r++) {
+      for (let c = 0; c < cellCols; c++) {
+        const k = r * cellCols + c;
+
+        if (!keepCell[k] && outside[k]) continue;
+
+        const a  = r * nx + c;
+        const b  = r * nx + c + 1;
+        const cc = (r + 1) * nx + c;
+        const d  = (r + 1) * nx + c + 1;
+
+        triA.push(a); triB.push(b); triC.push(cc);
+        triA.push(b); triB.push(d); triC.push(cc);
+      }
+    }
   }
+
+  const usedSet = new Set();
+  for (let t = 0; t < triA.length; t++) {
+    usedSet.add(triA[t]); usedSet.add(triB[t]); usedSet.add(triC[t]);
+  }
+
+  const used = Array.from(usedSet).sort((a, b) => a - b);
+  const remap = new Int32Array(ny * nx).fill(-1);
+  used.forEach((old, newIdx) => remap[old] = newIdx);
+
+  const n = used.length;
+  const positions = new Float32Array(n * 3);
+  const colors    = new Float32Array(n * 3);
+
+  const BASE_GREY = 240 / 255;
+  const zVals = used.map(i => zGrid[i]).filter(v => v > 0).sort((a, b) => a - b);
+  const zLow  = zVals[Math.floor(zVals.length * SURFACE_COLOR_Q_LOW)]  || 0;
+  const zHigh = zVals[Math.floor(zVals.length * SURFACE_COLOR_Q_HIGH)] || 1;
+  const zRange = zHigh > zLow ? zHigh - zLow : 1e-12;
+
+  for (let ni = 0; ni < n; ni++) {
+    const flat = used[ni];
+    const iy   = Math.floor(flat / nx);
+    const ix   = flat % nx;
+    const zRaw = zGrid[flat];
+    const zNorm = Math.max(0, Math.min(1, (zRaw - zLow) / zRange));
+    const intensity = SURFACE_COLOR_MIN + (SURFACE_COLOR_MAX - SURFACE_COLOR_MIN) * Math.pow(zNorm, SURFACE_COLOR_POWER);
+    const pi   = winnerGrid[flat];
+    const hex  = PARTY_COLORS[PARTY_ORDER[pi]] || '#8c8c8c';
+    const rgb  = hexToRgb255(hex);
+    const sup  = Math.max(0, Math.min(1, sf[iy][ix]));
+    const whiteMix = (1 - sup) * SURFACE_EDGE_FADE_TO_WHITE;
+
+    colors[ni*3]   = (BASE_GREY + (rgb[0]/255 - BASE_GREY) * intensity) * (1-whiteMix) + BASE_GREY * whiteMix;
+    colors[ni*3+1] = (BASE_GREY + (rgb[1]/255 - BASE_GREY) * intensity) * (1-whiteMix) + BASE_GREY * whiteMix;
+    colors[ni*3+2] = (BASE_GREY + (rgb[2]/255 - BASE_GREY) * intensity) * (1-whiteMix) + BASE_GREY * whiteMix;
+
+    const zScene = zRaw / zMax;
+    const p = dataToScene(g.x[ix], g.y[iy], zScene);
+    positions[ni*3]   = p.x;
+    positions[ni*3+1] = p.y;
+    positions[ni*3+2] = p.z;
+  }
+
+  const indices = new Uint32Array(triA.length * 3);
+  for (let t = 0; t < triA.length; t++) {
+    indices[t*3]   = remap[triA[t]];
+    indices[t*3+1] = remap[triB[t]];
+    indices[t*3+2] = remap[triC[t]];
+  }
+
+  this._originalColors = new Float32Array(colors);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+
+  smoothGeometry(geo, 20);
+
+  const matBack = new THREE.MeshLambertMaterial({
+    vertexColors: true, transparent: false, opacity: 1.0,
+    depthWrite: true, depthTest: true, side: THREE.BackSide,
+  });
+
+  const matFront = new THREE.MeshLambertMaterial({
+    vertexColors: true, transparent: false, opacity: 1.0,
+    depthWrite: true, depthTest: true, side: THREE.FrontSide,
+  });
+
+  this.meshBack = new THREE.Mesh(geo, matBack);
+  this.meshBack.renderOrder = 1;
+  this.scene.add(this.meshBack);
+
+  this.mesh = new THREE.Mesh(geo, matFront);
+  this.mesh.renderOrder = 2;
+  this.scene.add(this.mesh);
+}
 
   _buildDots() {
     const d = DATA[this.period].dots;
@@ -932,7 +1063,6 @@ class PeriodView {
     const partyColor = currentPartyView !== 'combined'
       ? (PARTY_COLORS[currentPartyView] || '').toLowerCase()
       : null;
-    // exclude hidden dots from geometry entirely
     this._dotVisible = new Uint8Array(n);
     const includedIdx = [];
     for (let i = 0; i < n; i++) {
@@ -1109,7 +1239,6 @@ class PeriodView {
   }
 
   _buildLabelOverlay() {
-    // ensure mass centers are computed for this period (lazy, in case DATA arrived late)
     if (!partyMassCenters[this.period] && DATA[this.period] && DATA[this.period].grid) {
       computePartyMassCenters();
     }
@@ -1440,7 +1569,6 @@ class PeriodView {
     };
   }
 
-  
   _updateLabels() {
   const meshCenter = this._project(dataToScene(40, 35, 0));
   for (const { div, pos3d } of this.partyLabelEls) {
@@ -1504,7 +1632,48 @@ class PeriodView {
   resize() {
     this._resize();
   }
+getRenderedMeshZAtDataXY(x, y) {
+  const geo = this.mesh && this.mesh.geometry;
+  if (!geo || !geo.index || !geo.attributes.position) return 0;
 
+  const pos = geo.attributes.position;
+  const idx = geo.index.array;
+
+  const px = x * SX + OX;
+  const py = y * SY + OY;
+
+  let fallbackZ = 0;
+  let fallbackD = Infinity;
+
+  for (let f = 0; f < idx.length; f += 3) {
+    const ia = idx[f], ib = idx[f + 1], ic = idx[f + 2];
+
+    const ax = pos.getX(ia), ay = pos.getY(ia), az = pos.getZ(ia);
+    const bx = pos.getX(ib), by = pos.getY(ib), bz = pos.getZ(ib);
+    const cx = pos.getX(ic), cy = pos.getY(ic), cz = pos.getZ(ic);
+
+    const da = (px - ax) * (px - ax) + (py - ay) * (py - ay);
+    const db = (px - bx) * (px - bx) + (py - by) * (py - by);
+    const dc = (px - cx) * (px - cx) + (py - cy) * (py - cy);
+
+    if (da < fallbackD) { fallbackD = da; fallbackZ = az; }
+    if (db < fallbackD) { fallbackD = db; fallbackZ = bz; }
+    if (dc < fallbackD) { fallbackD = dc; fallbackZ = cz; }
+
+    const den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+    if (Math.abs(den) < 1e-12) continue;
+
+    const wa = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / den;
+    const wb = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / den;
+    const wc = 1 - wa - wb;
+
+    if (wa >= -1e-5 && wb >= -1e-5 && wc >= -1e-5) {
+      return Math.max(0, (wa * az + wb * bz + wc * cz - OZ) / SZ);
+    }
+  }
+
+  return Math.max(0, (fallbackZ - OZ) / SZ);
+}
   getHitPoint(mouseX, mouseY) {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(
@@ -1640,27 +1809,36 @@ function setTouchGuides(hit) {
   viewB.setTouchGuideXY(hit.x, hit.y);
 }
 
-function setZGuides(hit) {
+function setZGuides(hit, sourceView) {
   for (const [view, period] of [[viewA, periodA], [viewB, '2026']]) {
     const g = DATA[period].grid;
     const ix = nearestIndex(g.x, hit.x);
     const iy = nearestIndex(g.y, hit.y);
-    let z = 0;
-    for (const p of PARTY_ORDER) { const v = g.party_height[p][iy][ix]; if (v > z) z = v; }
-    let color;
+
+    let color = '#ffffff';
+
     if (currentPartyView !== 'combined') {
-      // single-party mode: always use that party's colour
       color = PARTY_COLORS[currentPartyView] || '#ffffff';
     } else {
-      // combined mode: colour of dominant party at this cell
-      let bestParty = null, bestVal = -1;
+      let bestParty = null;
+      let bestVal = -1;
+
       for (const party of PARTY_ORDER) {
-        const v = g.party_raw[party][iy][ix];
-        if (v > bestVal) { bestVal = v; bestParty = party; }
+        const v = g.party_height[party][iy][ix];
+        if (v > bestVal) {
+          bestVal = v;
+          bestParty = party;
+        }
       }
+
       color = bestParty ? (PARTY_COLORS[bestParty] || '#ffffff') : '#ffffff';
     }
-    view.setTouchGuideZ(hit.x, hit.y, z, color);
+
+    const zScene = view === sourceView
+      ? hit.z
+      : view.getRenderedMeshZAtDataXY(hit.x, hit.y);
+
+    view.setTouchGuideZ(hit.x, hit.y, zScene, color);
   }
 }
 
@@ -1727,7 +1905,7 @@ function updateTooltips() {
         rectB.left + (relX / rectA.width) * rectB.width + 8,
         rectB.top  + (relY / rectA.height) * rectB.height + 8);
       setTouchGuides(hit);
-      setZGuides(hit);
+      setZGuides(hit, viewA);
     } else {
       hideZGuides();
       const dot = viewA.getNearestDot(x, y);
@@ -1754,7 +1932,7 @@ function updateTooltips() {
     const hit = viewB.getHitPoint(x, y);
     if (hit) {
       tooltipB.innerHTML = makeTooltipHTML('2026', hit);
-      tooltipA.innerHTML = makeTooltipHTML('2021-24', hit);
+      tooltipA.innerHTML = makeTooltipHTML(periodA, hit);
       placeTooltipInWindow(tooltipB, x + 8, y + 8);
       const relX = x - rectB.left;
       const relY = y - rectB.top;
@@ -1762,7 +1940,7 @@ function updateTooltips() {
         rectA.left + (relX / rectB.width) * rectA.width + 8,
         rectA.top  + (relY / rectB.height) * rectA.height + 8);
       setTouchGuides(hit);
-      setZGuides(hit);
+      setZGuides(hit, viewB);
     } else {
       hideZGuides();
       const dot = viewB.getNearestDot(x, y);
@@ -1817,79 +1995,158 @@ document.getElementById('bottom').style.visibility = 'visible';
 function updatePanelTitle(side, period) {
   const el = document.getElementById('panelTitle' + side);
   if (!el) return;
-  const n = DATA[period] && DATA[period].dots ? DATA[period].dots.x.length : 0;
+
+  const dots = DATA[period] && DATA[period].dots;
+  let n = 0;
+
+  if (dots && dots.x) {
+    if (currentPartyView === 'combined') {
+      n = dots.x.length;
+    } else {
+      const partyColor = (PARTY_COLORS[currentPartyView] || '').toLowerCase();
+      for (let i = 0; i < dots.x.length; i++) {
+        if ((dots.colors[i] || '').toLowerCase() === partyColor) n++;
+      }
+    }
+  }
+
   let label;
   if (period === '2021-24_matched') label = '2021-24';
   else if (period === '2021-24') label = '2021-24';
   else label = period;
-  const contested = (period === '2021-24_matched') ? ' contested':'';
-  const post_contested = (period === '2021-24_matched') ? ' in 2026':'';
-  el.innerHTML = label + '<span style="font-weight: 400;opacity:0.5;margin-left:7px;">(' + n.toLocaleString() + contested +' wards'+post_contested+')</span>';
+
+  const contested = (period === '2021-24_matched') ? ' contested' : '';
+  const post_contested = (period === '2021-24_matched') ? ' in 2026' : '';
+
+  el.innerHTML =
+    label +
+    '<span style="font-weight: 400;opacity:0.5;margin-left:7px;">(' +
+    n.toLocaleString() + contested + ' wards' + post_contested +
+    ')</span>';
 }
 const matchingToggle = document.getElementById('matchingToggle');
+
+
 
 function switchPeriodA(newPeriod) {
   periodA = newPeriod;
 
-  // Update panel title
   updatePanelTitle('A', periodA);
+  updatePanelTitle('B', '2026');
 
-  // Rebuild party mass centers with new period
   partyMassCenters[periodA] = {};
   const g = DATA[periodA].grid;
   const centers = {};
+
   for (const party of PARTY_ORDER) {
-    let wx=0, wy=0, wz=0, wsum=0;
-    for (let iy=0; iy<g.y.length; iy++) {
-      for (let ix=0; ix<g.x.length; ix++) {
-        let bestParty=null, bestVal=-1;
+    delete partyMassCenters[periodA + '__' + party];
+
+    let wx = 0, wy = 0, wz = 0, wsum = 0;
+
+    for (let iy = 0; iy < g.y.length; iy++) {
+      for (let ix = 0; ix < g.x.length; ix++) {
+        let bestParty = null;
+        let bestVal = -1;
+
         for (const p of PARTY_ORDER) {
           const v = g.party_raw[p][iy][ix];
-          if (v > bestVal) { bestVal=v; bestParty=p; }
+          if (v > bestVal) {
+            bestVal = v;
+            bestParty = p;
+          }
         }
+
         if (bestParty !== party) continue;
+
         let z = 0;
-        for (const p of PARTY_ORDER) { const v = g.party_height[p][iy][ix]; if (v > z) z = v; }
+        for (const p of PARTY_ORDER) {
+          const v = g.party_height[p][iy][ix];
+          if (v > z) z = v;
+        }
+
         if (z <= 0) continue;
+
         wx += g.x[ix] * z;
         wy += g.y[iy] * z;
-		wz += z*z;
+        wz += z * z;
         wsum += z;
       }
     }
+
     if (wsum > 0) {
-      centers[party] = { x: wx/wsum, y: wy/wsum, z: Math.min(1.02, wz/wsum + 0.018) };
+      centers[party] = {
+        x: wx / wsum,
+        y: wy / wsum,
+        z: Math.min(1.02, wz / wsum + 0.018)
+      };
+    }
+
+    let pwx = 0, pwy = 0, pwz = 0, pwsum = 0;
+    const ph = g.party_height[party];
+
+    for (let iy = 0; iy < g.y.length; iy++) {
+      for (let ix = 0; ix < g.x.length; ix++) {
+        const z = ph[iy][ix];
+        if (z <= 0) continue;
+
+        pwx += g.x[ix] * z;
+        pwy += g.y[iy] * z;
+        pwz += z * z;
+        pwsum += z;
+      }
+    }
+
+    if (pwsum > 0) {
+      partyMassCenters[periodA + '__' + party] = {
+        x: pwx / pwsum,
+        y: pwy / pwsum,
+        z: Math.min(1.02, pwz / pwsum + 0.018)
+      };
     }
   }
+
   partyMassCenters[periodA] = centers;
 
-  // Rebuild wardKeyToIndex for new period
   wardKeyToIndex[periodA] = {};
   const keys = DATA[periodA].dots.ward_key;
   if (keys) keys.forEach((k, i) => wardKeyToIndex[periodA][k] = i);
 
-  // Rebuild viewA mesh, dots, labels
   viewA.period = periodA;
-  viewA.scene.remove(viewA.mesh);
-  viewA.scene.remove(viewA.meshBack);
-  viewA.scene.remove(viewA.dots);
-  viewA.mesh.geometry.dispose();
-  viewA.mesh.material.dispose();
-  viewA.meshBack.material.dispose();
-  viewA.dots.geometry.dispose();
-  viewA.dots.material.dispose();
+
   window._zMaxByPeriod = {};
-  viewA._buildMesh();
-  viewA._buildDots();
-  viewA.setDotsVisible(dotsToggle.checked);
-  viewA.setMeshOpacity(Number(opacitySlider.value));
 
-  // Rebuild label overlay
-  if (viewA.labelOverlay) viewA.labelOverlay.remove();
-  viewA._buildLabelOverlay();
+  const viewsToRebuild = currentZScale === 'global_context'
+    ? [viewA, viewB]
+    : [viewA];
 
-  // Rebuild dot screen cache
-  rebuildDotScreenCache(viewA);
+  for (const view of viewsToRebuild) {
+    view.scene.remove(view.mesh);
+    view.scene.remove(view.meshBack);
+    view.scene.remove(view.dots);
+
+    view.mesh.geometry.dispose();
+    view.mesh.material.dispose();
+    view.meshBack.material.dispose();
+
+    view.dots.geometry.dispose();
+    if (view.dots.material.map) view.dots.material.map.dispose();
+    view.dots.material.dispose();
+
+    view._buildMesh();
+    view._buildDots();
+    view.setDotsVisible(dotsToggle.checked);
+    view.setMeshOpacity(Number(opacitySlider.value));
+
+    if (view.labelOverlay) view.labelOverlay.remove();
+    view._buildLabelOverlay();
+
+    rebuildDotScreenCache(view);
+  }
+
+  if (currentZScale === 'global_context') {
+    viewB.setCameraState(viewA.getCameraState());
+  }
+
   updateFocusPanel();
   hideTooltips();
   hideZGuides();
@@ -1915,6 +2172,7 @@ function rebuildBothMeshes() {
     view.mesh.material.dispose();
     view.meshBack.material.dispose();
     view.dots.geometry.dispose();
+	if (view.dots.material.map) view.dots.material.map.dispose();
     view.dots.material.dispose();
     view._buildMesh();
     view._buildDots();
@@ -1929,17 +2187,117 @@ function rebuildBothMeshes() {
   updateFocusPanel();
 }
 
-document.getElementById('partyViewSelect').addEventListener('change', e => {
-  currentPartyView = e.target.value;
-  rebuildBothMeshes();
-});
+// ---- PARTY VIEW DROPDOWN ----
+function togglePartyDropdown() {
+  const list = document.getElementById('partyViewList');
+  const isOpen = list.style.display !== 'none';
+  closeAllCustomDropdowns();
+  if (!isOpen) list.style.display = 'block';
+}
 
-document.getElementById('zScaleSelect').addEventListener('change', e => {
-  currentZScale = e.target.value;
+function selectPartyView(el) {
+  const value = el.dataset.value;
+  const color = el.dataset.color;
+  const changed = value !== currentPartyView;
+
+  document.getElementById('partyViewLabel').textContent =
+    value === 'combined' ? 'Combined' : value;
+
+  const dot = document.getElementById('partyViewDot');
+
+  if (value === 'combined') {
+    dot.style.display = 'none';
+
+    let svg = document.getElementById('partyViewCombinedSvg');
+    if (!svg) {
+      svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.id = 'partyViewCombinedSvg';
+      svg.setAttribute('width', '8');
+      svg.setAttribute('height', '8');
+      svg.setAttribute('viewBox', '0 0 8 8');
+      svg.style.cssText = 'flex-shrink:0;border-radius:50%;overflow:hidden;';
+      svg.innerHTML =
+        '<path d="M4,4 L4,0 A4,4 0 0,1 8,4 Z" fill="#1f77b4"/>' +
+        '<path d="M4,4 L8,4 A4,4 0 0,1 4,8 Z" fill="#d62728"/>' +
+        '<path d="M4,4 L4,8 A4,4 0 0,1 0,4 Z" fill="#2ca02c"/>' +
+        '<path d="M4,4 L0,4 A4,4 0 0,1 4,0 Z" fill="#ffbf00"/>';
+      dot.parentNode.insertBefore(svg, dot);
+    }
+
+    svg.style.display = 'inline-block';
+  } else {
+    const svg = document.getElementById('partyViewCombinedSvg');
+    if (svg) svg.style.display = 'none';
+
+    if (color) {
+      dot.style.background = color;
+      dot.style.display = 'inline-block';
+    } else {
+      dot.style.display = 'none';
+    }
+  }
+
+  document.querySelectorAll('.pvopt').forEach(o => {
+    o.style.background = o === el ? '#f0f0f0' : '';
+  });
+
+  document.getElementById('partyViewList').style.display = 'none';
+
+  if (!changed) return;
+
+  currentPartyView = value;
   rebuildBothMeshes();
-});
-document.getElementById('bwStepSelect').addEventListener('change', e => {
-  currentBwStep = Number(e.target.value);
+  updatePanelTitle('A', periodA);
+updatePanelTitle('B', '2026');
+}
+
+// ---- Z SCALE DROPDOWN ----
+function toggleZScaleDropdown() {
+  const list = document.getElementById('zScaleList');
+  const isOpen = list.style.display !== 'none';
+  closeAllCustomDropdowns();
+  if (!isOpen) list.style.display = 'block';
+}
+function selectZScale(el) {
+  document.getElementById('zScaleLabel').textContent = el.textContent;
+  document.querySelectorAll('.zsopt').forEach(o => o.style.background = o === el ? '#f0f0f0' : '');
+  document.getElementById('zScaleList').style.display = 'none';
+  currentZScale = el.dataset.value;
+  rebuildBothMeshes();
+}
+
+// ---- BANDWIDTH DROPDOWN ----
+function toggleBwDropdown() {
+  const list = document.getElementById('bwStepList');
+  const isOpen = list.style.display !== 'none';
+  closeAllCustomDropdowns();
+  if (!isOpen) list.style.display = 'block';
+}
+function selectBwStep(el) {
+  document.getElementById('bwStepLabel').textContent = el.textContent;
+  document.querySelectorAll('.bwopt').forEach(o => o.style.background = o === el ? '#f0f0f0' : '');
+  document.getElementById('bwStepList').style.display = 'none';
+  currentBwStep = Number(el.dataset.value);
+}
+
+// ---- CLOSE ALL CUSTOM DROPDOWNS ----
+function closeAllCustomDropdowns() {
+  document.getElementById('partyViewList').style.display = 'none';
+  document.getElementById('zScaleList').style.display = 'none';
+  document.getElementById('bwStepList').style.display = 'none';
+}
+
+// Outside-click closes all three dropdowns
+document.addEventListener('click', e => {
+  const inParty  = document.getElementById('partyViewDropdown').contains(e.target);
+  const inZScale = document.getElementById('zScaleDropdown').contains(e.target);
+  const inBw     = document.getElementById('bwStepDropdown').contains(e.target);
+  if (!inParty)  document.getElementById('partyViewList').style.display = 'none';
+  if (!inZScale) document.getElementById('zScaleList').style.display = 'none';
+  if (!inBw)     document.getElementById('bwStepList').style.display = 'none';
+  if (!menuPopup.contains(e.target) && e.target !== menuBtn) {
+    menuPopup.style.display = 'none';
+  }
 });
 
 opacitySlider.addEventListener('input', e => {
@@ -1976,12 +2334,6 @@ menuBtn.addEventListener('click', e => {
   const opening = menuPopup.style.display === 'none';
   menuPopup.style.display = opening ? 'block' : 'none';
   if (opening) { hideTooltips(); hideZGuides(); }
-});
-
-document.addEventListener('click', e => {
-  if (!menuPopup.contains(e.target) && e.target !== menuBtn) {
-    menuPopup.style.display = 'none';
-  }
 });
 
 const azimuthSlider   = document.getElementById('azimuthSlider');
@@ -2141,6 +2493,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') resetView();
 });
 
+selectPartyView(document.querySelector('.pvopt[data-value="combined"]'));
 
 </script>
 </body>
