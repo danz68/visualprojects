@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Births and Deaths</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+
 <script type="importmap">
 {
   "imports": {
@@ -191,13 +192,23 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
     </div>
     
 	<div class="menu-row"><label><input type="checkbox" id="showRawBehind" > Residuals thorns</label></div>
-    <div class="menu-row">
-      <div class="menu-label">Surfaces</div>
-      <label><input type="checkbox" id="showBirths" checked> Births</label>
-      <label style="margin-top:4px"><input type="checkbox" id="showDeaths" checked> Deaths</label>
-      <label style="margin-top:4px"><input type="checkbox" id="showBalance"> Balance</label>
-	  <label style="margin-top:4px"><input type="checkbox" id="showZeroPlane" checked> Zero plane </label>
-    </div>
+
+
+	<div class="menu-row">
+	  <div class="menu-label">Surfaces</div>
+
+	  <label><input type="checkbox" id="showBirths" checked> Births</label>
+
+	<label style="margin-top:4px;display:flex;align-items:center;gap:8px;">
+	  <input type="checkbox" id="showDeaths" checked>
+	  <span>Deaths</span>
+	  <input type="checkbox" id="mirrorDeathsZ" style="margin-left:10px;">
+	  <span>Mirrored</span>
+	</label>
+
+	  <label style="margin-top:4px"><input type="checkbox" id="showBalance"> Balance</label>
+	  <label style="margin-top:4px"><input type="checkbox" id="showZeroPlane" checked> Zero plane</label>
+	</div>
 	<div class="menu-row">
 	  <div class="menu-label">Wires</div>
 	  <label><input type="checkbox" id="showCycleWires"> Cyclic/Months</label>
@@ -219,7 +230,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
       <div style="display:flex;justify-content:space-between;" class="menu-label"><span>Wire opacity</span><span id="wire_opacityValView">0.50</span></div>
       <input type="range" id="wire_opacitySliderView" min="0.05" max="1" step="0.01" value="0.50">
     </div>
-    <div class="menu-row">
+    <div class="menu-row" >
       <div style="display:flex;justify-content:space-between;" class="menu-label"><span>Spin</span><span id="azVal">0</span></div>
       <input type="range" id="azSlider" min="0" max="360" step="1" value="200">
     </div>
@@ -263,11 +274,15 @@ function updateHeaderWithColors() {
 updateHeaderWithColors();
 
 import * as THREE from "three";
-import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
-import { LineGeometry } from "three/addons/lines/LineGeometry.js";
-import { LineMaterial } from "three/addons/lines/LineMaterial.js";
-import { FullScreenQuad } from "three/addons/postprocessing/Pass.js";
+import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.10/build/index.module.js";
+import { LineSegmentsGeometry } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/lines/LineSegmentsGeometry.js";
+import { LineGeometry } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/lines/LineGeometry.js";
+import { LineMaterial } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/lines/LineMaterial.js";
+import { FullScreenQuad } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/postprocessing/Pass.js";
 window.THREE = THREE;
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 THREE.ColorManagement.enabled = true; // legacy (r128-era) colour parity for the surface ramp
 
 const GEO_LABELS = {
@@ -455,6 +470,18 @@ function _cycleGridFromSource(grid, sourceYears, tpl) {
   return out;
 }
 
+function _mirrorDeathsGridIfNeeded(sname, grid) {
+  if (sname !== 'deaths' || !mirrorDeathsZ || !Array.isArray(grid)) return grid;
+  return grid.map(row => Array.isArray(row)
+    ? row.map(v => (v !== null && isFinite(v)) ? -v : v)
+    : row
+  );
+}
+
+function _seriesColorValue(sname, v) {
+  return (sname === 'deaths' && mirrorDeathsZ && v !== null && isFinite(v)) ? Math.abs(v) : v;
+}
+
 function _compileGeoDataset(geo, record, forcedStartMonth) {
   const rawSegments = (record && Array.isArray(record.segments) && record.segments.length)
     ? record.segments
@@ -522,7 +549,7 @@ function _compileGeoDataset(geo, record, forcedStartMonth) {
         const val = ss[key];
         if (!_isGridLike(val, segYears.length)) continue;
 
-        seg.series[sname][key] = _cycleGridFromSource(val, segYears, segTpl);
+        seg.series[sname][key] = _mirrorDeathsGridIfNeeded(sname, _cycleGridFromSource(val, segYears, segTpl));
 
         if (!baseSeries[sname][key]) baseSeries[sname][key] = _emptyGrid(calendarYears.length, nMonths);
         for (let yi = 0; yi < segYears.length; yi++) {
@@ -538,7 +565,7 @@ function _compileGeoDataset(geo, record, forcedStartMonth) {
 
   for (const sname of ['births', 'deaths', 'balance']) {
     for (const key of Object.keys(baseSeries[sname])) {
-      out.series[sname][key] = _cycleGridFromSource(baseSeries[sname][key], calendarYears, globalTpl);
+      out.series[sname][key] = _mirrorDeathsGridIfNeeded(sname, _cycleGridFromSource(baseSeries[sname][key], calendarYears, globalTpl));
     }
   }
 
@@ -666,9 +693,16 @@ const SERIES = {
 const N_A = 12;
 let axisSwap = true;
 
-function normA(a) { return ((a + 0.5) / N_A) * 2 - 1; }
-function normB(b, nB) { return nB <= 0 ? 0 : ((b + 0.5) / nB) * 2 - 1; }
+const SCENE_A_SCALE = 1.0;  // month/cycle axis
+const SCENE_B_SCALE = 1.0;  // year/time axis
 
+function normA(a) {
+  return (((a + 0.5) / N_A) * 2 - 1) * SCENE_A_SCALE;
+}
+
+function normB(b, nB) {
+  return (nB <= 0 ? 0 : ((b + 0.5) / nB) * 2 - 1) * SCENE_B_SCALE;
+}
 function _interpYearPosition(arr, b) {
   if (!arr || !arr.length) return b;
   if (arr.length === 1) return arr[0] || 0;
@@ -790,6 +824,7 @@ function denseCycleSegmentVisible(mask, nYears, d, mi, vi0, vi1) {
 let currentLayer    = 'smooth';
 let showBirths      = true;
 let showDeaths      = true;
+let mirrorDeathsZ   = false;
 let showBalance     = false;
 let showRawBehind   = false;
 let showZeroPlane   = true;
@@ -942,6 +977,7 @@ function resizeRenderer() {
   const svg = document.getElementById('touchGuideSvg');
   svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
   _refreshWideLineResolutions();
+  if (typeof updateSurfaceTouchMarker === 'function') updateSurfaceTouchMarker();
 }
 
 // =====================================================================
@@ -1399,26 +1435,37 @@ const _wideLineMaterials = new Set();
 let zeroPlane = null;
 let axisLines = null;
 let axisLabelEls = [];
+
+const SURFACE_TOUCH_MARKER_ENABLED = true;
+const SURFACE_TOUCH_MARKER_SIZE_PX = 4;
+const SURFACE_TOUCH_MARKER_STROKE_PX = 2.0;
+const SURFACE_TOUCH_MARKER_OUTLINE_PX = 3.0;
+let surfaceTouchMarkerState = null;
+let surfaceTouchMarkerEls = null;
 const smoothedZ = {};
 
 function applyCamera() {
   const r = 10;
   const target = _pan.clone();
-  const x = r * Math.sin(_el) * Math.sin(_az);
-  const y = r * Math.sin(_el) * Math.cos(_az);
-  const z = r * Math.cos(_el);
+
+  const sinEl = Math.sin(_el);
+  const cosEl = Math.cos(_el);
+  const sinAz = Math.sin(_az);
+  const cosAz = Math.cos(_az);
+
+  const x = r * sinEl * sinAz;
+  const y = r * sinEl * cosAz;
+  const z = r * cosEl;
+
   const eye = new THREE.Vector3(target.x + x, target.y + y, target.z + z);
   camera.position.copy(eye);
 
-  const forward = new THREE.Vector3().subVectors(target, eye).normalize();
-  let upHint = new THREE.Vector3(0, 0, 1);
-  if (Math.abs(forward.dot(upHint)) > 0.999) upHint.set(0, 1, 0);
+  // Stable up vector that matches the old projected-world-Z orientation away
+  // from the pole, but keeps azimuth meaningful near tilt 0.
+  const up = new THREE.Vector3(-cosEl * sinAz, -cosEl * cosAz, sinEl).normalize();
 
-  const right = new THREE.Vector3().crossVectors(forward, upHint).normalize();
-  const up = new THREE.Vector3().crossVectors(right, forward).normalize();
-
-  camera.up.copy(up);
   const m = new THREE.Matrix4().lookAt(eye, target, up);
+  camera.up.copy(up);
   camera.quaternion.setFromRotationMatrix(m);
   camera.zoom = _zoom;
   camera.updateProjectionMatrix();
@@ -1434,6 +1481,10 @@ function applyCamera() {
   ) {
     repositionHighlightLabels();
   }
+
+  if (typeof updateSurfaceTouchMarker === 'function') {
+    updateSurfaceTouchMarker();
+  }
 }
 
 applyCamera();
@@ -1444,16 +1495,42 @@ function project(v3) {
   return { x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h, visible: true };
 }
 
+function _enableBVHForGeometry(geo) {
+  if (!geo || typeof geo.computeBoundsTree !== 'function') return geo;
+  if (!geo.attributes || !geo.attributes.position) return geo;
+
+  try {
+    if (geo.boundsTree && typeof geo.disposeBoundsTree === 'function') {
+      geo.disposeBoundsTree();
+    }
+    geo.computeBoundsTree();
+  } catch (err) {
+    console.warn('BVH build failed; falling back to normal raycast.', err);
+  }
+
+  return geo;
+}
+
 function disposeMesh(obj) {
   if (!obj) return;
   if (Array.isArray(obj)) { for (const o of obj) disposeMesh(o); return; }
-  if (obj.geometry) obj.geometry.dispose();
+  if (obj.geometry) {
+    if (obj.geometry.boundsTree && typeof obj.geometry.disposeBoundsTree === 'function') {
+      obj.geometry.disposeBoundsTree();
+    }
+    obj.geometry.dispose();
+  }
   if (obj.material) {
     _wideLineMaterials.delete(obj.material);
     if (obj.material.map) obj.material.map.dispose();
     obj.material.dispose();
   }
   scene.remove(obj);
+}
+
+function _gridLayerNamesForSeries(s) {
+  if (!s) return [];
+  return Object.keys(s).filter(k => Array.isArray(s[k]) && Array.isArray(s[k][0]));
 }
 
 function getZRange() {
@@ -1591,7 +1668,8 @@ function getColorRange() {
       for (let mi = 0; mi < row.length; mi++) {
         if (!cycleCellVisible(yi, mi)) continue;
         const v = row[mi];
-        if (v !== null && isFinite(v) && v > cMax) cMax = v;
+        const cv = _seriesColorValue(sname, v);
+        if (cv !== null && isFinite(cv) && cv > cMax) cMax = cv;
       }
     }
   }
@@ -1633,10 +1711,11 @@ function surfaceColorByValue(sname, v, cMax) {
   }
 
   const rgb = hexToRgb(SERIES[sname].color);
+  const cv = _seriesColorValue(sname, v);
   const zHigh = cMax * SURFACE_COLOR_CLIP_HIGH;
   const zLow  = cMax * SURFACE_COLOR_FLOOR_FRAC;
   const zRange = zHigh > zLow ? zHigh - zLow : 1e-12;
-  const zNorm = Math.max(0, Math.min(1, (v - zLow) / zRange));
+  const zNorm = Math.max(0, Math.min(1, (cv - zLow) / zRange));
   const intensity = SURFACE_COLOR_MIN + (SURFACE_COLOR_MAX - SURFACE_COLOR_MIN) * Math.pow(zNorm, SURFACE_COLOR_POWER);
 
   return [
@@ -1958,6 +2037,7 @@ function buildPchipSurfaceGeometry(grid, sname, nYears, nMonths, zMin, zMax, cMa
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.setIndex(new THREE.BufferAttribute(new IndexArray(rawIndices), 1));
   geo.computeVertexNormals();
+  _enableBVHForGeometry(geo);
   return geo;
 }
 
@@ -2021,6 +2101,7 @@ function buildPchipSurfaceGeometryWithIntegratedSpikes_0(grid, rawGrid, sname, n
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
   geo.computeVertexNormals();
+  _enableBVHForGeometry(geo);
   return geo;
 }
 
@@ -2172,6 +2253,7 @@ function buildPchipSurfaceGeometryWithIntegratedSpikes_1(grid, rawGrid, sname, n
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
   geo.computeVertexNormals();
+  _enableBVHForGeometry(geo);
   return geo;
 }
 
@@ -2355,6 +2437,7 @@ function buildPchipSurfaceGeometryWithIntegratedSpikes_2(grid, rawGrid, sname, n
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
   geo.computeVertexNormals();
+  _enableBVHForGeometry(geo);
   return geo;
 }
 
@@ -2672,6 +2755,7 @@ function buildPchipSurfaceGeometryWithIntegratedSpikes_3(grid, rawGrid, sname, n
   geo.setAttribute('color', new THREE.BufferAttribute(finalColors, 3));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
   geo.computeVertexNormals();
+  _enableBVHForGeometry(geo);
   return geo;
 }
 
@@ -3067,41 +3151,37 @@ function buildPchipSurfaceGeometryWithIntegratedSpikes_4(grid, rawGrid, sname, n
   geo.setAttribute('color', new THREE.BufferAttribute(finalColors, 3));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
   geo.computeVertexNormals();
+  _enableBVHForGeometry(geo);
   return geo;
 }
 let buildPchipSurfaceGeometryWithIntegratedSpikes = buildPchipSurfaceGeometryWithIntegratedSpikes_3;
 
+function rawVertexPatchVisible(mask, yi, mi) {
+  if (!mask) return true;
+  return !!(
+    mask[yi] && mask[yi + 1] &&
+    mask[yi][mi] && mask[yi][mi + 1] &&
+    mask[yi + 1][mi] && mask[yi + 1][mi + 1]
+  );
+}
+
 function buildCoarseSurfaceGeometry(grid, sname, nYears, nMonths, zMin, zMax, cMax, sm, visibleMask) {
-  const nx = nMonths + 1;
-  const ny = nYears + 1;
-  const positions = new Float32Array(nx * ny * 3);
-  const colors = new Float32Array(nx * ny * 3);
+  const n = nYears * nMonths;
+  const positions = new Float32Array(n * 3);
+  const colors = new Float32Array(n * 3);
 
-  const rowVals = new Array(nYears);
-  const rowSlopes = new Array(nYears);
   for (let yi = 0; yi < nYears; yi++) {
-    const row = new Float32Array(nMonths);
-    for (let mi = 0; mi < nMonths; mi++) row[mi] = isFinite(grid[yi][mi]) ? grid[yi][mi] : 0;
-    rowVals[yi] = row;
-    rowSlopes[yi] = pchipSlopes(row);
-  }
-  const colVals = new Float32Array(nYears);
-
-  for (let ey = 0; ey < ny; ey++) {
-    const yearParam = -0.5 + ey;
-    for (let ex = 0; ex < nx; ex++) {
-      const monthParam = -0.5 + ex;
-      for (let yi = 0; yi < nYears; yi++) {
-        colVals[yi] = pchipEvalExtended(rowVals[yi], rowSlopes[yi], monthParam);
-      }
-      const colSlopes = pchipSlopes(colVals);
-      const v = pchipEvalExtended(colVals, colSlopes, yearParam);
-      const idx = ey * nx + ex;
-      const xy = XY(sceneXParam(monthParam), sceneYParam(yearParam, nYears));
+    for (let mi = 0; mi < nMonths; mi++) {
+      const idx = yi * nMonths + mi;
+      const v = grid[yi][mi];
+      const sz = sceneZ(v, zMin, zMax);
+      const xy = XY(sceneX(mi), sceneY(yi, nYears));
 
       positions[idx * 3] = xy[0];
       positions[idx * 3 + 1] = xy[1];
-      positions[idx * 3 + 2] = sceneZ(v, zMin, zMax);
+      positions[idx * 3 + 2] = sz;
+
+      sm[idx] = sz;
 
       const cv = surfaceColorByValue(sname, v, cMax);
       colors[idx * 3] = cv[0];
@@ -3110,31 +3190,31 @@ function buildCoarseSurfaceGeometry(grid, sname, nYears, nMonths, zMin, zMax, cM
     }
   }
 
-  for (let yi = 0; yi < nYears; yi++) {
-    for (let mi = 0; mi < nMonths; mi++) {
-      sm[yi * nMonths + mi] = sceneZ(grid[yi][mi], zMin, zMax);
-    }
-  }
-
   const rawIndices = [];
-  for (let yi = 0; yi < nYears; yi++) {
-    for (let mi = 0; mi < nMonths; mi++) {
-      if (!visibleMaskCell(visibleMask, yi, mi)) continue;
-      const a = yi * nx + mi;
-      const b = yi * nx + mi + 1;
-      const c = (yi + 1) * nx + mi;
-      const d = (yi + 1) * nx + mi + 1;
+
+  for (let yi = 0; yi < nYears - 1; yi++) {
+    for (let mi = 0; mi < nMonths - 1; mi++) {
+      if (!rawVertexPatchVisible(visibleMask, yi, mi)) continue;
+
+      const a = yi * nMonths + mi;
+      const b = yi * nMonths + mi + 1;
+      const c = (yi + 1) * nMonths + mi;
+      const d = (yi + 1) * nMonths + mi + 1;
+
       rawIndices.push(a, b, c);
       rawIndices.push(b, d, c);
     }
   }
 
-  const IndexArray = (nx * ny) > 65535 ? Uint32Array : Uint16Array;
+  const indices = new Uint32Array(rawIndices);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geo.setIndex(new THREE.BufferAttribute(new IndexArray(rawIndices), 1));
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
   geo.computeVertexNormals();
+
+  for (let i = 0; i < n; i++) sm[i] = geo.attributes.position.getZ(i);
+
   return geo;
 }
 
@@ -3674,6 +3754,128 @@ function setLine(el, a, b) { el.setAttribute('x1',a.x); el.setAttribute('y1',a.y
 function hideGuide() { [tgToX,tgToY,tgToZ,tgSphere].forEach(e=>e.style.display='none'); }
 function zRange() { const r = getZRange(); return [r.zMin, r.zMax]; }
 
+function _surfaceMarkerMakeLine(color, width, opacity) {
+  const l = document.createElementNS(svgNS, 'line');
+  l.setAttribute('stroke', color);
+  l.setAttribute('stroke-width', String(width));
+  l.setAttribute('stroke-opacity', String(opacity));
+  l.setAttribute('stroke-linecap', 'round');
+  l.setAttribute('vector-effect', 'non-scaling-stroke');
+  l.style.display = 'none';
+  tgSvg.appendChild(l);
+  return l;
+}
+
+function _ensureSurfaceTouchMarkerEls() {
+  if (surfaceTouchMarkerEls) return surfaceTouchMarkerEls;
+
+  surfaceTouchMarkerEls = {
+    outline: [
+      _surfaceMarkerMakeLine('#ffffff', SURFACE_TOUCH_MARKER_OUTLINE_PX, 0.95),
+      _surfaceMarkerMakeLine('#ffffff', SURFACE_TOUCH_MARKER_OUTLINE_PX, 0.95),
+      _surfaceMarkerMakeLine('#ffffff', SURFACE_TOUCH_MARKER_OUTLINE_PX, 0.95)
+    ],
+    line: [
+      _surfaceMarkerMakeLine('#111111', SURFACE_TOUCH_MARKER_STROKE_PX, 0.98),
+      _surfaceMarkerMakeLine('#111111', SURFACE_TOUCH_MARKER_STROKE_PX, 0.98),
+      _surfaceMarkerMakeLine('#111111', SURFACE_TOUCH_MARKER_STROKE_PX, 0.98)
+    ]
+  };
+
+  return surfaceTouchMarkerEls;
+}
+
+function clearSurfaceTouchMarker() {
+  surfaceTouchMarkerState = null;
+
+  if (!surfaceTouchMarkerEls) return;
+
+  for (const el of surfaceTouchMarkerEls.outline) el.style.display = 'none';
+  for (const el of surfaceTouchMarkerEls.line) el.style.display = 'none';
+}
+
+function _setSurfaceMarkerSvgLine(el, c, d, halfLenPx, color) {
+  if (!d || !isFinite(d.x) || !isFinite(d.y)) {
+    el.style.display = 'none';
+    return;
+  }
+
+  const len = Math.hypot(d.x, d.y);
+  if (len < 1e-6) {
+    el.style.display = 'none';
+    return;
+  }
+
+  const ux = d.x / len;
+  const uy = d.y / len;
+
+  el.setAttribute('x1', c.x - ux * halfLenPx);
+  el.setAttribute('y1', c.y - uy * halfLenPx);
+  el.setAttribute('x2', c.x + ux * halfLenPx);
+  el.setAttribute('y2', c.y + uy * halfLenPx);
+
+  if (color) el.setAttribute('stroke', color);
+
+  el.style.display = 'block';
+}
+
+function updateSurfaceTouchMarker() {
+  if (!SURFACE_TOUCH_MARKER_ENABLED || !surfaceTouchMarkerState || !surfaceTouchMarkerState.point) {
+    clearSurfaceTouchMarker();
+    return;
+  }
+
+  const els = _ensureSurfaceTouchMarkerEls();
+  const p = surfaceTouchMarkerState.point;
+  const color = surfaceTouchMarkerState.color || '#111111';
+  const c = project(p);
+
+  if (!c || !isFinite(c.x) || !isFinite(c.y)) {
+    clearSurfaceTouchMarker();
+    return;
+  }
+
+  const axes = [
+    new THREE.Vector3(1, 0, 0),
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(0, 0, 1)
+  ];
+
+  const halfLenPx = SURFACE_TOUCH_MARKER_SIZE_PX;
+
+  for (let i = 0; i < 3; i++) {
+    const p2 = project(p.clone().add(axes[i]));
+    const d = {
+      x: p2.x - c.x,
+      y: p2.y - c.y
+    };
+
+    _setSurfaceMarkerSvgLine(els.outline[i], c, d, halfLenPx, null);
+    _setSurfaceMarkerSvgLine(els.line[i], c, d, halfLenPx, color);
+  }
+}
+
+function setSurfaceTouchMarker(hit) {
+  if (!SURFACE_TOUCH_MARKER_ENABLED) {
+    clearSurfaceTouchMarker();
+    return;
+  }
+
+  if (!hit || !hit.point || !isFinite(hit.point.x) || !isFinite(hit.point.y) || !isFinite(hit.point.z)) {
+    clearSurfaceTouchMarker();
+    return;
+  }
+
+  surfaceTouchMarkerState = {
+    point: hit.point.clone(),
+    color: (hit.sname && SERIES[hit.sname] && SERIES[hit.sname].color) ? SERIES[hit.sname].color : '#111111'
+  };
+
+  updateSurfaceTouchMarker();
+}
+
+
+
 // ---- TOOLTIP ----
 const tooltip = document.getElementById('tooltip');
 let _lastTipKey = '';
@@ -3759,48 +3961,317 @@ function placeTooltip(el, x, y) {
 }
 
 // ---- HIT TEST ----
-function getHit(mouseX, mouseY) {
-  if (!data || !data.axes) return null;
-  const rect = renderer.domElement.getBoundingClientRect();
-  const ndc  = new THREE.Vector2(((mouseX-rect.left)/rect.width)*2-1, ((mouseY-rect.top)/rect.height)*-2+1);
-  const ray = new THREE.Raycaster();
-  ray.setFromCamera(ndc, camera);
+const MOUSE_PICK_RADIUS_PX = 5;
+const TOUCH_PICK_RADIUS_PX = 18;
+const PICK_RAY_STEP_PX = 1;
+const MOUSE_PICK_START_DELAY_MS = 100;
+const TOUCH_PICK_START_DELAY_MS = 25;
+const PICK_TASK_BUDGET_MS = 3;
+
+let _lastPointerWasTouch = false;
+let _activePickTask = null;
+let _activePickTaskKey = '';
+let _pickTaskSeq = 0;
+
+const _pickPixelCircleCache = new Map();
+const _pickRaycaster = new THREE.Raycaster();
+_pickRaycaster.firstHitOnly = true;
+const _pickNdc = new THREE.Vector2();
+
+function cancelPickTask() {
+  _pickTaskSeq++;
+
+  const task = _activePickTask;
+
+  if (task) {
+    task.cancelled = true;
+    task.seq = -1;
+
+    if (task.timer != null) {
+      clearTimeout(task.timer);
+      task.timer = null;
+    }
+  }
+ 
+  _activePickTask = null;
+  _activePickTaskKey = '';
+}
+
+function _hitTargets() {
   const targets = [];
+
   for (const sname of ['births','deaths','balance']) {
     const obj = meshObjects[sname];
     if (!obj) continue;
+
     const pieces = obj.segments || [obj];
-    for (const piece of pieces) { if (piece.mesh) targets.push(piece.mesh); }
+    for (const piece of pieces) {
+      if (piece.mesh) targets.push(piece.mesh);
+    }
   }
-  if (!targets.length) return null;
-  const hits = ray.intersectObjects(targets, false);
-  if (!hits.length) return null;
-  const h = hits[0];
-  const pt = h.point;
-  const nYears = data.axes.n_years;
+
+  return targets;
+}
+
+function _raycastAtScreenFast(clientX, clientY, rect, targets, cameraObj) {
+  _pickNdc.set(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    ((clientY - rect.top) / rect.height) * -2 + 1
+  );
+
+  _pickRaycaster.firstHitOnly = true;
+  _pickRaycaster.setFromCamera(_pickNdc, cameraObj || camera);
+
+  const hits = _pickRaycaster.intersectObjects(targets, false);
+  return hits && hits.length ? hits[0] : null;
+}
+
+function _raycastAtScreen(clientX, clientY, rect, targets, cameraObj) {
+  return _raycastAtScreenFast(clientX, clientY, rect, targets, cameraObj);
+}
+
+function _pickOffsetsForRadius(radiusPx) {
+  const R = Math.max(0, Math.floor(radiusPx || 0));
+  let offsets = _pickPixelCircleCache.get(R);
+
+  if (offsets) return offsets;
+
+  offsets = [];
+
+  for (let dy = -R; dy <= R; dy++) {
+    for (let dx = -R; dx <= R; dx++) {
+      const d2 = dx * dx + dy * dy;
+      if (d2 > R * R) continue;
+      offsets.push({ dx, dy, d2 });
+    }
+  }
+
+  offsets.sort((a, b) => {
+    if (a.d2 !== b.d2) return a.d2 - b.d2;
+    if (a.dy !== b.dy) return a.dy - b.dy;
+    return a.dx - b.dx;
+  });
+
+  _pickPixelCircleCache.set(R, offsets);
+  return offsets;
+}
+
+function _hitCellFromPoint(pt, nYears) {
   const xCoord = (pt.x + 1) / 2;
   const yCoord = (pt.y + 1) / 2;
-  const mi_f = (axisSwap ? yCoord : xCoord) * N_MONTHS;
-  const yi_f = (axisSwap ? xCoord : yCoord) * nYears;
-  const mi = Math.max(0, Math.min(N_MONTHS - 1, Math.floor(mi_f)));
-  const yi = Math.max(0, Math.min(nYears - 1, Math.floor(yi_f)));
+  const aCoord = axisSwap ? yCoord : xCoord;
+  const bCoord = axisSwap ? xCoord : yCoord;
+
+  let mi;
+  let yi;
+
+  if (currentLayer === 'raw') {
+    mi = Math.round(Math.max(0, Math.min(N_MONTHS - 1, aCoord * (N_MONTHS - 1))));
+    yi = Math.round(Math.max(0, Math.min(nYears - 1, bCoord * (nYears - 1))));
+  } else {
+    mi = Math.max(0, Math.min(N_MONTHS - 1, Math.floor(aCoord * N_MONTHS)));
+    yi = Math.max(0, Math.min(nYears - 1, Math.floor(bCoord * nYears)));
+  }
+
+  return { mi, yi };
+}
+
+function _makeHitResult(h, mouseX, mouseY) {
+  if (!h || !h.point || !data || !data.axes) return null;
+
+  const nYears = data.axes.n_years;
+  const cell = _hitCellFromPoint(h.point, nYears);
+  const mi = cell.mi;
+  const yi = cell.yi;
+
   if (!cycleCellVisible(yi, mi)) return null;
+
   const sname = h.object && h.object.userData && h.object.userData.sname ? h.object.userData.sname : '';
   const segmentIndex = h.object && h.object.userData ? h.object.userData.segmentIndex : -1;
-  return { mi, yi, sname, segmentIndex, x: mouseX, y: mouseY };
+
+  return { mi, yi, sname, segmentIndex, x: mouseX, y: mouseY, point: h.point.clone() };
+}
+
+function _radialRaycastFromScreen(clientX, clientY, rect, targets, cameraObj, radiusPx) {
+  const offsets = _pickOffsetsForRadius(radiusPx);
+
+  for (let i = 0; i < offsets.length; i++) {
+    const o = offsets[i];
+    const h = _raycastAtScreenFast(clientX + o.dx, clientY + o.dy, rect, targets, cameraObj);
+    const hit = _makeHitResult(h, clientX, clientY);
+    if (hit) return hit;
+  }
+
+  return null;
+}
+
+// ---- HIT TEST ----
+function getHit(mouseX, mouseY) {
+  if (!data || !data.axes) return null;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  const targets = _hitTargets();
+  if (!targets.length) return null;
+
+  const radius = _lastPointerWasTouch ? TOUCH_PICK_RADIUS_PX : MOUSE_PICK_RADIUS_PX;
+  return _radialRaycastFromScreen(mouseX, mouseY, rect, targets, camera, radius);
+}
+
+function _pickTaskKeyFor(mouseX, mouseY, mode) {
+  return [
+    mode || 'mouse',
+    Math.round(mouseX),
+    Math.round(mouseY),
+    currentLayer,
+    currentGeo,
+    currentCycleStartMonth,
+    _az.toFixed(6),
+    _el.toFixed(6),
+    _zoom.toFixed(6),
+    showBirths ? 1 : 0,
+    showDeaths ? 1 : 0,
+    showBalance ? 1 : 0
+  ].join('|');
+}
+
+function startPickTask(mouseX, mouseY, mode, done) {
+  mode = mode === 'touch' ? 'touch' : 'mouse';
+  
+
+  if (!data || !data.axes) {
+    cancelPickTask();
+    if (typeof done === 'function') done(null);
+    return null;
+  }
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  if (mouseX < rect.left || mouseX > rect.right || mouseY < rect.top || mouseY > rect.bottom) {
+    cancelPickTask();
+    if (typeof done === 'function') done(null);
+    return null;
+  }
+
+  const taskKey = _pickTaskKeyFor(mouseX, mouseY, mode);
+
+  if (_activePickTask && !_activePickTask.cancelled && _activePickTaskKey === taskKey) {
+    return _activePickTask;
+  }
+
+  cancelPickTask();
+  
+
+  const targets = _hitTargets();
+  if (!targets.length) {
+    if (typeof done === 'function') done(null);
+    return null;
+  }
+
+  const radius = mode === 'touch' ? TOUCH_PICK_RADIUS_PX : MOUSE_PICK_RADIUS_PX;
+  const delay = mode === 'touch' ? TOUCH_PICK_START_DELAY_MS : MOUSE_PICK_START_DELAY_MS;
+  const offsets = _pickOffsetsForRadius(radius);
+
+  const task = {
+    seq: ++_pickTaskSeq,
+    key: taskKey,
+    mode,
+    cancelled: false,
+    timer: null,
+    index: 0,
+    mouseX,
+    mouseY,
+    rect,
+    targets,
+    cameraObj: camera,
+    done
+  };
+
+  _activePickTask = task;
+  _activePickTaskKey = taskKey;
+
+  function finish(hit) {
+    if (task.cancelled || _activePickTask !== task || task.seq !== _pickTaskSeq) return;
+
+    if (task.timer != null) {
+      clearTimeout(task.timer);
+      task.timer = null;
+    }
+
+    _activePickTask = null;
+    _activePickTaskKey = '';
+
+    if (typeof task.done === 'function') {
+      task.done(hit || null);
+    }
+  }
+
+  function step() {
+    if (task.cancelled || _activePickTask !== task || task.seq !== _pickTaskSeq) return;
+
+    task.timer = null;
+
+    const deadline = performance.now() + PICK_TASK_BUDGET_MS;
+
+    while (
+      !task.cancelled &&
+      _activePickTask === task &&
+      task.seq === _pickTaskSeq &&
+      task.index < offsets.length
+    ) {
+      const o = offsets[task.index++];
+
+      const h = _raycastAtScreenFast(
+        task.mouseX + o.dx,
+        task.mouseY + o.dy,
+        task.rect,
+        task.targets,
+        task.cameraObj
+      );
+
+      if (task.cancelled || _activePickTask !== task || task.seq !== _pickTaskSeq) return;
+
+      const hit = _makeHitResult(h, task.mouseX, task.mouseY);
+
+      if (hit) {
+        finish(hit);
+        return;
+      }
+
+      if (performance.now() >= deadline) break;
+    }
+
+    if (task.cancelled || _activePickTask !== task || task.seq !== _pickTaskSeq) return;
+
+    if (task.index >= offsets.length) {
+      finish(null);
+      return;
+    }
+
+    task.timer = setTimeout(step, 1);
+  }
+
+  task.timer = setTimeout(step, delay);
+  return task;
 }
 
 // ---- INTERACTION ----
 let isDragging=false, dragBtn=0, lastMX=0, lastMY=0;
 let lastMouseX=-9999, lastMouseY=-9999;
+
+let _touchIsActive = false;
+let _touchPickPending = false;
+let _touchPickX = -9999;
+let _touchPickY = -9999;
 renderer.domElement.addEventListener('mousedown', e => {
+  cancelPickTask();
+  _lastPointerWasTouch = false;
   isDragging=true; dragBtn=e.button; lastMX=e.clientX; lastMY=e.clientY;
   clearHighlight();
+  clearSurfaceTouchMarker();
   const onMove = e => { const dx=e.clientX-lastMX, dy=e.clientY-lastMY; lastMX=e.clientX; lastMY=e.clientY; if (dragBtn===2) { doPan(dx,dy); } else { doRotate(dx,dy); } };
   const onUp = () => { isDragging=false; syncSliders(); window.removeEventListener('mousemove',onMove); window.removeEventListener('mouseup',onUp); };
   window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp);
 });
-renderer.domElement.addEventListener('wheel', e => { e.preventDefault(); _zoom = Math.max(0.3, Math.min(10, _zoom * (e.deltaY>0?0.9:1.1))); applyCamera(); }, {passive:false});
+renderer.domElement.addEventListener('wheel', e => { cancelPickTask(); e.preventDefault(); _zoom = Math.max(0.3, Math.min(10, _zoom * (e.deltaY>0?0.9:1.1))); applyCamera(); }, {passive:false});
 
 let _lastPinchDist = null;
 let _lastTouchMid = null;
@@ -3811,18 +4282,26 @@ let _touchMoved = false;
 function _touchDist(t1, t2) { return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY); }
 function _touchMid(t1, t2) { return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 }; }
 function _onTouchStart(e) {
+  cancelPickTask();
+  _lastPointerWasTouch = true;
+  _touchIsActive = true;
+  _touchPickPending = false;
+  _lastTipKey = '';
+  lastMouseX = -9999;
+  lastMouseY = -9999;
+
   e.preventDefault();
   _lastPinchDist = null;
   _lastTouchMid = null;
   _touchMoved = false;
   _touchDragging = false;
   clearHighlight();
+  clearSurfaceTouchMarker();
+
   if (e.touches.length === 1) {
     const t = e.touches[0];
     _lastSingleTouch = { x: t.clientX, y: t.clientY };
     _touchStart = { x: t.clientX, y: t.clientY };
-    lastMouseX = t.clientX;
-    lastMouseY = t.clientY;
   } else if (e.touches.length === 2) {
     _lastSingleTouch = null;
     _touchStart = null;
@@ -3834,63 +4313,104 @@ function _onTouchStart(e) {
   }
 }
 function _onTouchMove(e) {
+  cancelPickTask();
+  _lastPointerWasTouch = true;
+  _touchIsActive = true;
+  _touchPickPending = false;
+  lastMouseX = -9999;
+  lastMouseY = -9999;
+
   e.preventDefault();
   const touches = e.touches;
+
   if (touches.length === 1) {
     const t = touches[0];
     const p = { x: t.clientX, y: t.clientY };
-    lastMouseX = t.clientX;
-    lastMouseY = t.clientY;
+
     if (_lastSingleTouch && _touchStart) {
       const totalMove = Math.hypot(p.x - _touchStart.x, p.y - _touchStart.y);
+
       if (totalMove > 8) {
         _touchMoved = true;
+
         if (!_touchDragging) {
           _touchDragging = true;
           isDragging = true;
           tooltip.style.display = 'none';
           hideGuide();
         }
+
         const dx = p.x - _lastSingleTouch.x;
         const dy = p.y - _lastSingleTouch.y;
         doRotate(dx, dy);
       }
     }
+
     _lastSingleTouch = p;
     _lastPinchDist = null;
     _lastTouchMid = null;
   } else if (touches.length === 2) {
     _touchMoved = true;
+
     if (!_touchDragging) {
       _touchDragging = true;
       isDragging = true;
       tooltip.style.display = 'none';
       hideGuide();
     }
+
     _lastSingleTouch = null;
     _touchStart = null;
+
     const t1 = touches[0], t2 = touches[1];
     const dist = _touchDist(t1, t2);
     const mid = _touchMid(t1, t2);
+
     if (_lastPinchDist !== null && _lastPinchDist > 0) doZoom(dist / _lastPinchDist);
     if (_lastTouchMid !== null) doPan(mid.x - _lastTouchMid.x, mid.y - _lastTouchMid.y);
+
     _lastPinchDist = dist;
     _lastTouchMid = mid;
-    lastMouseX = mid.x;
-    lastMouseY = mid.y;
   }
 }
 function _onTouchEnd(e) {
   e.preventDefault();
+
+  const wasTap =
+    e.type !== 'touchcancel' &&
+    e.touches.length === 0 &&
+    !_touchMoved &&
+    !_touchDragging &&
+    _touchStart;
+
+  const tapX = _touchStart ? _touchStart.x : -9999;
+  const tapY = _touchStart ? _touchStart.y : -9999;
+
   _lastPinchDist = null;
   _lastTouchMid = null;
   _lastSingleTouch = null;
   _touchStart = null;
+
   if (e.touches.length === 0) {
     if (_touchDragging) syncSliders();
+
     isDragging = false;
     _touchDragging = false;
     _touchMoved = false;
+    _touchIsActive = false;
+
+    if (wasTap) {
+      cancelPickTask();
+      _lastPointerWasTouch = true;
+      _touchPickPending = true;
+      _touchPickX = tapX;
+      _touchPickY = tapY;
+      _lastTipKey = '';
+    } else {
+      _touchPickPending = false;
+      lastMouseX = -9999;
+      lastMouseY = -9999;
+    }
   }
 }
 renderer.domElement.addEventListener('touchstart', _onTouchStart, { passive: false });
@@ -3898,9 +4418,18 @@ renderer.domElement.addEventListener('touchmove', _onTouchMove, { passive: false
 renderer.domElement.addEventListener('touchend', _onTouchEnd, { passive: false });
 renderer.domElement.addEventListener('touchcancel', _onTouchEnd, { passive: false });
 renderer.domElement.addEventListener('contextmenu', e=>e.preventDefault());
-document.addEventListener('mousemove', e => { lastMouseX=e.clientX; lastMouseY=e.clientY; });
-function doRotate(dx,dy) { _az += dx*0.008; _el -= dy*0.008; _el = Math.max(0.01, Math.min(Math.PI-0.01, _el)); applyCamera(); }
+document.addEventListener('mousemove', e => {
+  if (_touchIsActive || _touchPickPending) return;
+  clearSurfaceTouchMarker();
+  cancelPickTask();
+  _lastPointerWasTouch = false;
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+  _lastTipKey = '';
+});
+function doRotate(dx,dy) { cancelPickTask(); _az += dx*0.008; _el -= dy*0.008; _el = Math.max(0.0005, Math.min(Math.PI-0.0005, _el)); applyCamera(); }
 function doPan(dx,dy) {
+  cancelPickTask();
   const w=wrap.clientWidth, h=wrap.clientHeight;
   const fw=(camera.right-camera.left)/_zoom; const fh=(camera.top-camera.bottom)/_zoom;
   const panX=-(dx/w)*fw, panY=(dy/h)*fh;
@@ -3909,7 +4438,7 @@ function doPan(dx,dy) {
   const up=camera.up.clone().normalize();
   _pan.addScaledVector(right,panX); _pan.addScaledVector(up,panY); applyCamera();
 }
-function doZoom(factor) { _zoom=Math.max(0.3,Math.min(10,_zoom*factor)); applyCamera(); }
+function doZoom(factor) { cancelPickTask(); _zoom=Math.max(0.3,Math.min(10,_zoom*factor)); applyCamera(); }
 
 
 function _fitBoundsEmpty() {
@@ -3968,7 +4497,7 @@ function _getComprehensiveZRangeForSource(src) {
 
 function _computeComprehensiveFitBounds(geo, record) {
   if (!geo || !record) return null;
-  const cacheKey = String(geo);
+  const cacheKey = String(geo) + '|mirrorDeathsZ=' + (mirrorDeathsZ ? '1' : '0');
   const cached = _fitBoundsByGeo.get(cacheKey);
   if (cached) return cached;
 
@@ -4088,7 +4617,7 @@ const elSlider = document.getElementById('elSlider');
 const azVal    = document.getElementById('azVal');
 const elVal    = document.getElementById('elVal');
 azSlider.addEventListener('input', e => { _az = Math.PI - Number(e.target.value)*Math.PI/180; applyCamera(); azVal.textContent = e.target.value + '\u00b0'; });
-elSlider.addEventListener('input', e => { _el = Math.max(0.01,Math.min(Math.PI-0.01, Number(e.target.value)*Math.PI/180)); applyCamera(); elVal.textContent = e.target.value + '\u00b0'; });
+elSlider.addEventListener('input', e => { _el = Math.max(0.0005,Math.min(Math.PI-0.0005, Number(e.target.value)*Math.PI/180)); applyCamera(); elVal.textContent = e.target.value + '\u00b0'; });
 function syncSliders() {
   const azDeg = Math.round(((Math.PI-_az)*180/Math.PI%360+360)%360);
   const elDeg = Math.round(_el*180/Math.PI);
@@ -4156,6 +4685,20 @@ function rebuildForCycleStart() {
   selectDefaultPoint();
 }
 
+function rebuildForDeathsMirror() {
+  const datasets = _datasetsNow();
+  if (!datasets || !currentGeo || !datasets[currentGeo]) return;
+  data = _compileGeoDataset(currentGeo, datasets[currentGeo]);
+  _activeFitBounds = _computeComprehensiveFitBounds(currentGeo, datasets[currentGeo]);
+  clearHighlight();
+  hideGuide();
+  tooltip.style.display = 'none';
+  _lastTipKey = '';
+  updateHeaderForGeo();
+  buildAllSurfaces();
+  selectDefaultPoint();
+}
+
 function applyCycleStartMonth(v) {
   const m = Math.max(0, Math.min(11, Math.round(Number(v) || 0)));
   if (m === currentCycleStartMonth) { syncCycleStartControl(); return; }
@@ -4171,6 +4714,7 @@ if (cycleStartSlider) cycleStartSlider.addEventListener('input', e => applyCycle
 function bindCheck(id, fn) { const el = document.getElementById(id); if (el) el.addEventListener('change', e => fn(e.target.checked)); }
 bindCheck('showBirths',     v => { showBirths=v;     buildAllSurfaces(); });
 bindCheck('showDeaths',     v => { showDeaths=v;     buildAllSurfaces(); });
+bindCheck('mirrorDeathsZ',  v => { mirrorDeathsZ=v;  rebuildForDeathsMirror(); });
 bindCheck('showBalance',    v => { showBalance=v;    buildAllSurfaces(); });
 bindCheck('showRawBehind',  v => { showRawBehind=v;  buildAllSurfaces(); });
 bindCheck('showZeroPlane',  v => { showZeroPlane=v;  buildZeroPlane(); updateEntityRenderOrders(); requestRightPanelRender(); });
@@ -4875,10 +5419,7 @@ function requestRightPanelRender() {
   });
 }
 
-const RIGHT_VIEW_MARGIN_L = 66;
-const RIGHT_VIEW_MARGIN_R = 30;
-const RIGHT_VIEW_MARGIN_T = 30;
-const RIGHT_VIEW_MARGIN_B = 56;
+const RIGHT_AXIS_LABEL_FONT = '10px Arial, sans-serif';
 const RIGHT_VIEW_MIN_WIDTH = 220;
 const RIGHT_VIEW_MIN_HEIGHT = 150;
 const RIGHT_VIEW_CAMERA_DISTANCE = 10;
@@ -4926,6 +5467,7 @@ function _rightViewHover(rec, clientX, clientY) {
 
   const ndc = new THREE.Vector2((px / rect.width) * 2 - 1, -((py / rect.height) * 2 - 1));
   const ray = new THREE.Raycaster();
+  ray.firstHitOnly = true;
   ray.setFromCamera(ndc, rec.camera);
 
   const targets = [];
@@ -4940,12 +5482,10 @@ function _rightViewHover(rec, clientX, clientY) {
   if (!hits.length) return;
 
   const h = hits[0];
-  const pt = h.point;
   const nYears = data.axes.n_years;
-  const xCoord = (pt.x + 1) / 2;
-  const yCoord = (pt.y + 1) / 2;
-  const mi = Math.max(0, Math.min(N_MONTHS - 1, Math.floor((axisSwap ? yCoord : xCoord) * N_MONTHS)));
-  const yi = Math.max(0, Math.min(nYears - 1, Math.floor((axisSwap ? xCoord : yCoord) * nYears)));
+  const cell = _hitCellFromPoint(h.point, nYears);
+  const mi = cell.mi;
+  const yi = cell.yi;
   if (!cycleCellVisible(yi, mi)) return;
   const sname = h.object.userData && h.object.userData.sname ? h.object.userData.sname : '';
   const s = data.series[sname];
@@ -5136,14 +5676,74 @@ function _rightFormatTick(v) {
   return String(Math.round(v * 100) / 100);
 }
 
-function _rightSharedUnitsPerPxForWidth(width) {
-  const usableW = Math.max(80, width - RIGHT_VIEW_MARGIN_L - RIGHT_VIEW_MARGIN_R);
-  return 2.0 / usableW;
+let _rightAxisTextMetrics = null;
+
+function _rightMeasureAxisTextMetrics() {
+  if (_rightAxisTextMetrics) return _rightAxisTextMetrics;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = RIGHT_AXIS_LABEL_FONT;
+
+  const mT = ctx.measureText('Hy');
+  const hT = Math.ceil(
+    (mT.actualBoundingBoxAscent || 8) +
+    (mT.actualBoundingBoxDescent || 3)
+  );
+
+  _rightAxisTextMetrics = {
+    w0: ctx.measureText('0000000000').width,
+    wM: ctx.measureText('MMMM').width,
+    hT
+  };
+
+  return _rightAxisTextMetrics;
 }
 
-function _rightConfigureCamera(rec, unitsPerPx) {
+function _rightCurrentMargins() {
+  const tm = _rightMeasureAxisTextMetrics();
+  const vr = getRightValueRange();
+
+  const minText = _rightFormatTick(vr.vMin);
+  const maxText = _rightFormatTick(vr.vMax);
+  const maxNumLen = Math.max(minText.length, maxText.length);
+  const maxNumWidth = maxNumLen * tm.w0 / 10;
+
+  const side = 1.5 * Math.max(maxNumWidth, tm.wM);
+  const vertical = 3.5 * tm.hT;
+
+  return {
+    left: side,
+    right: side,
+    top: vertical/2,
+    bottom: vertical
+  };
+}
+
+function _rightUnitsPerPxForWidth(kind, width, margins) {
+  const m = margins || _rightCurrentMargins();
+  const usableW = Math.max(80, width - m.left - m.right);
+
+  const nYears = data && data.axes ? data.axes.n_years : 1;
+
+  const yearSpan =
+    sceneYParam(nYears - 0.5, nYears) -
+    sceneYParam(-0.5, nYears);
+
+  const monthSpan =
+    sceneXParam(N_MONTHS - 0.5) -
+    sceneXParam(-0.5);
+
+  const rightSpan =
+    kind === 'monthValue' ? monthSpan : yearSpan;
+
+  return Math.max(1e-6, rightSpan) / usableW;
+}
+
+function _rightConfigureCamera(rec, unitsPerPx, margins) {
   const { A, B, Z } = _rightAxisBasis();
   const valueRange = getRightValueRange();
+  const m = margins || _rightCurrentMargins();
 
   const nYears = data && data.axes ? data.axes.n_years : 1;
   const yearMin = sceneYParam(-0.5, nYears);
@@ -5178,24 +5778,25 @@ function _rightConfigureCamera(rec, unitsPerPx) {
   }
 
   rec.valueRange = valueRange;
+  rec.axisMargins = m;
 
   const eyeDir = new THREE.Vector3().crossVectors(rec.rightVec, rec.upVec).normalize();
   const cam = rec.camera;
-  
-  const cRight = (rec.rightMin + rec.rightMax) * 0.5;
-const cUp    = (rec.upMin + rec.upMax) * 0.5;
 
-cam.left   = (rec.rightMin - cRight) - RIGHT_VIEW_MARGIN_L * unitsPerPx;
-cam.right  = (rec.rightMax - cRight) + RIGHT_VIEW_MARGIN_R * unitsPerPx;
-cam.bottom = (rec.upMin    - cUp)    - RIGHT_VIEW_MARGIN_B * unitsPerPx;
-cam.top    = (rec.upMax    - cUp)    + RIGHT_VIEW_MARGIN_T * unitsPerPx;
+  const cRight = (rec.rightMin + rec.rightMax) * 0.5;
+  const cUp    = (rec.upMin + rec.upMax) * 0.5;
+
+  cam.left   = (rec.rightMin - cRight) - m.left   * unitsPerPx;
+  cam.right  = (rec.rightMax - cRight) + m.right  * unitsPerPx;
+  cam.bottom = (rec.upMin    - cUp)    - m.bottom * unitsPerPx;
+  cam.top    = (rec.upMax    - cUp)    + m.top    * unitsPerPx;
 
   cam.near = 0.001;
   cam.far = 100;
 
-const centre = new THREE.Vector3()
-  .addScaledVector(rec.rightVec, cRight)
-  .addScaledVector(rec.upVec,    cUp);
+  const centre = new THREE.Vector3()
+    .addScaledVector(rec.rightVec, cRight)
+    .addScaledVector(rec.upVec,    cUp);
 
   cam.position.copy(centre).addScaledVector(eyeDir, RIGHT_VIEW_CAMERA_DISTANCE);
   cam.up.copy(rec.upVec);
@@ -5206,9 +5807,12 @@ const centre = new THREE.Vector3()
   rec.unitsPerPx = unitsPerPx;
 }
 
+
 function _rightResizeExactViews() {
   const views = _rightInitExactViews();
   if (!views.length || !rightPanel) return views;
+
+  const margins = _rightCurrentMargins();
 
   for (const rec of views) {
     const width = Math.max(
@@ -5216,19 +5820,19 @@ function _rightResizeExactViews() {
       Math.floor(rec.container.clientWidth || rightPanel.clientWidth || 320)
     );
 
-    const unitsPerPx = _rightSharedUnitsPerPxForWidth(width);
+    const unitsPerPx = _rightUnitsPerPxForWidth(rec.kind, width, margins);
     const valueRange = getRightValueRange();
 
     let worldUpSpan;
     if (rec.kind === 'yearMonth') {
-      worldUpSpan = 2.0;
+      worldUpSpan = Math.max(1e-6, sceneXParam(N_MONTHS - 0.5) - sceneXParam(-0.5));
     } else {
       worldUpSpan = Math.max(1e-6, valueRange.sceneAxisMax - valueRange.sceneAxisMin);
     }
 
     const height = Math.max(
       RIGHT_VIEW_MIN_HEIGHT,
-      Math.ceil((worldUpSpan / unitsPerPx) + RIGHT_VIEW_MARGIN_T + RIGHT_VIEW_MARGIN_B)
+      Math.ceil((worldUpSpan / unitsPerPx) + margins.top + margins.bottom)
     );
 
     rec.width = width;
@@ -5244,11 +5848,12 @@ function _rightResizeExactViews() {
     rec.axisCanvas.width = Math.max(1, Math.floor(width * dpr));
     rec.axisCanvas.height = Math.max(1, Math.floor(height * dpr));
 
-    _rightConfigureCamera(rec, unitsPerPx);
+    _rightConfigureCamera(rec, unitsPerPx, margins);
   }
 
   return views;
 }
+
 
 function _rightProjectWithCamera(rec, v) {
   const p = v.clone().project(rec.camera);
@@ -5530,7 +6135,7 @@ function _rightDrawAxisOverlay(rec) {
         makeLabel(
           sceneX(mi),
           axisBase,
-          initials ? (name.charAt(0) === '◆' ?  name.charAt(1):name.charAt(0)) : (name === '◆Ja'?'◆Jan':name),
+          initials ? (name.charAt(0) === '◆' ?  '◆'+name.charAt(1):name.charAt(0)) : (name === '◆Ja'?'◆Jan':name),
           0,
           dy,
           'center',
@@ -5735,6 +6340,7 @@ function renderRightPanelViews() {
 
 // ---- RESIZE ----
 function setAppHeight() {
+  cancelPickTask();
   if (tooltip) tooltip.style.display = 'none';
   hideGuide();
   lastMouseX = -9999;
@@ -5757,27 +6363,77 @@ initWorkSplitter();
 setAppHeight();
 
 // ---- RENDER LOOP ----
-function updateTooltips() {
-  if (isDragging) { tooltip.style.display='none'; hideGuide(); return; }
-  const x=lastMouseX, y=lastMouseY;
-  const key=x+','+y+','+_az+','+_el+','+_zoom+','+currentLayer+','+currentGeo+','+currentCycleStartMonth;
-  if (key===_lastTipKey) return;
-  _lastTipKey=key;
-  const rect=renderer.domElement.getBoundingClientRect();
-  const over=x>=rect.left&&x<=rect.right&&y>=rect.top&&y<=rect.bottom;
-  if (!over||!data||!data.axes) { tooltip.style.display='none'; hideGuide(); return; }
-  const hit=getHit(x,y);
+
+function applyPickHitResult(hit, x, y) {
   if (hit) {
     const {mi,yi,sname}=hit;
-    const {zMin,zMax}=getZRange();
     const s=data.series[sname];
     const grid=s&&(s[currentLayer]||s.smooth);
     const v=grid&&grid[yi]&&grid[yi][mi]!==null?grid[yi][mi]:0;
     tooltip.innerHTML=makeTooltipHTML(mi,yi);
     placeTooltip(tooltip,x,y);
     setGuide(mi,yi,v,SERIES[sname].color);
+    setSurfaceTouchMarker(hit);
     updateHighlight(mi, yi, sname, v);
-  } else { tooltip.style.display='none'; hideGuide(); clearHighlight(); }
+  } else {
+    tooltip.style.display='none';
+    hideGuide();
+    clearSurfaceTouchMarker();
+    clearHighlight();
+  }
+}
+
+function updateTooltips() {
+  if (isDragging || (_touchIsActive && !_touchPickPending)) {
+    cancelPickTask();
+    tooltip.style.display = 'none';
+    hideGuide();
+	
+    return;
+  }
+
+  const usingTouchPick = _touchPickPending;
+  const x = usingTouchPick ? _touchPickX : lastMouseX;
+  const y = usingTouchPick ? _touchPickY : lastMouseY;
+  const mode = usingTouchPick ? 'touch' : 'mouse';
+
+  const key =
+    x + ',' + y + ',' + _az + ',' + _el + ',' + _zoom + ',' +
+    currentLayer + ',' + currentGeo + ',' + currentCycleStartMonth + ',' + mode;
+
+  if (!usingTouchPick && key === _lastTipKey && _activePickTask) return;
+  _lastTipKey = key;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  const over = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+
+  if (!over || !data || !data.axes) {
+    if (usingTouchPick) _touchPickPending = false;
+    cancelPickTask();
+    tooltip.style.display = 'none';
+    hideGuide();
+
+    if (x > -9000 && y > -9000) {
+      clearSurfaceTouchMarker();
+    }
+
+    return;
+  }
+
+  _lastPointerWasTouch = usingTouchPick;
+
+  if (usingTouchPick) {
+    _touchPickPending = false;
+    lastMouseX = -9999;
+    lastMouseY = -9999;
+  }
+
+  const expectedKey = _pickTaskKeyFor(x, y, mode);
+
+  startPickTask(x, y, mode, hit => {
+    if (_activePickTaskKey && _activePickTaskKey !== expectedKey) return;
+    applyPickHitResult(hit, x, y);
+  });
 }
 
 function animate() {
