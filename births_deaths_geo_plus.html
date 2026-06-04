@@ -7036,6 +7036,8 @@ let _touchIsActive = false;
 let _touchPickPending = false;
 let _touchPickX = -9999;
 let _touchPickY = -9999;
+let _touchAnchorActive = false;
+let _touchAnchorPickActive = false;
 
 function releaseMouseAnchor(clientX, clientY) {
   
@@ -7057,6 +7059,53 @@ function _markRightPointerActive() {
 
 function _rightPointerIsActive() {
   return performance.now() < _rightPointerActiveUntil;
+}
+
+function releaseTouchAnchor(clientX, clientY) {
+  _touchAnchorActive = false;
+  _touchAnchorPickActive = false;
+  _touchPickPending = false;
+  cancelPickTask();
+  _lastPointerWasTouch = true;
+  lastMouseX = -9999;
+  lastMouseY = -9999;
+  _lastTipKey = '';
+  tooltip.style.display = 'none';
+  hideGuide();
+  clearSurfaceTouchMarker();
+  clearHighlight();
+  requestRightPanelRender();
+  requestPeelRender();
+}
+
+function setTouchAnchorAt(clientX, clientY) {
+  cancelPickTask();
+  _lastPointerWasTouch = true;
+  _touchAnchorActive = false;
+  _touchAnchorPickActive = true;
+  _touchPickPending = false;
+  lastMouseX = -9999;
+  lastMouseY = -9999;
+  _lastTipKey = '';
+
+  const expectedKey = _pickTaskKeyFor(clientX, clientY, 'touch');
+
+  startPickTask(clientX, clientY, 'touch', hit => {
+    _touchAnchorPickActive = false;
+
+    if (_lastCompletedPickKey && _lastCompletedPickKey !== expectedKey) return;
+
+    if (hit) {
+      _touchAnchorActive = true;
+      applyPickHitResult(hit, clientX, clientY);
+    } else {
+      _touchAnchorActive = false;
+      applyPickHitResult(null, clientX, clientY);
+      lastMouseX = -9999;
+      lastMouseY = -9999;
+      _lastTipKey = '';
+    }
+  });
 }
 
 function setMouseAnchorAt(clientX, clientY) {
@@ -7219,8 +7268,10 @@ function _onTouchStart(e) {
   _lastTouchMid = null;
   _touchMoved = false;
   _touchDragging = false;
-  clearHighlight();
-  clearSurfaceTouchMarker();
+  if (!_touchAnchorActive) {
+    clearHighlight();
+    clearSurfaceTouchMarker();
+  }
 
   if (e.touches.length === 1) {
     const t = e.touches[0];
@@ -7326,10 +7377,16 @@ function _onTouchEnd(e) {
     if (wasTap) {
       cancelPickTask();
       _lastPointerWasTouch = true;
-      _touchPickPending = true;
-      _touchPickX = tapX;
-      _touchPickY = tapY;
+      _touchPickPending = false;
+      _touchPickX = -9999;
+      _touchPickY = -9999;
       _lastTipKey = '';
+
+      if (_touchAnchorActive || _touchAnchorPickActive) {
+        releaseTouchAnchor(tapX, tapY);
+      } else {
+        setTouchAnchorAt(tapX, tapY);
+      }
     } else {
       _touchPickPending = false;
       lastMouseX = -9999;
@@ -7343,7 +7400,7 @@ renderer.domElement.addEventListener('touchend', _onTouchEnd, { passive: false }
 renderer.domElement.addEventListener('touchcancel', _onTouchEnd, { passive: false });
 renderer.domElement.addEventListener('contextmenu', e=>e.preventDefault());
 document.addEventListener('mousemove', e => {
-  if (_touchIsActive || _touchPickPending || anchorState ._mouseAnchorActive || _mouseAnchorPickActive) return;
+  if (_touchIsActive || _touchPickPending || _touchAnchorActive || _touchAnchorPickActive || anchorState ._mouseAnchorActive || _mouseAnchorPickActive) return;
 
   if (e.target && e.target.closest && e.target.closest('.orthoView')) {
     _markRightPointerActive();
@@ -10005,17 +10062,21 @@ function applyPickHitResult(hit, x, y) {
     clearSurfaceTouchMarker();
     clearHighlight();
   }
+
+  requestPeelRender();
 }
 
 function updateTooltips() {
-  if (anchorState ._mouseAnchorActive || _mouseAnchorPickActive) return;
+  if (anchorState ._mouseAnchorActive || _mouseAnchorPickActive || _touchAnchorActive || _touchAnchorPickActive) return;
+
+  if (_activePickTask && !_activePickTask.cancelled && _activePickTask.mode === 'touch') {
+    return;
+  }
 
   if (isDragging || (_touchIsActive && !_touchPickPending)) {
-
     cancelPickTask();
     tooltip.style.display = 'none';
     hideGuide();
-	
     return;
   }
 
@@ -10023,6 +10084,10 @@ function updateTooltips() {
   const x = usingTouchPick ? _touchPickX : lastMouseX;
   const y = usingTouchPick ? _touchPickY : lastMouseY;
   const mode = usingTouchPick ? 'touch' : 'mouse';
+
+  if (!usingTouchPick && x < -9000 && y < -9000 && _lastPointerWasTouch && surfaceTouchMarkerState) {
+    return;
+  }
 
   const key =
     x + ',' + y + ',' + _az + ',' + _el + ',' + _zoom + ',' +
@@ -10054,7 +10119,6 @@ function updateTooltips() {
   _lastPointerWasTouch = usingTouchPick;
 
   if (usingTouchPick) {
-    _touchPickPending = false;
     lastMouseX = -9999;
     lastMouseY = -9999;
   }
@@ -10062,6 +10126,7 @@ function updateTooltips() {
   const expectedKey = taskKey;
 
   startPickTask(x, y, mode, hit => {
+    if (usingTouchPick) _touchPickPending = false;
     if (_activePickTaskKey && _activePickTaskKey !== expectedKey) return;
     if (_lastCompletedPickKey && _lastCompletedPickKey !== expectedKey) return;
     applyPickHitResult(hit, x, y);
