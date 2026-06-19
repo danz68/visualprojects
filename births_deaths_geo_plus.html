@@ -46,12 +46,10 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
 #bottomBalanceText {  width: 62px;}
 #menuBtn { position: fixed; top: 12px; right: 16px; width: 30px; height: 30px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 101; }
 #menuPopup { position: fixed; left: 0; top: 0; right: auto; transform: translate3d(0,0,0); -webkit-transform: translate3d(0,0,0); will-change: transform; contain: layout paint; background: transparent; border: 1px solid rgba(210,210,210,0.92); border-radius: 6px; padding: 0; z-index: 200; display: none; width: 200px; font-size: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); max-height: calc(100vh - 16px); overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; }
-
-.menu-window-bar { height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 6px 0 4px; border: none; border-bottom: 1px solid rgba(210,210,210,0.92); border-radius: 6px 6px 0 0; background: rgba(220,220,220,0.80); cursor: move; user-select: none; -webkit-user-select: none; -ms-user-select: none; touch-action: none; }
-.menu-window-loader { height: 80%; width: auto; display: block; flex: 0 0 auto; margin-right: auto; }
-#menuCloseBtn { width: 22px; height: 22px; flex: 0 0 22px; border: none; background: transparent; color: #666; cursor: pointer; font-size: 16px; line-height: 20px; padding: 0; border-radius: 4px; font-family: Arial, sans-serif; touch-action: manipulation; }
-#menuCloseBtn:hover { background: rgba(0,0,0,0.07); color: #111; }
+.menu-window-bar { height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 6px 0 10px; border: none; border-bottom: 1px solid rgba(210,210,210,0.92); border-radius: 6px 6px 0 0; background: rgba(220,220,220,0.80); cursor: move; user-select: none; -webkit-user-select: none; -ms-user-select: none; touch-action: none; }
 .menu-window-title { flex: 1; font-size: 11px; color: #666; line-height: 28px; }
+#menuCloseBtn { width: 22px; height: 22px; border: none; background: transparent; color: #666; cursor: pointer; font-size: 16px; line-height: 20px; padding: 0; border-radius: 4px; font-family: Arial, sans-serif; touch-action: manipulation; }
+#menuCloseBtn:hover { background: rgba(0,0,0,0.07); color: #111; }
 .menu-window-content { overflow-x: hidden; overflow-y: auto; max-height: calc(100vh - 44px); background: #fff; border: none; border-radius: 0 0 6px 6px; }
 .menu-tabs { display: flex; border-top: none; border-bottom: 1px solid rgba(210,210,210,0.92); }
 .menu-tab { flex: 1; padding: 7px 4px; font-size: 11px; font-family: inherit; cursor: pointer; border: none; border-left: 1px solid rgba(210,210,210,0.92); background: #f0f0f0; color: #666; }
@@ -130,9 +128,6 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
 .dpad-btn:active { background: #ddd; }
 #resetBtn { width: 100%; font-size: 11px; padding: 5px; border: 1px solid #ccc; background: #f5f5f5; color: #111; cursor: pointer; border-radius: 4px; font-family: inherit; }
 #resetBtn:hover { background: #ececec; }
-
-#wasmBusyInputBlocker { position: fixed; inset: 0; z-index: 99998; display: block; background: rgba(0,0,0,0); pointer-events: all; touch-action: none; overscroll-behavior: contain; cursor: progress; }
-#wasmBusyInputBlocker[hidden] { display: none; }
 </style>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Rust-owned geometry/wire/marker build: no JS mesh/wire/marker reconstruction outside 2D Cycle. -->
@@ -154,10 +149,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
 <section class="right-section" id="essaySection">
       <h2>Cycle Plot: A Ticket to the Seasonality Journey</h2>
       <p>I recently came across a cycle-plot visualization designed by <a href="https://www.linkedin.com/in/camoesjo/"  target="_blank" rel="noopener noreferrer">Jorge Camões</a>, a data visualization expert for whom I have developed tremendous respect over the years. Because that respect has been mutual, I have always felt free to follow and comment on his work without being constrained by the usual social-media formalities.</p>
-	  <a href="https://www.linkedin.com/posts/camoesjo_cycleplots-demography-activity-7460047111640854528-hmQ_"  target="_blank" rel="noopener noreferrer">
-	  <img src=" https://media.licdn.com/dms/image/v2/D4E22AQERTPnTSoLpSw/feedshare-image-high-res/B4EZ4dpUOpJMAU-/0/1778613831180?e=1783555200&v=beta&t=6zt8OjAAi3QfVMU4uPrgy77noCLTLeiMyJa2u88v78Q" 
-
-	  width="100%"></a>
+	  <a href="https://www.linkedin.com/posts/camoesjo_cycleplots-demography-activity-7460047111640854528-hmQ_"  target="_blank" rel="noopener noreferrer"><img src="https://media.licdn.com/dms/image/v2/D4E22AQERTPnTSoLpSw/feedshare-image-high-res/B4EZ4dpUOpJMAU-/0/1778613831180?e=1781740800&v=beta&t=FBW3wKEIsabDLSjSjWA7mSSP2KbXN_Lhobxtcp9xIfc" width="100%"></a>
       <p>The visualization was posted on <a href="https://www.linkedin.com/posts/camoesjo_cycleplots-demography-activity-7460047111640854528-hmQ_"  target="_blank" rel="noopener noreferrer">LinkedIn with the following note</a>:</p>
       <p><i>“Love #cycleplots. Often used for data with strong seasonality, but I wanted to compare these two variables, live births and deaths, check if I could spot some patterns at month level. The results are... depressing.”</i></p>
       <p>It is hard to fault Jorge when it comes to dataviz choices. Once in a while, I feel like showing another perspective, but this was not really one of those cases. What triggered me was the content of the visualization itself: a chart meant to reveal similarities across 12 panels, yet similarities my eye could not easily extract. And because I value data smoothing, both for noise removal and pattern detection, we quickly exchanged a few comments. At some point, however, I felt the subject had exactly the kind of substance I like to approach through a carefully crafted numerical framework. The goal was not to replace a beautifully made visualization, but to expose the structure behind it through the right methodology, in a way that supports and strengthens the kind of cognition cycle plots invite.
@@ -243,12 +235,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
 </div>
 
 <div id="menuPopup">
-  <div class="menu-window-bar" id="menuDragBar">
-  <img id="wasm-busy" class="menu-window-loader" height="80%" style="display:none;" src="data:image/gif;base64,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" alt="Processing">
- 
-  <button id="menuCloseBtn" type="button" aria-label="Close">×</button>
-  
-  </div>
+  <div class="menu-window-bar" id="menuDragBar"><button id="menuCloseBtn" type="button" aria-label="Close">×</button></div>
   <div class="menu-window-content" id="menuPopupContent">
   <div class="menu-tabs">
     <button class="menu-tab active" id="tabSurfBtn" onclick="switchTab('surf')">Show</button>
@@ -457,8 +444,6 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
 	
   </div>
 </div>
-
-<div id="wasmBusyInputBlocker" hidden aria-hidden="true"></div>
 
 <div class="tooltip3d" id="tooltip"></div>
 
@@ -2826,7 +2811,7 @@ function _computeGeoRecordDirect(geo, c1, c2, c3, forecastParams) {
   }
 
   if (forecastSegment) segments.push(forecastSegment);
-  return { geo, segments, _forecast_message: messages.join(String.fromCharCode(10)) };
+  return { geo, segments, _forecast_message: messages.join('\n') };
 }
 
 const _wasmRecordCache = new Map();
@@ -2967,7 +2952,7 @@ function _wasmParamKey() {
   return _wasmParamKeyFor(wasmC1, wasmC2, wasmC3, fp.forecastYears, fp.trainingYears, fp.memoryYears, fp.overlapYears, fp.maxGapYears, fp.skipLastYears);
 }
 
-function _wasmDirectRequest(type, payload) {
+async function _wasmWorkerRequest(type, payload) {
   payload = payload || {};
   if (!_geomWasmMod) throw new Error('WASM module not initialized.');
   if (Array.isArray(payload.globalOptions)) {
@@ -2991,423 +2976,6 @@ function _wasmDirectRequest(type, payload) {
     return { ok: true, geo: payload.geo, record };
   }
   throw new Error('Unknown WASM request: ' + type);
-}
-
-const WASM_BUSY_UI_DELAY_MS = 1000;
-let _wasmBusyDepth = 0;
-let _wasmBusyTimer = 0;
-let _wasmBusyShown = false;
-let _wasmWorkerUrl = null;
-let _wasmWorker = null;
-let _wasmWorkerSeq = 0;
-let _wasmWorkerReadyPromise = null;
-let _wasmWorkerJobChain = Promise.resolve();
-const _wasmWorkerPending = new Map();
-
-function _wasmBusyOverlayEl() {
-  return document.getElementById('wasmBusyInputBlocker');
-}
-
-function _wasmBusyImageEl() {
-  return document.getElementById('wasm-busy');
-}
-
-function _wasmBusySetShown(shown) {
-  _wasmBusyShown = !!shown;
-  const img = _wasmBusyImageEl();
-  if (img) img.style.display = shown ? 'block' : 'none';
-}
-
-function _wasmBusyBegin() {
-  _wasmBusyDepth++;
-  const overlay = _wasmBusyOverlayEl();
-  if (overlay) overlay.hidden = false;
-  if (_wasmBusyDepth === 1) {
-    clearTimeout(_wasmBusyTimer);
-    _wasmBusySetShown(false);
-    _wasmBusyTimer = setTimeout(() => {
-      if (_wasmBusyDepth > 0) _wasmBusySetShown(true);
-    }, WASM_BUSY_UI_DELAY_MS);
-  }
-}
-
-function _wasmBusyEnd() {
-  _wasmBusyDepth = Math.max(0, _wasmBusyDepth - 1);
-  if (_wasmBusyDepth !== 0) return;
-  clearTimeout(_wasmBusyTimer);
-  _wasmBusyTimer = 0;
-  _wasmBusySetShown(false);
-  const overlay = _wasmBusyOverlayEl();
-  if (overlay) overlay.hidden = true;
-}
-
-function _wasmBusyBlockEvent(ev) {
-  if (_wasmBusyDepth <= 0) return;
-  ev.preventDefault();
-  ev.stopPropagation();
-}
-
-window.addEventListener('wheel', _wasmBusyBlockEvent, { capture: true, passive: false });
-window.addEventListener('touchmove', _wasmBusyBlockEvent, { capture: true, passive: false });
-window.addEventListener('pointerdown', _wasmBusyBlockEvent, { capture: true });
-window.addEventListener('keydown', _wasmBusyBlockEvent, { capture: true });
-
-function _wasmWorkerScriptSource() {
-  return `
-let _geomWasmMod = null;
-const _APPLIED_WASM_GLOBAL_OPTIONS = new Map();
-const _MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-function _sameGlobalOptionValue(a, b) {
-  if (typeof a === 'number' || typeof b === 'number') {
-    const na = Number(a);
-    const nb = Number(b);
-    return Number.isFinite(na) && Number.isFinite(nb) && na === nb;
-  }
-  return a === b;
-}
-
-function _b64ToUint8ArrayWorker(b64) {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
-}
-
-function _applyWorkerGlobalOptionIfChanged(option_key, option_val) {
-  const key = String(option_key || '').trim();
-  if (!key || !_geomWasmMod || typeof _geomWasmMod.global_option_set !== 'function') return false;
-  const oldVal = _APPLIED_WASM_GLOBAL_OPTIONS.get(key);
-  if (_APPLIED_WASM_GLOBAL_OPTIONS.has(key) && _sameGlobalOptionValue(oldVal, option_val)) return false;
-  _geomWasmMod.global_option_set(key, option_val);
-  _APPLIED_WASM_GLOBAL_OPTIONS.set(key, option_val);
-  try {
-    if (typeof _geomWasmMod.clear_geometry_cache === 'function') _geomWasmMod.clear_geometry_cache();
-  } catch (_) {}
-  return true;
-}
-
-function _applyWorkerGlobalOptions(globalOptions) {
-  if (!Array.isArray(globalOptions)) return;
-  for (const pair of globalOptions) {
-    if (pair && pair.length >= 2) _applyWorkerGlobalOptionIfChanged(String(pair[0]), pair[1]);
-  }
-}
-
-function _flatToGrid(arr, nYears, period) {
-  if (!arr || !Array.isArray(arr) && !(ArrayBuffer.isView(arr))) return null;
-  if (arr.length !== nYears * period) return null;
-  const out = new Array(nYears);
-  for (let y = 0; y < nYears; y++) {
-    const row = new Array(period);
-    for (let m = 0; m < period; m++) {
-      const v = Number(arr[y * period + m]);
-      row[m] = Number.isFinite(v) ? v : null;
-    }
-    out[y] = row;
-  }
-  return out;
-}
-
-function _deriveGrid(a, b, op) {
-  if (!a || !b || a.length !== b.length) return null;
-  const out = new Array(a.length);
-  for (let y = 0; y < a.length; y++) {
-    const ar = a[y], br = b[y];
-    if (!Array.isArray(ar) || !Array.isArray(br) || ar.length !== br.length) return null;
-    const row = new Array(ar.length);
-    for (let m = 0; m < ar.length; m++) {
-      const av = ar[m], bv = br[m];
-      row[m] = (av !== null && bv !== null && Number.isFinite(av) && Number.isFinite(bv)) ? op(av, bv) : null;
-    }
-    out[y] = row;
-  }
-  return out;
-}
-
-function _seriesToGrids(series, nYears, period) {
-  series = series || {};
-  const smooth = _flatToGrid(series.smooth, nYears, period);
-  const trend = _flatToGrid(series.trend, nYears, period);
-  const raw = _flatToGrid(series.raw, nYears, period);
-  const out = {};
-  if (smooth) out.smooth = smooth;
-  if (trend) out.trend = trend;
-  const seasonal = _flatToGrid(series.seasonal, nYears, period) || (smooth && trend ? _deriveGrid(smooth, trend, (s, t) => s - t) : null);
-  if (seasonal) out.seasonal = seasonal;
-  if (raw) out.raw = raw;
-  const residual = _flatToGrid(series.residual, nYears, period) || (raw && smooth ? _deriveGrid(raw, smooth, (r, s) => r - s) : null);
-  if (residual) out.residual = residual;
-  return out;
-}
-
-function _addIfGrid(target, key, arr, nYears, period) {
-  const g = _flatToGrid(arr, nYears, period);
-  if (g) target[key] = g;
-}
-
-function _addForecastVarianceGrids(target, bundle, compatValue, nYears, period) {
-  let hasLayered = false;
-  if (bundle && typeof bundle === 'object') {
-    const raw = _flatToGrid(bundle.raw, nYears, period);
-    const trend = _flatToGrid(bundle.trend, nYears, period);
-    const smooth = _flatToGrid(bundle.smooth, nYears, period);
-    if (raw) { target.variance_raw = raw; hasLayered = true; }
-    if (trend) { target.variance_trend = trend; hasLayered = true; }
-    if (smooth) { target.variance_smooth = smooth; target.variance = smooth; hasLayered = true; }
-  }
-  if (!hasLayered) _addIfGrid(target, 'variance', compatValue, nYears, period);
-}
-
-function _copyConfidenceScore(src) {
-  if (!src || typeof src !== 'object') return null;
-  const out = {};
-  for (const k of ['raw', 'trend', 'smooth']) {
-    const v = Number(src[k]);
-    if (Number.isFinite(v)) out[k] = v;
-  }
-  return Object.keys(out).length ? out : null;
-}
-
-function _segmentHasRenderableData(r) {
-  const n = Number(r && r.n_years) || 0;
-  const p = Number(r && r.period) || 0;
-  if (!n || !p) return false;
-  for (const ss of [r.births, r.deaths, r.balance]) {
-    if (ss && ss.smooth && ss.smooth.length === n * p) return true;
-    if (ss && ss.trend && ss.trend.length === n * p) return true;
-    if (ss && ss.raw && ss.raw.length === n * p) return true;
-  }
-  return false;
-}
-
-function _segmentResultToRecordSegment(geo, r, segmentIndex) {
-  const nYears = Number(r.n_years);
-  const period = Number(r.period);
-  const isForecast = !!r.is_forecast || Number(segmentIndex) === 128;
-  const overlapYears = Number(r.overlap_years || r.overlapped_years || 0);
-  const out = {
-    geo,
-    axes: {
-      years: Array.from(r.years || []),
-      n_years: nYears,
-      n_months: period,
-      month_names: _MONTH_NAMES.slice(0, period)
-    },
-    series: {
-      births:  _seriesToGrids(r.births,  nYears, period),
-      deaths:  _seriesToGrids(r.deaths,  nYears, period),
-      balance: _seriesToGrids(r.balance, nYears, period)
-    },
-    is_forecast: isForecast,
-    _isForecast: isForecast,
-    _segmentIndex: Number(segmentIndex),
-    _overlap_years: overlapYears,
-    _forecast_message: String(r.message || ''),
-    _wasm: {
-      power: r.power,
-      trend_lambda: r.trend_lambda,
-      seasonal_year_lambda: r.seasonal_year_lambda,
-      seasonal_month_lambda: r.seasonal_month_lambda,
-      thorn_residual_ref: Number(r.thorn_residual_ref || 0)
-    }
-  };
-  if (isForecast) {
-    _addForecastVarianceGrids(out.series.births,  r.births_funnel_variance,  r.births_variance,  nYears, period);
-    _addForecastVarianceGrids(out.series.deaths,  r.deaths_funnel_variance,  r.deaths_variance,  nYears, period);
-    _addForecastVarianceGrids(out.series.balance, r.balance_funnel_variance, r.balance_variance, nYears, period);
-    out._confidence = {
-      births:  _copyConfidenceScore(r.births_confidence),
-      deaths:  _copyConfidenceScore(r.deaths_confidence),
-      balance: _copyConfidenceScore(r.balance_confidence)
-    };
-  }
-  return out;
-}
-
-function _observedBoundsFromPayload(payload) {
-  const b = payload && payload.observedBounds;
-  const first = Math.round(Number(b && b.first));
-  const last = Math.round(Number(b && b.last));
-  const span = Math.round(Number(b && b.span));
-  if (Number.isFinite(first) && Number.isFinite(last) && Number.isFinite(span) && span > 0) {
-    return { first, last, span };
-  }
-  return { first: 1969, last: 2024, span: 56 };
-}
-
-function _computeGeoRecordWorker(payload) {
-  if (!_geomWasmMod) throw new Error('WASM module not initialized.');
-  payload = payload || {};
-  const forecastParams = payload.forecastParams || {};
-  const forecastYears = Math.max(0, Math.round(Number(forecastParams.forecastYears) || 0));
-  const trainingYears = Math.max(0, Math.round(Number(forecastParams.trainingYears) || 0));
-  const memoryYears = Math.max(0, Math.round(Number(forecastParams.memoryYears) || 0));
-  const skipLastYears = Math.max(0, Math.round(Number(forecastParams.skipLastYears) || 0));
-  const bounds = _observedBoundsFromPayload(payload);
-  const observedSpan = Math.max(0, Math.round(Number(bounds && bounds.span) || 0));
-  const effectiveTrainingYears = trainingYears > 0 ? trainingYears : observedSpan;
-  const maxBacktestYears = Math.max(0, effectiveTrainingYears - skipLastYears);
-  const overlapYears = Math.max(0, Math.min(maxBacktestYears, Math.round(Number(forecastParams.overlapYears) || 0)));
-  const maxGapYears = Math.max(0, Math.round(Number(forecastParams.maxGapYears) || 0));
-  _applyWorkerGlobalOptionIfChanged('forecast_skip_last', skipLastYears);
-  _geomWasmMod.set_forecast_params(forecastYears, trainingYears, memoryYears, overlapYears, maxGapYears);
-  const geo = String(payload.geo || '');
-  const c1n = Number(payload.c1);
-  const c2n = Number(payload.c2);
-  const c3n = Number(payload.c3);
-  const segIds = _geomWasmMod.list_segments(geo);
-  const segments = [];
-  const messages = [];
-  let forecastSegment = null;
-  if (forecastYears > 0) {
-    const r = _geomWasmMod.compute_compensate(geo, 128, c1n, c2n, c3n);
-    if (r && r.message) messages.push(String(r.message));
-    if (_segmentHasRenderableData(r)) forecastSegment = _segmentResultToRecordSegment(geo, r, 128);
-  }
-  for (const segId of segIds) {
-    const sid = Number(segId);
-    const r = _geomWasmMod.compute_compensate(geo, sid, c1n, c2n, c3n);
-    if (r && r.message) messages.push(String(r.message));
-    if (_segmentHasRenderableData(r)) segments.push(_segmentResultToRecordSegment(geo, r, sid));
-  }
-  if (forecastSegment) segments.push(forecastSegment);
-  return { geo, segments, _forecast_message: messages.join(String.fromCharCode(10)) };
-}
-
-async function _workerInit(payload) {
-  const jsUrl = URL.createObjectURL(new Blob([String(payload.jsText || '')], { type: 'text/javascript' }));
-  try {
-    const mod = await import(jsUrl);
-    await mod.default(_b64ToUint8ArrayWorker(String(payload.wasmB64 || '')));
-    const cfg = new mod.Config();
-    mod.init(cfg);
-    mod.load_embedded();
-    _geomWasmMod = mod;
-    _applyWorkerGlobalOptions(payload.globalOptions || []);
-  } finally {
-    setTimeout(() => URL.revokeObjectURL(jsUrl), 0);
-  }
-  return { ok: true };
-}
-
-self.onmessage = async (ev) => {
-  const msg = ev.data || {};
-  const id = msg.id;
-  try {
-    const type = String(msg.type || '');
-    const payload = msg.payload || {};
-    let result;
-    if (type === 'init') {
-      result = await _workerInit(payload);
-    } else {
-      if (!_geomWasmMod) throw new Error('WASM worker not initialized.');
-      if (Array.isArray(payload.globalOptions)) _applyWorkerGlobalOptions(payload.globalOptions);
-      if (type === 'global_option_set') {
-        _applyWorkerGlobalOptionIfChanged(String(payload.option_key || ''), payload.option_val);
-        result = { ok: true };
-      } else if (type === 'list_geos') {
-        result = { ok: true, geos: _geomWasmMod.list_geos() };
-      } else if (type === 'compute_geo') {
-        const record = _computeGeoRecordWorker(payload);
-        result = { ok: true, geo: payload.geo, record };
-      } else {
-        throw new Error('Unknown WASM request: ' + type);
-      }
-    }
-    self.postMessage({ id, ok: true, result });
-  } catch (err) {
-    self.postMessage({ id, ok: false, error: String(err && err.message ? err.message : err) });
-  }
-};
-`;
-}
-
-function _wasmWorkerPost(type, payload) {
-  if (!_wasmWorker) throw new Error('WASM worker is not available.');
-  const id = ++_wasmWorkerSeq;
-  return new Promise((resolve, reject) => {
-    _wasmWorkerPending.set(id, { resolve, reject });
-    _wasmWorker.postMessage({ id, type, payload: payload || {} });
-  });
-}
-
-function _rejectAllWasmWorkerPending(err) {
-  for (const pending of _wasmWorkerPending.values()) pending.reject(err);
-  _wasmWorkerPending.clear();
-}
-
-function _ensureWasmWorkerReady() {
-  if (_wasmWorkerReadyPromise) return _wasmWorkerReadyPromise;
-  if (typeof Worker !== 'function') {
-    _wasmWorkerReadyPromise = Promise.reject(new Error('WebWorker is not available.'));
-    return _wasmWorkerReadyPromise;
-  }
-
-  const srcEl = document.getElementById('geom-js-source');
-  if (!srcEl) {
-    _wasmWorkerReadyPromise = Promise.reject(new Error('Missing geometry WASM JS glue source.'));
-    return _wasmWorkerReadyPromise;
-  }
-
-  const workerSrc = _wasmWorkerScriptSource();
-  _wasmWorkerUrl = URL.createObjectURL(new Blob([workerSrc], { type: 'text/javascript' }));
-  _wasmWorker = new Worker(_wasmWorkerUrl, { type: 'module' });
-
-  _wasmWorker.onmessage = (ev) => {
-    const msg = ev.data || {};
-    const pending = _wasmWorkerPending.get(msg.id);
-    if (!pending) return;
-    _wasmWorkerPending.delete(msg.id);
-    if (msg.ok) pending.resolve(msg.result);
-    else pending.reject(new Error(String(msg.error || 'WASM worker error')));
-  };
-
-  _wasmWorker.onerror = (ev) => {
-    const err = new Error(String(ev && ev.message ? ev.message : 'WASM worker failed'));
-    _rejectAllWasmWorkerPending(err);
-  };
-
-  _wasmWorkerReadyPromise = _wasmWorkerPost('init', {
-    jsText: srcEl.textContent || '',
-    wasmB64: GEOM_WASM_B64,
-    globalOptions: _globalOptionEntries()
-  });
-
-  return _wasmWorkerReadyPromise;
-}
-
-async function _wasmWorkerRequestRaw(type, payload) {
-  payload = payload || {};
-  await _ensureWasmWorkerReady();
-  if (type === 'compute_geo') {
-    payload = Object.assign({}, payload, { observedBounds: _currentObservedYearBounds() });
-  }
-  return await _wasmWorkerPost(type, payload);
-}
-
-function _wasmExecuteSmart(fn) {
-  const run = _wasmWorkerJobChain.then(async () => {
-    _wasmBusyBegin();
-    try {
-      return await fn();
-    } finally {
-      _wasmBusyEnd();
-    }
-  });
-  _wasmWorkerJobChain = run.catch(() => {});
-  return run;
-}
-
-async function _wasmWorkerRequest(type, payload) {
-  return await _wasmExecuteSmart(async () => {
-    try {
-      return await _wasmWorkerRequestRaw(type, payload);
-    } catch (err) {
-      console.warn('WASM worker request failed; falling back to main thread:', err);
-      return _wasmDirectRequest(type, payload);
-    }
-  });
 }
 
 async function _wasmListGeos() {
@@ -4391,7 +3959,7 @@ function _consumePeelRenderRequest() {
 window.requestPeelRender = requestPeelRender;
 
 let renderer = await _createOptionalRenderer(
-  { antialias: true, alpha: false , premultipliedAlpha: false},
+  { antialias: true, alpha: false },
   EXPERIMENTAL_WEBGPU_MAIN_RENDERER,
   'main renderer'
 );
@@ -4403,7 +3971,7 @@ wrap.style.background = '#f8f8f8';
 if (document.body) document.body.style.background = '#ffffff';
 
 let highlightRenderer = await _createOptionalRenderer(
-  { antialias: true, alpha: true , premultipliedAlpha: false},
+  { antialias: true, alpha: true },
   EXPERIMENTAL_WEBGPU_HIGHLIGHT_RENDERER,
   'highlight overlay renderer'
 );
@@ -4419,7 +3987,7 @@ function _replaceHighlightRendererWithWebGL(reason) {
 
   const oldRenderer = highlightRenderer;
   const oldEl = oldRenderer && oldRenderer.domElement ? oldRenderer.domElement : null;
-  const next = new THREE.WebGLRenderer({ antialias: true, alpha: true , premultipliedAlpha: false });
+  const next = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   if (!next.userData) next.userData = {};
   next.userData.dzvRendererBackend = 'webgl';
   next.setPixelRatio(window.devicePixelRatio || 1);
@@ -4655,8 +4223,8 @@ function DepthPeelMaterialMixin(BaseMaterial) {
 
 const LambertPeelMaterial = DepthPeelMaterialMixin(THREE.MeshLambertMaterial);
 const BasicPeelMaterial   = DepthPeelMaterialMixin(THREE.MeshBasicMaterial);
-LambertPeelMaterial.alphaToCoverage = true;
-BasicPeelMaterial.alphaToCoverage = true;
+
+
 
 const OPAQUE_OPACITY_EPS = 0.9995;
 
@@ -4958,23 +4526,13 @@ function _peelCandidateActive(obj, kind) {
   return _materialOpacityValue(obj.material) > PEEL_VISIBLE_EPS;
 }
 
-
-function _helicoidalSolidSobelMaskModeActive() {
-  return viewMode === VIEW_MODE_HELICOIDAL
-    && typeof _helicalAreaSolidMode === 'function'
-    && _helicalAreaSolidMode()
-    && typeof _surfaceSolidModeForWasm === 'function'
-    && _surfaceSolidModeForWasm();
-}
-
 function _dpForEachPeelCandidate(fn) {
   const useBooleanSolid = _booleanSolidModeActive && _booleanSolidModeActive();
   if (useBooleanSolid && booleanSolidGroup) {
     const gateSideWalls = _booleanHelicalSideWallRendererActive();
-    const helicalSolidSobelMask = _helicoidalSolidSobelMaskModeActive();
     for (const child of (booleanSolidGroup.children || [])) {
       if (!child) continue;
-      if (helicalSolidSobelMask && child.userData && child.userData.isSobelEdgeHelper) continue;
+      if (_helicalSolidSobelMaskModeActive() && child.userData && child.userData.isSobelEdgeHelper) continue;
       if (gateSideWalls && _isBooleanSideWallMesh(child)) continue;
       fn(child, 'surface');
     }
@@ -4987,8 +4545,7 @@ function _dpForEachPeelCandidate(fn) {
       if (peelMesh)       fn(peelMesh, 'surface');
       const singleSolidSobel = !useBooleanSolid
         && _booleanSelectedSeriesNames().length === 1
-        && viewMode === VIEW_MODE_ORTHOGONAL
-        && !!surfaceSolid;
+        && _orthogonalSolidSobelSurfaceModeActive();
       if (singleSolidSobel) {
         if (p.sobelEdgeStrict) fn(p.sobelEdgeStrict, 'surface');
         if (p.sobelEdgeOptional) fn(p.sobelEdgeOptional, 'surface');
@@ -5048,6 +4605,21 @@ function _booleanHelicalSideWallRendererActive() {
 
 function _isBooleanSideWallMesh(o) {
   return !!(o && o.userData && o.userData.isBooleanSideWall);
+}
+
+function _helicalSolidSobelMaskModeActive() {
+  return !!(viewMode === VIEW_MODE_HELICOIDAL
+    && typeof _helicalAreaSolidMode === 'function'
+    && _helicalAreaSolidMode()
+    && typeof _surfaceSolidModeForWasm === 'function'
+    && _surfaceSolidModeForWasm());
+}
+
+function _orthogonalSolidSobelSurfaceModeActive() {
+  return !!(viewMode === VIEW_MODE_ORTHOGONAL
+    && !!surfaceSolid
+    && typeof _surfaceSolidModeForWasm === 'function'
+    && _surfaceSolidModeForWasm());
 }
 
 function _forEachBooleanSideWall(fn) {
@@ -5160,12 +4732,13 @@ function _peelSobelStateGet() {
            (sN + sS + sW + sE) * 0.1250 +
            (sNW + sNE + sSW + sSE) * 0.03125;
 
-        vec4 softenedSurface = mix(sM, sBlur, edge);
+        vec3 edgedSurfaceRgb = sM.rgb * (1.0 - edge * 0.35);
+        vec4 edgedSurface = vec4(edgedSurfaceRgb, sM.a);
         vec4 fM = texture2D(tFull, vUv);
         float wireDiff = max(length(fM.rgb - sM.rgb), abs(fM.a - sM.a));
         float wireMask = smoothstep(wireThreshold, wireThreshold * 2.5, wireDiff);
 
-        gl_FragColor = mix(softenedSurface, fM, wireMask);
+        gl_FragColor = mix(edgedSurface, fM, wireMask);
         #include <colorspace_fragment>
       }
     `,
@@ -5215,8 +4788,7 @@ function _peelSobelEdgeDepthMaterialGet() {
 
 function _peelSobelEdgeHelperVisible(o) {
   if (!o || !o.userData || !o.userData.isSobelEdgeHelper) return false;
-  const helicalSolidSobelMask = _helicoidalSolidSobelMaskModeActive();
-  if (!SOBEL_GEOMETRY_EDGES_ACTIVE && !helicalSolidSobelMask) return false;
+  if (!SOBEL_GEOMETRY_EDGES_ACTIVE && !_helicalSolidSobelMaskModeActive()) return false;
   if (o.userData.sobelEdgeKind === SOBEL_EDGE_OPTIONAL_COMMON && !SOBEL_GEOMETRY_COMMON_EDGES_ACTIVE) return false;
   return true;
 }
@@ -5255,12 +4827,24 @@ function _peelRenderGeometrySobelEdgeMask(target, scene, w, h) {
     renderer.render(scene, camera);
     scene.overrideMaterial = oldOverride;
 
+    const helperOpacitySaved = [];
     for (const [o] of saved) {
-      if (!o.isMesh && !o.isLine && !o.isSprite) o.visible = true;
-      else o.visible = _peelSobelEdgeHelperVisible(o);
+      if (!o.isMesh && !o.isLine && !o.isSprite) {
+        o.visible = true;
+      } else {
+        const visibleHelper = _peelSobelEdgeHelperVisible(o);
+        o.visible = visibleHelper;
+        if (visibleHelper && o.material && o.material.uniforms && o.material.uniforms.opacity) {
+          helperOpacitySaved.push([o.material, o.material.uniforms.opacity.value]);
+          o.material.uniforms.opacity.value = 1.0;
+        }
+      }
     }
     renderer.autoClear = false;
     renderer.render(scene, camera);
+    for (const [mat, op] of helperOpacitySaved) {
+      if (mat && mat.uniforms && mat.uniforms.opacity) mat.uniforms.opacity.value = op;
+    }
   }
 
   scene.overrideMaterial = oldOverride;
@@ -5716,8 +5300,8 @@ updateCameraHeadLight(camera);
 let SOBEL_ACTIVE = true; 
 let SOBEL_GEOMETRY_EDGES_ACTIVE = false;
 let SOBEL_GEOMETRY_COMMON_EDGES_ACTIVE = false;
-const SOBEL_GEOMETRY_EDGE_LINEWIDTH = 1.0;
-const SOBEL_GEOMETRY_EDGE_STRENGTH = 0.5;
+const SOBEL_GEOMETRY_EDGE_LINEWIDTH = 0.5;
+const SOBEL_GEOMETRY_EDGE_STRENGTH = 0.25;
 const SOBEL_EDGE_STRICT = 1;
 const SOBEL_EDGE_OPTIONAL_COMMON = 2;
 const TRI_PART_DATA_SURFACE = 0;
@@ -5736,7 +5320,7 @@ function depthPeelRender() {
   updateCameraHeadLight(camera);							
   const SOBEL_EDGE_STRENGTH = 0.65;
   const SOBEL_EDGE_THRESHOLD = 0.1;
-  const SOBEL_BLUR_RADIUS = 1.0;
+  const SOBEL_BLUR_RADIUS = 0.5;
   const WIRE_RESTORE_THRESHOLD = 0.001;
 
   renderer.getDrawingBufferSize(_dpSize);
@@ -5751,7 +5335,7 @@ function depthPeelRender() {
   st.material.uniforms.edgeThreshold.value = SOBEL_EDGE_THRESHOLD;
   st.material.uniforms.blurRadius.value = SOBEL_BLUR_RADIUS;
   st.material.uniforms.wireThreshold.value = WIRE_RESTORE_THRESHOLD;
-  st.material.uniforms.geomEdgeStrength.value = SOBEL_GEOMETRY_EDGE_STRENGTH;
+  st.material.uniforms.geomEdgeStrength.value = _helicalSolidSobelMaskModeActive() ? 0.65 : SOBEL_GEOMETRY_EDGE_STRENGTH;
 
   const w = Math.max(1, (_dpSize.x * PEEL_SS) | 0);
   const h = Math.max(1, (_dpSize.y * PEEL_SS) | 0);
@@ -14408,7 +13992,7 @@ function _rightViewClick(rec, clientX, clientY) {
 function _rightMakeExactView(container, axisCanvas, kind) {
   if (!container || !axisCanvas) return null;
 
-  const r = new THREE.WebGLRenderer({ antialias: true, alpha: false , premultipliedAlpha: false});
+  const r = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   r.setPixelRatio(window.devicePixelRatio || 1);
   r.setClearColor(RIGHT_VIEW_BG, 1);
   r.domElement.style.position = 'absolute';
