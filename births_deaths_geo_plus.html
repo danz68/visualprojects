@@ -7601,7 +7601,90 @@ let cycle2dGroup = null;
 let cycle2dMarker = null;
 let cycle2dPickPoints = [];
 let cycle2dPickTriangles = [];
+let cycle2dPickBuckets = [];
+let cycle2dPickPointIndex = new Map();
+let cycle2dPickEpoch = 0;
 let cycle2dCellMeta = [];
+let _cycle2dHoverRaf = 0;
+let _cycle2dHoverSeq = 0;
+let _cycle2dHoverClientX = -9999;
+let _cycle2dHoverClientY = -9999;
+
+function _cycle2dResetPickBuckets() {
+  const n = data && data.axes && Number.isFinite(Number(data.axes.n_months))
+    ? Math.max(1, Math.min(12, Number(data.axes.n_months)))
+    : 12;
+  cycle2dPickBuckets = Array.from({ length: n }, () => ({ points: [], triangles: [] }));
+  cycle2dPickPointIndex = new Map();
+  cycle2dPickEpoch += 1;
+}
+
+function _cycle2dPickPointKey(mi, sname, segmentIndex, localYi) {
+  return [
+    Math.round(Number(mi)),
+    String(sname || ''),
+    Math.round(Number(segmentIndex)),
+    Math.round(Number(localYi))
+  ].join('|');
+}
+
+function _cycle2dBucketForMonth(mi) {
+  const m = Math.round(Number(mi));
+  if (!Number.isFinite(m) || m < 0) return null;
+  if (!cycle2dPickBuckets || !cycle2dPickBuckets.length) _cycle2dResetPickBuckets();
+  if (m >= cycle2dPickBuckets.length) return null;
+  if (!cycle2dPickBuckets[m]) cycle2dPickBuckets[m] = { points: [], triangles: [] };
+  return cycle2dPickBuckets[m];
+}
+
+function _cycle2dAddPickPoint(point) {
+  if (!point) return;
+  cycle2dPickPoints.push(point);
+  const b = _cycle2dBucketForMonth(point.mi);
+  if (b) b.points.push(point);
+
+  const key = _cycle2dPickPointKey(point.mi, point.sname, point.segmentIndex, point.localYi);
+  if (!cycle2dPickPointIndex.has(key)) cycle2dPickPointIndex.set(key, point);
+}
+
+function _cycle2dAddPickTriangle(tri) {
+  cycle2dPickTriangles.push(tri);
+  const b = _cycle2dBucketForMonth(tri && tri.point && tri.point.mi);
+  if (b) b.triangles.push(tri);
+}
+
+function _cycle2dPickBucketForWorld(x, y, padWorld) {
+  const pad = Math.max(0, Number(padWorld) || 0);
+  let best = null;
+  let bestD2 = Infinity;
+
+  for (const cell of (cycle2dCellMeta || [])) {
+    if (!cell) continue;
+    const bucket = _cycle2dBucketForMonth(cell.month);
+    if (!bucket || ((!bucket.points || !bucket.points.length) && (!bucket.triangles || !bucket.triangles.length))) continue;
+
+    const l0 = Math.min(Number(cell.plotL), Number(cell.plotR));
+    const r0 = Math.max(Number(cell.plotL), Number(cell.plotR));
+    const b0 = Math.min(Number(cell.plotB), Number(cell.plotT));
+    const t0 = Math.max(Number(cell.plotB), Number(cell.plotT));
+    if (![l0, r0, b0, t0].every(Number.isFinite)) continue;
+
+    if (x < l0 - pad || x > r0 + pad || y < b0 - pad || y > t0 + pad) continue;
+
+    // Distance to the real cell rectangle: 0 when the pointer is inside.
+    const qx = Math.max(l0, Math.min(r0, x));
+    const qy = Math.max(b0, Math.min(t0, y));
+    const dx = x - qx;
+    const dy = y - qy;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = bucket;
+    }
+  }
+
+  return best;
+}
 let cycle2dTouchState = null;
 let cycle2dNeedsFullYearReset = true;
 let cycle2dLastTotalSpan = null;
@@ -7627,6 +7710,7 @@ function _disposeCycle2DView() {
   cycle2dMarker = null;
   cycle2dPickPoints = [];
   cycle2dPickTriangles = [];
+  _cycle2dResetPickBuckets();
   cycle2dCellMeta = [];
   _cycle2dClearLabels();
 }
@@ -7766,10 +7850,10 @@ function _cycle2dVisibleSeries() {
 function _cycle2dFormatValue(v) {
   v = Number(v);
   if (!Number.isFinite(v)) return '';
-  const av = Math.abs(v);
-  if (av >= 100) return v.toFixed(0);
-  if (av >= 10) return v.toFixed(1);
-  return v.toFixed(2);
+  return Math.round(v).toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  });
 }
 
 function _cycle2dCollectDomainForMonths(months, visibleSeries, y0, y1) {
@@ -8031,7 +8115,7 @@ function _cycle2dBuildThorns(points, sname, colorScale, linewidthPx, opacity, z,
     outlineSegs.push(right.x, right.y, z + 0.001, left.x, left.y, z + 0.001);
     outlineCols.push(...outlineColor, ...outlineColor, ...outlineColor, ...outlineColor, ...outlineColor, ...outlineColor);
 
-    cycle2dPickTriangles.push({
+    _cycle2dAddPickTriangle({
       x0: left.x, y0: left.y,
       x1: right.x, y1: right.y,
       x2: p.x, y2: tipY,
@@ -8078,7 +8162,7 @@ function _cycle2dCollectSeriesPointGroups(month, sname, y0, y1, xOfYear, yOfVal)
         localYi: yi
       };
       pts.push(point);
-      cycle2dPickPoints.push(point);
+      _cycle2dAddPickPoint(point);
     }
     pts.sort((a, b) => a.year - b.year);
     if (pts.length) groups.push(pts);
@@ -8093,6 +8177,103 @@ function _cycle2dAddAxisLine(points, color, opacity) {
 }
 
 
+function _cycle2dValueTickAlreadyDrawn(v, drawn, valueLo, valueHi) {
+  const span = Math.max(1e-12, Math.abs(Number(valueHi) - Number(valueLo)));
+  const eps = span * 1e-7;
+  for (const d of drawn) if (Math.abs(Number(v) - Number(d)) <= eps) return true;
+  return false;
+}
+
+function _cycle2dValueTickScreenY(v, yOfVal) {
+  if (!yOfVal) return NaN;
+  const yy = yOfVal(Number(v));
+  if (!Number.isFinite(yy)) return NaN;
+  return _cycle2dWorldToSvg(0, yy, 0.02).y;
+}
+
+function _cycle2dRoundTickValue(v, step) {
+  const s = Math.abs(Number(step));
+  if (!Number.isFinite(v) || !Number.isFinite(s) || s <= 0) return v;
+  const decimals = Math.max(0, Math.min(12, Math.ceil(-Math.log10(s)) + 3));
+  return Number(Number(v).toFixed(decimals));
+}
+
+function _cycle2dNiceExtraValueTicks(valueLo, valueHi, maxTicks = 10, yOfVal = null, reservedValues = [], fontPx = 10) {
+  const lo = Number(valueLo);
+  const hi = Number(valueHi);
+  const limit = Math.max(1, Math.floor(Number(maxTicks) || 10));
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || !(hi > lo)) return [];
+
+  const span = hi - lo;
+  const eps = Math.max(1e-9, span * 1e-9);
+  const minLabelSepPx = Math.max(14, (Number(fontPx) || 10) + 6);
+  const idealStep = span / Math.max(1, limit);
+  const e0 = Math.floor(Math.log10(Math.max(idealStep, 1e-12))) - 2;
+
+  const fixedRows = [];
+  if (yOfVal) {
+    for (const rv of reservedValues || []) {
+      const sy = _cycle2dValueTickScreenY(rv, yOfVal);
+      if (Number.isFinite(sy)) fixedRows.push({ v: Number(rv), sy });
+    }
+  }
+
+  const markExtraLabels = (ticks) => {
+    if (!yOfVal) return ticks.map(v => ({ v, labelVisible: true }));
+
+    const rows = fixedRows.slice();
+    return ticks.map(v => {
+      const sy = _cycle2dValueTickScreenY(v, yOfVal);
+      let labelVisible = Number.isFinite(sy);
+      if (labelVisible) {
+        for (const r of rows) {
+          if (Math.abs(sy - r.sy) < minLabelSepPx) {
+            labelVisible = false;
+            break;
+          }
+        }
+      }
+      if (labelVisible) rows.push({ v, sy });
+      return { v, labelVisible };
+    });
+  };
+
+  let best = [];
+  let bestScore = -Infinity;
+
+  for (let ei = e0; ei <= e0 + 14; ei++) {
+    const base = Math.pow(10, ei);
+    for (const mul of [1, 2, 5]) {
+      const step = mul * base;
+      if (!Number.isFinite(step) || step <= 0) continue;
+
+      const start = Math.ceil((lo + eps) / step) * step;
+      const gridTicks = [];
+      for (let v = start, guard = 0; v < hi - eps && guard < 10000; v += step, guard++) {
+        const vv0 = Math.abs(v) < eps ? 0 : v;
+        const vv = _cycle2dRoundTickValue(vv0, step);
+        if (vv > lo + eps && vv < hi - eps && !_cycle2dValueTickAlreadyDrawn(vv, reservedValues, valueLo, valueHi)) gridTicks.push(vv);
+      }
+
+      // Ticks belong to the scale. Labels are optional when they would collide
+      // with fixed endpoint/zero labels or with earlier extra labels.
+      if (!gridTicks.length || gridTicks.length > limit) continue;
+
+      const markedTicks = markExtraLabels(gridTicks);
+      const visibleLabelCount = markedTicks.reduce((n, t) => n + (t.labelVisible ? 1 : 0), 0);
+      const stepRank = Math.abs(Math.log10(step / Math.max(idealStep, 1e-12)));
+      const score = gridTicks.length * 1000 + visibleLabelCount * 10 - stepRank;
+      if (score > bestScore) {
+        bestScore = score;
+        best = markedTicks;
+      }
+    }
+  }
+
+  return best;
+}
+
+
 
 function _cycle2dRebuild() {
   _disposeCycle2DView();
@@ -8104,6 +8285,7 @@ function _cycle2dRebuild() {
   cycle2dScene.add(cycle2dGroup);
   cycle2dPickPoints = [];
   cycle2dPickTriangles = [];
+  _cycle2dResetPickBuckets();
   cycle2dCellMeta = [];
 
   const dims = _cycle2dGridDims();
@@ -8328,18 +8510,34 @@ function _cycle2dRebuild() {
       if (valueLo < 0 && valueHi > 0) valueTicks.push({ v: 0, label: '0' });
       valueTicks.push({ v: valueHi, label: _cycle2dFormatValue(valueHi) });
 
-      for (const t of valueTicks) {
+      const labeledTickValues = valueTicks.map(t => t.v);
+      const extraValueTicks = _cycle2dNiceExtraValueTicks(
+        valueLo,
+        valueHi,
+        10,
+        yOfVal,
+        labeledTickValues,
+        CYCLE2D_YEAR_LABEL_FONT_PX
+      ).map(t => ({ v: t.v, label: _cycle2dFormatValue(t.v), labelVisible: !!t.labelVisible }));
+
+      const allValueTicks = valueTicks
+        .map(t => ({ ...t, labelVisible: true }))
+        .concat(extraValueTicks)
+        .sort((a, b) => Number(a.v) - Number(b.v));
+      for (const t of allValueTicks) {
         const yy = yOfVal(t.v);
         _cycle2dAddAxisLine([yAxisX - tickLen, yy, 0.003, yAxisX, yy, 0.003], tickColor, 0.95);
-        _cycle2dAddSvgText(
-          t.label,
-          yAxisX - tickLen - yLabelGap,
-          yy,
-          CYCLE2D_YEAR_LABEL_FONT_PX,
-          '#777',
-          'end',
-          'middle'
-        );
+        if (t.labelVisible) {
+          _cycle2dAddSvgText(
+            t.label,
+            yAxisX - tickLen - yLabelGap,
+            yy,
+            CYCLE2D_YEAR_LABEL_FONT_PX,
+            '#777',
+            'end',
+            'middle'
+          );
+        }
       }
     }
 
@@ -8463,9 +8661,20 @@ function _cycle2dPick(clientX, clientY) {
   const pxTol = 14;
   const sx = (camera.right - camera.left) / Math.max(1, rect.width) / Math.max(0.0001, camera.zoom);
   const sy = (camera.top - camera.bottom) / Math.max(1, rect.height) / Math.max(0.0001, camera.zoom);
-  const tol2 = Math.pow(pxTol * Math.max(sx, sy), 2);
+  const tolWorld = pxTol * Math.max(sx, sy);
+  const tol2 = tolWorld * tolWorld;
 
-  for (const p of cycle2dPickPoints) {
+  // Month-cell first: pick only inside the hovered 2D cycle month bucket.
+  // This avoids a global scan across all 12 months and prevents a nearby point
+  // from another cell from winning near gaps/labels.
+  const bucket = _cycle2dPickBucketForWorld(w.x, w.y, tolWorld);
+  if (!bucket) return null;
+
+  const pointCandidates = bucket.points || [];
+  const triangleCandidates = bucket.triangles || [];
+  if (!pointCandidates.length && !triangleCandidates.length) return null;
+
+  for (const p of pointCandidates) {
     const d2 = (p.x - w.x) * (p.x - w.x) + (p.y - w.y) * (p.y - w.y);
     if (d2 < bd2) {
       bd2 = d2;
@@ -8482,7 +8691,7 @@ function _cycle2dPick(clientX, clientY) {
     }
   }
 
-  for (const tri of cycle2dPickTriangles) {
+  for (const tri of triangleCandidates) {
     const d2 = _cycle2dTriangleDistance2(w.x, w.y, tri);
     if (d2 <= bd2) {
       bd2 = d2;
@@ -8511,6 +8720,7 @@ function _cycle2dPick(clientX, clientY) {
     year: best.year
   };
 }
+
 
 function _cycle2dUpdateMarker() {
   if (cycle2dMarker) { _disposeObject3D(cycle2dMarker); cycle2dMarker = null; }
@@ -8546,28 +8756,70 @@ function _cycle2dZoomYears(factor, anchorClientX) {
   _cycle2dRebuild();
 }
 
-function _cycle2dHandleHoverMove(clientX, clientY) {
+function _cycle2dApplyHoverHit(hit, clientX, clientY) {
+  const currentKey = _currentHoverStateKey();
+  const nextKey = _hoverStateKeyFromHit(hit);
+
+  if (!hit) {
+    if (!currentKey && !surfaceTouchMarkerState) {
+      if (tooltip) tooltip.style.display = 'none';
+      hideGuide();
+      return;
+    }
+    applyPickHitResult(null, clientX, clientY, { mode: 'cycle2d' });
+    return;
+  }
+
+  // Same semantic point: do not rewrite bottom-bar DOM, marker state, or
+  // right-panel highlight. Plain pointer movement should not create a backlog.
+  if (nextKey === currentKey && surfaceTouchMarkerState) return;
+
+  applyPickHitResult(hit, clientX, clientY, { mode: 'cycle2d' });
+}
+
+function _cycle2dHandleHoverMoveNow(clientX, clientY) {
   if (_hoverOpsSuspended) return;
   if (anchorState ._mouseAnchorActive || _mouseAnchorPickActive || _touchAnchorActive || _touchAnchorPickActive) {
     updateSurfaceTouchMarker();
-    requestPeelRender();
     return;
   }
 
   const rect = renderer.domElement.getBoundingClientRect();
   const over = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
   if (!over) {
-    tooltip.style.display = 'none';
-    hideGuide();
-    clearSurfaceTouchMarker();
-    clearHighlight();
-    requestPeelRender();
+    _cycle2dApplyHoverHit(null, clientX, clientY);
     return;
   }
+
   const hit = _cycle2dPick(clientX, clientY);
-  applyPickHitResult(hit, clientX, clientY, { mode: 'cycle2d' });
-  _cycle2dUpdateMarker();
-  requestPeelRender();
+  _cycle2dApplyHoverHit(hit, clientX, clientY);
+}
+
+function _cycle2dFlushHoverMove() {
+  _cycle2dHoverRaf = 0;
+  if (viewMode !== VIEW_MODE_CYCLE2D) return;
+
+  const seq = _cycle2dHoverSeq;
+  const x = _cycle2dHoverClientX;
+  const y = _cycle2dHoverClientY;
+
+  _cycle2dHandleHoverMoveNow(x, y);
+
+  // If another event arrived while this frame was being processed, keep only
+  // the latest one and process it on the next frame. No historical replay.
+  if (_cycle2dHoverSeq !== seq && !_cycle2dHoverRaf) {
+    _cycle2dHoverRaf = requestAnimationFrame(_cycle2dFlushHoverMove);
+  }
+}
+
+function _cycle2dHandleHoverMove(clientX, clientY) {
+  _cycle2dHoverClientX = clientX;
+  _cycle2dHoverClientY = clientY;
+  _cycle2dHoverSeq += 1;
+  _hoverMoveSeq += 1;
+
+  if (_cycle2dHoverRaf) return;
+  _cycle2dHoverRaf = requestAnimationFrame(_cycle2dFlushHoverMove);
 }
 
 function _cycle2dYearsPerPixel() {
@@ -9708,43 +9960,53 @@ function _surfaceTouchMarkerSeriesVisible(sname) {
 }
 
 function _cycle2dPointFromMarkerState(st) {
-  if (!st || !cycle2dPickPoints || !cycle2dPickPoints.length) return null;
+  if (!st) return null;
+
+  // Hover already carries the exact 2D marker point. Reuse it during the same
+  // 2D-cycle geometry epoch; do not search all pick points again on every marker
+  // refresh.
+  if (st.cycle2dPoint && st.cycle2dPoint.clone && st.cycle2dEpoch === cycle2dPickEpoch) {
+    return st.cycle2dPoint.clone();
+  }
 
   const mi = Math.round(Number(st.mi));
   const localYi = Math.round(Number(st.localYi));
   const segIdx = Math.round(Number(st.segmentIndex));
   const sname = String(st.sname || '');
-  const globalYi = Math.round(Number(st.yi));
-  const year = Number(st.year);
 
-  let exact = null;
-  let byYear = null;
-  let byGlobal = null;
+  const exact = cycle2dPickPointIndex && cycle2dPickPointIndex.get
+    ? cycle2dPickPointIndex.get(_cycle2dPickPointKey(mi, sname, segIdx, localYi))
+    : null;
 
-  for (const p of cycle2dPickPoints) {
-    if (Number(p.mi) !== mi) continue;
-    if (sname && String(p.sname || '') !== sname) continue;
+  let best = exact || null;
 
-    const pSegIdx = Number(p.segmentIndex);
-    const pLocalYi = Number(p.localYi);
+  // Fallback is still month-bucket restricted. No global cycle2dPickPoints scan.
+  if (!best) {
+    const bucket = _cycle2dBucketForMonth(mi);
+    const year = Number(st.year);
+    const globalYi = Math.round(Number(st.yi));
+    let byYear = null;
+    let byGlobal = null;
+    for (const p of ((bucket && bucket.points) || [])) {
+      if (Number(p.mi) !== mi) continue;
+      if (sname && String(p.sname || '') !== sname) continue;
 
-    if (Number.isFinite(segIdx) && segIdx >= 0 && pSegIdx === segIdx && pLocalYi === localYi) {
-      exact = p;
-      break;
+      if (!byYear && Number.isFinite(year) && Number.isFinite(Number(p.year)) && Number(p.year) === year) {
+        byYear = p;
+      }
+
+      const pGlobalYi = _segmentLocalYearToGlobal(p.seg, p.localYi);
+      if (!byGlobal && Number.isFinite(globalYi) && pGlobalYi === globalYi) {
+        byGlobal = p;
+      }
+
+      if (byYear && byGlobal) break;
     }
-
-    if (!byYear && Number.isFinite(year) && Number.isFinite(Number(p.year)) && Number(p.year) === year) {
-      byYear = p;
-    }
-
-    const pGlobalYi = _segmentLocalYearToGlobal(p.seg, p.localYi);
-    if (!byGlobal && Number.isFinite(globalYi) && pGlobalYi === globalYi) {
-      byGlobal = p;
-    }
+    best = byYear || byGlobal;
   }
 
-  const best = exact || byYear || byGlobal;
-  if (!best) return null;
+  if (!best) return st.cycle2dPoint && st.cycle2dPoint.clone ? st.cycle2dPoint.clone() : null;
+
   if (String(st.valueKind || '') === 'raw_tip' && best.cycle2dThornVisible && Number.isFinite(Number(best.cycle2dThornTipY))) {
     const tipX = Number.isFinite(Number(best.cycle2dThornTipX)) ? Number(best.cycle2dThornTipX) : best.x;
     return new THREE.Vector3(tipX, Number(best.cycle2dThornTipY), 0.04);
@@ -9914,12 +10176,16 @@ function setSurfaceTouchMarker(hit) {
   }
 
   const localYi = Number.isFinite(Number(hit.localYi)) ? Number(hit.localYi) : Number(hit.yi);
-  const cycle2dPoint = hit && hit.cycle2dPoint && hit.cycle2dPoint.clone ? hit.cycle2dPoint.clone() : (viewMode === VIEW_MODE_CYCLE2D ? p.clone() : null);
+  // Only a real 2D-cycle pick carries a valid cycle2dPoint.
+  // Right-panel picks carry geometry-space points; in 2D cycle mode those must
+  // be remapped by semantic indices through _cycle2dPointFromMarkerState().
+  const cycle2dPoint = hit && hit.cycle2dPoint && hit.cycle2dPoint.clone ? hit.cycle2dPoint.clone() : null;
 
   surfaceTouchMarkerState = {
     point: p.clone(),
     geometryPoint: p.clone(),
     cycle2dPoint,
+    cycle2dEpoch: cycle2dPickEpoch,
     color: (hit.sname && SERIES[hit.sname] && SERIES[hit.sname].color) ? SERIES[hit.sname].color : '#111111',
     pickMode: _lastPointerWasTouch ? 'touch' : 'mouse',
     sname: hit.sname || '',
@@ -13892,8 +14158,16 @@ function rebuildCurrentHighlight() {
 
   _disposeHl();
 
+  // In 2D cycle view the visible marker is SVG/DOM based. Building the hidden
+  // 3D highlight-wire overlay on every hover transition is wasted work and is
+  // the main source of hover backlog.
+  if (viewMode === VIEW_MODE_CYCLE2D) {
+    if (activeView && activeView.rebuildHighlight) activeView.rebuildHighlight();
+    requestRightPanelRender();
+    return;
+  }
+
   if (!highlightNearest || !Number.isFinite(Number(mi)) || mi < 0 || !Number.isFinite(Number(yi)) || yi < 0) {
-    if (viewMode === VIEW_MODE_CYCLE2D && activeView && activeView.rebuildHighlight) activeView.rebuildHighlight();
     requestHighlightWireOverlayRender(false);
     requestRightPanelRender();
     return;
