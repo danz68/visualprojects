@@ -39,11 +39,22 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
 .orthoView .orthoAxis { pointer-events: none; z-index: 3; }
 .sideNote { margin-top: 8px; font-size: 11px; line-height: 1.45; color: #777; }
 .touch-guide-svg { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; overflow: visible; z-index: 50; }
-#bottom { flex: 0 0 auto; padding: 6px 20px; border-top: 1px solid #ddd; display: flex; align-items: center; gap: 18px; font-size: 11px; color: #999; flex-wrap: wrap; }
+#bottom { flex: 0 0 auto; padding: 6px 20px; border-top: 1px solid #ddd; display: flex; align-items: center; column-gap: 16px; row-gap: 4px; font-size: 11px; color: #999; flex-wrap: wrap; overflow: visible; min-width: 0; }
 #bottom a { color: #999; }
-.bottomDate {display: inline-block;  min-width: 62px;  font-variant-numeric: tabular-nums;  color: #777;}
-.bottomValue {  display: inline-block;  min-width: 62px;  font-variant-numeric: tabular-nums;  white-space: nowrap;}
-#bottomBalanceText {  width: 62px;}
+#bottom > span:first-child { flex: 0 1 var(--bottom-credit-w, 136px); width: var(--bottom-credit-w, 136px); max-width: var(--bottom-credit-w, 136px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bottomAnchor { flex: 0 0 16px; width: 16px; text-align: center; }
+.bottomDate {display: inline-block; flex: 0 0 var(--bottom-date-w, 82px); width: var(--bottom-date-w, 82px); min-width: var(--bottom-date-w, 82px); font-variant-numeric: tabular-nums; color: #777; white-space: nowrap;}
+.bottomValue { display: inline-block; flex: 0 0 auto; min-width: 0; overflow: visible; text-overflow: clip; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bottomLegBirths { flex: 0 0 var(--bottom-births-slot-w, auto); width: var(--bottom-births-slot-w, auto); }
+.bottomLegDeaths { flex: 0 0 var(--bottom-deaths-slot-w, auto); width: var(--bottom-deaths-slot-w, auto); }
+.bottomLegBalance { flex: 0 0 var(--bottom-balance-slot-w, auto); width: var(--bottom-balance-slot-w, auto); }
+.bottomLegBirths .bottomValue { width: var(--bottom-births-text-w, auto); }
+.bottomLegDeaths .bottomValue { width: var(--bottom-deaths-text-w, auto); }
+.bottomLegBalance .bottomValue { width: var(--bottom-balance-text-w, auto); }
+.bottomLegSpacer { display: none !important; }
+#bottom.bottom-tight, #bottom.bottom-ultra { font-size: 11px; }
+#bottom.bottom-tight .bottomValue, #bottom.bottom-ultra .bottomValue { max-width: none; }
+#bottom.bottom-tight #bottomBalanceText, #bottom.bottom-ultra #bottomBalanceText { max-width: none; }
 #menuBtn { position: fixed; top: 12px; right: 16px; width: 30px; height: 30px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 101; }
 #menuPopup { position: fixed; left: 0; top: 0; right: auto; transform: translate3d(0,0,0); -webkit-transform: translate3d(0,0,0); will-change: transform; contain: layout paint; background: transparent; border: 1px solid rgba(210,210,210,0.92); border-radius: 6px; padding: 0; z-index: 200; display: none; width: 200px; font-size: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); max-height: calc(100vh - 16px); overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; }
 .menu-window-bar { height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 6px 0 10px; border: none; border-bottom: 1px solid rgba(210,210,210,0.92); border-radius: 6px 6px 0 0; background: rgba(220,220,220,0.80); cursor: move; user-select: none; -webkit-user-select: none; -ms-user-select: none; touch-action: none; }
@@ -134,7 +145,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
 .csel-opt:hover { background: #f5f5f5; }
 .csel-opt.selected { background: #f0f0f0; color: #111; }
 .no-select {user-select: none;  -webkit-user-select: none; -ms-user-select: none;}
-.leg { display: flex; align-items: center; gap: 5px; }
+.leg { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 0 auto; white-space: nowrap; }
 .legdot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .star {
   display: inline-block;
@@ -143,7 +154,24 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
   font-size: 12px;
   vertical-align: middle;
 }
-.tooltip3d { position: fixed; display: none; pointer-events: none; background: rgba(45,45,45,0.88); color: white; font-size: 11px; padding: 8px 12px; border-radius: 4px; z-index: 9999; font-family: Arial, sans-serif; line-height: 1.6; min-width: 180px; }
+.tooltip3d { position: fixed; display: none; pointer-events: none; background: rgba(45,45,45,0.88); color: white; font-size: 11px; padding: 8px 12px; border-radius: 4px; z-index: 9999; font-family: Arial, sans-serif; line-height: 1.6; min-width: 0; width: max-content; max-width: calc(100vw - 16px); }
+.tooltip3d .tooltip-shell { min-width:0; position:relative; }
+.tooltip3d .tooltip-head { display:grid; grid-template-columns:1fr 18px; align-items:center; column-gap:8px; padding-bottom:6px; margin-bottom:6px; border-bottom:1px solid #444; }
+.tooltip3d .tooltip-close { position:static; width:18px; height:18px; border:0; background:transparent; color:rgba(255,255,255,0.62); font-size:18px; line-height:18px; padding:0; cursor:pointer; pointer-events:auto; font-family:Arial,sans-serif; text-align:center; align-self:center; justify-self:center; }
+.tooltip3d .tooltip-close:hover { color:rgba(255,255,255,0.95); }
+.tooltip3d .tooltip-title { font-size:12px; font-weight:600; padding:0; margin:0; border-bottom:0; line-height:18px; }
+.tooltip3d .tip-grid { display:grid; column-gap:3px; row-gap:4px; align-items:baseline; }
+.tooltip3d .tip-grid-raw, .tooltip3d .tip-grid-smooth { grid-template-columns:10px max-content max-content max-content; }
+.tooltip3d .tip-grid-pair { grid-template-columns:10px max-content max-content max-content max-content max-content; }
+.tooltip3d .tip-head { display:none; }
+.tooltip3d .tip-row { display:contents; }
+.tooltip3d .tip-dot { width:7px; height:7px; border-radius:50%; display:inline-block; align-self:center; justify-self:start; }
+.tooltip3d .tip-label { opacity:0.75; white-space:nowrap; padding-right:31px; }
+.tooltip3d .tip-mark { opacity:0.72; white-space:nowrap; text-align:center; justify-self:center; min-width:1ch; }
+.tooltip3d .tip-approx { padding-left:17px; }
+.tooltip3d .tip-num { font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; justify-self:end; min-width:4.8ch; }
+.tooltip3d .tip-raw { opacity:0.92; }
+.tooltip3d .tip-num-title { display:none; }
 .dpad-btn { width: 28px; height: 28px; background: none; border: none; border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #444; user-select: none; }
 .dpad-btn:hover { background: #ececec; }
 .dpad-btn:active { background: #ddd; }
@@ -229,22 +257,22 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
   <span id="bottomAnchor" class="star"></span>
   <span id="bottomDate" class="bottomDate"></span>
 
-  <span class="leg">
+  <span class="leg bottomLegBirths">
     <span class="legdot" style="background:#e08214"></span>
     <span id="bottomBirthsText" class="bottomValue">Births</span>
   </span>
 
-  <span class="leg">
+  <span class="leg bottomLegDeaths">
     <span class="legdot" style="background:#62508A"></span>
     <span id="bottomDeathsText" class="bottomValue">Deaths</span>
   </span>
 
-  <span class="leg">
+  <span class="leg bottomLegBalance">
     <span class="legdot" style="background:#a0a0a0"></span>
     <span id="bottomBalanceText" class="bottomValue">Balance</span>
   </span>
   
-  <span class="leg">&nbsp;&nbsp;&nbsp;</span>
+  <span class="leg bottomLegSpacer">&nbsp;&nbsp;&nbsp;</span>
   
 
   
@@ -312,6 +340,11 @@ h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color
 	  <label style="margin-top:4px"><input type="checkbox" id="showAxes3D" checked> Axes</label>
 	  
       <label style="margin-top:4px;display:none"><input type="checkbox" id="swapAxes" checked> Swap months &harr; years</label>
+	</div>
+	<div class="menu-row">
+	  <div class="menu-label">Layout</div>
+	  <label><input type="checkbox" id="showRightPanel" checked> Right panel</label>
+	  <label style="margin-top:4px"><input type="checkbox" id="showTooltip"> Tooltip</label>
 	</div>
 	
   </div>
@@ -3563,6 +3596,9 @@ async function switchGeo(geo) {
 
   currentGeo = geo;
   data = _compileGeoDataset(geo, record);
+  _cycle2dPrepareAxisLayoutForLoadedGeo();
+  _bottomPanelLayoutCache = null;
+  requestBottomPanelFit();
   syncForecastControls();
   _activeFitBounds = _computeComprehensiveFitBounds(geo, record);
   clearHighlight();
@@ -3962,6 +3998,8 @@ let showCycleWires  = false;
 let showAnnualWires = false;
 let showAxes3D      = true;
 let highlightNearest= true;
+let showRightPanel  = true;
+let showTooltip     = false;
 let meshOpacity     = 0.90;
 let wireOpacity     = 0.50;
 
@@ -4306,6 +4344,7 @@ function resizeRenderer() {
   if (typeof updateSurfaceTouchMarker === 'function') updateSurfaceTouchMarker();
   if (typeof activeView !== 'undefined' && activeView && activeView.id === VIEW_MODE_CYCLE2D && activeView.rebuild) activeView.rebuild();
   if (typeof renderHighlightWireOverlayIfNeeded === 'function') renderHighlightWireOverlayIfNeeded();
+  if (typeof _refreshAnchoredTooltipAfterLayoutChange === 'function') _refreshAnchoredTooltipAfterLayoutChange();
 }
 
 // =====================================================================
@@ -7799,10 +7838,23 @@ function _cycle2dWorldRect() {
   const zoom = Math.max(0.0001, Number(camera && camera.zoom) || 1);
   const viewW = Number.isFinite(left) && Number.isFinite(right) ? (right - left) / zoom : 3.2;
   const viewH = Number.isFinite(top) && Number.isFinite(bottom) ? (top - bottom) / zoom : 3.2;
-  const pad = 0.025;
-  const w = Math.max(0.5, viewW * (1 - 2 * pad));
-  const h = Math.max(0.5, viewH * (1 - 2 * pad));
-  return { x0: -w * 0.5, y0: -h * 0.5, w, h };
+
+  const wrapW = Math.max(1, wrap && wrap.clientWidth ? wrap.clientWidth : 1);
+  const wrapH = Math.max(1, wrap && wrap.clientHeight ? wrap.clientHeight : 1);
+  const pxX = viewW / wrapW;
+  const pxY = viewH / wrapH;
+
+  const padLeftPx = 8;
+  const padRightPx = 8;
+  const padTopPx = 8;
+  const padBottomPx = 8;
+
+  const x0 = -viewW * 0.5 + padLeftPx * pxX;
+  const y0 = -viewH * 0.5 + padBottomPx * pxY;
+  const w = Math.max(0.5, viewW - (padLeftPx + padRightPx) * pxX);
+  const h = Math.max(0.5, viewH - (padTopPx + padBottomPx) * pxY);
+
+  return { x0, y0, w, h };
 }
 
 function _cycle2dWorldUnitsPerPixel() {
@@ -7884,6 +7936,86 @@ function _cycle2dFormatValue(v) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0
   });
+}
+
+let _cycle2dLoadedGeoAxisLayout = null;
+
+function _cycle2dScanNumberGridForAxisLabels(grid, visit) {
+  if (!grid || typeof visit !== 'function') return;
+  const stack = [grid];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (cur == null) continue;
+    if (typeof cur === 'number') {
+      if (Number.isFinite(cur)) visit(cur);
+      continue;
+    }
+    if (Array.isArray(cur)) {
+      for (let i = 0; i < cur.length; i++) stack.push(cur[i]);
+    }
+  }
+}
+
+function _cycle2dPrepareAxisLayoutForLoadedGeo() {
+  const geoKey = String(currentGeo || '');
+  const dataKey =
+    geoKey + '|' +
+    String((_surfaceDatasetKeys && currentGeo && _surfaceDatasetKeys[currentGeo]) || '') + '|' +
+    String(data && data.axes ? (data.axes.n_years || '') : '');
+
+  if (_cycle2dLoadedGeoAxisLayout && _cycle2dLoadedGeoAxisLayout.key === dataKey) {
+    return _cycle2dLoadedGeoAxisLayout;
+  }
+
+  const fontPx = 10;
+  const ctx =
+    _cycle2dPrepareAxisLayoutForLoadedGeo._measureCtx ||
+    (_cycle2dPrepareAxisLayoutForLoadedGeo._measureCtx = document.createElement('canvas').getContext('2d'));
+  ctx.font = `${fontPx}px Arial, sans-serif`;
+
+  const labels = new Set(['0']);
+  const addValue = v => {
+    const label = _cycle2dFormatValue(v);
+    if (label) labels.add(label);
+  };
+
+  const owners = [];
+  if (data) owners.push(data);
+  if (data && Array.isArray(data.segments)) {
+    for (const seg of data.segments) if (seg) owners.push(seg);
+  }
+
+  const seriesNames = ['births', 'deaths', 'balance'];
+  const layerNames = ['raw', 'smooth', 'trend'];
+
+  for (const owner of owners) {
+    const series = owner && owner.series;
+    if (!series) continue;
+    for (const sname of seriesNames) {
+      const s = series[sname];
+      if (!s) continue;
+      for (const lname of layerNames) {
+        _cycle2dScanNumberGridForAxisLabels(s[lname], addValue);
+      }
+    }
+  }
+
+  let maxLabelWidthPx = 0;
+  for (const label of labels) {
+    maxLabelWidthPx = Math.max(maxLabelWidthPx, ctx.measureText(label).width || 0);
+  }
+
+  _cycle2dLoadedGeoAxisLayout = {
+    key: dataKey,
+    fontPx,
+    maxLabelWidthPx: Math.ceil(maxLabelWidthPx)
+  };
+  return _cycle2dLoadedGeoAxisLayout;
+}
+
+function _cycle2dLoadedGeoYAxisMarginPx(axisGapPx, tickLenPx, labelGapPx, guardPx) {
+  const m = _cycle2dPrepareAxisLayoutForLoadedGeo();
+  return Math.ceil((m && m.maxLabelWidthPx) || 0) + labelGapPx + tickLenPx + axisGapPx + guardPx;
 }
 
 function _cycle2dCollectDomainForMonths(months, visibleSeries, y0, y1) {
@@ -8240,32 +8372,28 @@ function _cycle2dNiceExtraValueTicks(valueLo, valueHi, maxTicks = 10, yOfVal = n
   const idealStep = span / Math.max(1, limit);
   const e0 = Math.floor(Math.log10(Math.max(idealStep, 1e-12))) - 2;
 
-  const fixedRows = [];
-  if (yOfVal) {
-    for (const rv of reservedValues || []) {
-      const sy = _cycle2dValueTickScreenY(rv, yOfVal);
-      if (Number.isFinite(sy)) fixedRows.push({ v: Number(rv), sy });
-    }
-  }
-
-  const markExtraLabels = (ticks) => {
+  const markLabelsTopToBottom = (ticks) => {
     if (!yOfVal) return ticks.map(v => ({ v, labelVisible: true }));
 
-    const rows = fixedRows.slice();
-    return ticks.map(v => {
+    const rows = [];
+    const marked = ticks.map(v => {
       const sy = _cycle2dValueTickScreenY(v, yOfVal);
-      let labelVisible = Number.isFinite(sy);
-      if (labelVisible) {
-        for (const r of rows) {
-          if (Math.abs(sy - r.sy) < minLabelSepPx) {
-            labelVisible = false;
-            break;
-          }
+      return { v, sy, labelVisible: Number.isFinite(sy) };
+    });
+
+    const order = marked.slice().sort((a, b) => a.sy - b.sy);
+    for (const t of order) {
+      if (!t.labelVisible) continue;
+      for (const r of rows) {
+        if (Math.abs(t.sy - r.sy) < minLabelSepPx) {
+          t.labelVisible = false;
+          break;
         }
       }
-      if (labelVisible) rows.push({ v, sy });
-      return { v, labelVisible };
-    });
+      if (t.labelVisible) rows.push(t);
+    }
+
+    return marked.map(t => ({ v: t.v, labelVisible: !!t.labelVisible }));
   };
 
   let best = [];
@@ -8277,22 +8405,25 @@ function _cycle2dNiceExtraValueTicks(valueLo, valueHi, maxTicks = 10, yOfVal = n
       const step = mul * base;
       if (!Number.isFinite(step) || step <= 0) continue;
 
-      const start = Math.ceil((lo + eps) / step) * step;
+      // Standard axis ticks: use the equidistant grid only. The data-domain
+      // endpoints are not forced as ticks/labels unless they lie on this grid.
+      const start = Math.ceil((lo - eps) / step) * step;
       const gridTicks = [];
-      for (let v = start, guard = 0; v < hi - eps && guard < 10000; v += step, guard++) {
+      for (let v = start, guard = 0; v <= hi + eps && guard < 10000; v += step, guard++) {
         const vv0 = Math.abs(v) < eps ? 0 : v;
         const vv = _cycle2dRoundTickValue(vv0, step);
-        if (vv > lo + eps && vv < hi - eps && !_cycle2dValueTickAlreadyDrawn(vv, reservedValues, valueLo, valueHi)) gridTicks.push(vv);
+        if (vv >= lo - eps && vv <= hi + eps) gridTicks.push(vv);
       }
 
-      // Ticks belong to the scale. Labels are optional when they would collide
-      // with fixed endpoint/zero labels or with earlier extra labels.
       if (!gridTicks.length || gridTicks.length > limit) continue;
 
-      const markedTicks = markExtraLabels(gridTicks);
+      const markedTicks = markLabelsTopToBottom(gridTicks);
       const visibleLabelCount = markedTicks.reduce((n, t) => n + (t.labelVisible ? 1 : 0), 0);
       const stepRank = Math.abs(Math.log10(step / Math.max(idealStep, 1e-12)));
-      const score = gridTicks.length * 1000 + visibleLabelCount * 10 - stepRank;
+      const endpointPenalty =
+        (Math.abs(gridTicks[0] - lo) < eps ? 1 : 0) +
+        (Math.abs(gridTicks[gridTicks.length - 1] - hi) < eps ? 1 : 0);
+      const score = gridTicks.length * 1000 + visibleLabelCount * 10 - stepRank - endpointPenalty * 0.01;
       if (score > bestScore) {
         bestScore = score;
         best = markedTicks;
@@ -8350,10 +8481,13 @@ function _cycle2dRebuild() {
   const surfaceCMax = Math.max(1e-12, Math.abs(Number(surfaceRange.cMax) || 1));
   const colorScale = { cMax: surfaceCMax, cMin: 0, cSpan: surfaceCMax };
 
-  const CYCLE2D_MARGIN_LEFT_PX = 36;
+  const CYCLE2D_AXIS_OUTER_GUARD_PX = 6;
   const CYCLE2D_MARGIN_RIGHT_PX = CYCLE2D_RIGHT_AXIS ? 36 : 10;
   const CYCLE2D_MARGIN_TOP_PX = 0;
-  const CYCLE2D_MARGIN_BOTTOM_PX = 22;
+  // Fixed 2D-cycle bottom-axis stack:
+  // grid -> axis = 16px, tick = 6px, tick -> label = 4px,
+  // label height = 10px, bottom guard = 2px. No proportional reserve.
+  const CYCLE2D_MARGIN_BOTTOM_PX = 38;
 
   const CYCLE2D_MONTH_TITLE_SPACE_PX = 22;
 
@@ -8379,7 +8513,15 @@ function _cycle2dRebuild() {
 
   const px = _cycle2dWorldUnitsPerPixel();
 
-  const marginLeft = CYCLE2D_MARGIN_LEFT_PX * px;
+
+  const cycle2dMarginLeftPx = _cycle2dLoadedGeoYAxisMarginPx(
+    CYCLE2D_Y_AXIS_GAP_PX,
+    CYCLE2D_TICK_LEN_PX,
+    CYCLE2D_Y_LABEL_GAP_PX,
+    CYCLE2D_AXIS_OUTER_GUARD_PX
+  );
+
+  const marginLeft = cycle2dMarginLeftPx * px;
   const marginRight = CYCLE2D_MARGIN_RIGHT_PX * px;
   const marginTop = CYCLE2D_MARGIN_TOP_PX * px;
   const marginBottom = CYCLE2D_MARGIN_BOTTOM_PX * px;
@@ -8536,23 +8678,15 @@ function _cycle2dRebuild() {
     if (col === 0) {
       _cycle2dAddAxisLine([yAxisX, yAxisMin, 0.002, yAxisX, yAxisMax, 0.002], axisColor, 0.95);
 
-      const valueTicks = [{ v: valueLo, label: _cycle2dFormatValue(valueLo) }];
-      if (valueLo < 0 && valueHi > 0) valueTicks.push({ v: 0, label: '0' });
-      valueTicks.push({ v: valueHi, label: _cycle2dFormatValue(valueHi) });
-
-      const labeledTickValues = valueTicks.map(t => t.v);
-      const extraValueTicks = _cycle2dNiceExtraValueTicks(
+      const allValueTicks = _cycle2dNiceExtraValueTicks(
         valueLo,
         valueHi,
         10,
         yOfVal,
-        labeledTickValues,
+        [],
         CYCLE2D_YEAR_LABEL_FONT_PX
-      ).map(t => ({ v: t.v, label: _cycle2dFormatValue(t.v), labelVisible: !!t.labelVisible }));
-
-      const allValueTicks = valueTicks
-        .map(t => ({ ...t, labelVisible: true }))
-        .concat(extraValueTicks)
+      )
+        .map(t => ({ v: t.v, label: _cycle2dFormatValue(t.v), labelVisible: !!t.labelVisible }))
         .sort((a, b) => Number(a.v) - Number(b.v));
       for (const t of allValueTicks) {
         const yy = yOfVal(t.v);
@@ -9095,7 +9229,12 @@ function setViewMode(nextMode) {
     rebuildCurrentHighlight();
     updateSurfaceTouchMarker();
     repositionHighlightLabels();
-    requestHighlightWireOverlayRender(false);
+    _refreshAnchoredTooltipAfterViewOp();
+    requestAnimationFrame(() => {
+      updateSurfaceTouchMarker();
+      _refreshAnchoredTooltipAfterViewOp();
+      requestHighlightWireOverlayRender(false);
+    });
   }
   requestRightPanelRender();
 }
@@ -9172,6 +9311,20 @@ function buildAllSurfaces() {
   else requestRightPanelRender();
 
   updateSurfaceTouchMarker();
+
+  if (keepHighlight) {
+    _lastTipKey = '';
+    _refreshTooltipAndBottomFromMarkerState();
+    _refreshAnchoredTooltipAfterLayoutChange();
+    requestAnimationFrame(() => {
+      updateSurfaceTouchMarker();
+      _refreshTooltipAndBottomFromMarkerState();
+      _refreshAnchoredTooltipAfterLayoutChange();
+      requestHighlightWireOverlayRender(false);
+      requestRightPanelRender();
+    });
+  }
+
   if (isCycle2DView && activeView && activeView.rebuild) activeView.rebuild();
   requestPeelRender();
 }
@@ -10252,6 +10405,33 @@ function _surfaceTouchMarkerContainsClientPoint(clientX, clientY, mode) {
 // ---- TOOLTIP ----
 const tooltip = document.getElementById('tooltip');
 let _lastTipKey = '';
+
+function _tooltipCloseTarget(e) {
+  const t = e && e.target;
+  return t && t.closest ? t.closest('.tooltip-close') : null;
+}
+
+function _setTooltipVisibleFlag(v) {
+  showTooltip = !!v;
+  const cb = document.getElementById('showTooltip');
+  if (cb) cb.checked = showTooltip;
+  if (!showTooltip && tooltip) tooltip.style.display = 'none';
+}
+
+if (tooltip) {
+  tooltip.addEventListener('pointerdown', e => {
+    if (!_tooltipCloseTarget(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+  tooltip.addEventListener('click', e => {
+    if (!_tooltipCloseTarget(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    _setTooltipVisibleFlag(false);
+  }, true);
+}
+
 function _pickValueContext(sname, mi, yi, hit) {
   if (!data || !data.series || !sname) return { series: null, grid: null, value: null, rowYi: yi };
   const hitSegmentIndex = hit && Number.isFinite(Number(hit.segmentIndex)) ? Number(hit.segmentIndex) : -1;
@@ -10264,6 +10444,354 @@ function _pickValueContext(sname, mi, yi, hit) {
   const value = grid && grid[rowYi] && grid[rowYi][mi] !== null && Number.isFinite(Number(grid[rowYi][mi])) ? Number(grid[rowYi][mi]) : null;
   return { series, grid, value, rowYi };
 }
+
+function _tipGridValue(grid, yi, mi) {
+  const v = grid && grid[yi] && grid[yi][mi] !== null ? Number(grid[yi][mi]) : NaN;
+  return Number.isFinite(v) ? v : null;
+}
+
+function _tooltipThornsActive() {
+  return !!(currentLayer !== 'raw' && showRawBehind && Number(thornBaseScale || 0) > 0);
+}
+
+function _tooltipSeriesValues(series, yi, mi) {
+  if (!series) return null;
+  const rawGrid = series.raw || null;
+  const smoothGrid = (currentLayer !== 'raw' ? (series[currentLayer] || series.smooth || null) : null);
+  const fallbackGrid = series[currentLayer] || series.smooth || series.raw || null;
+
+  const raw = _tipGridValue(rawGrid || fallbackGrid, yi, mi);
+  const smooth = _tipGridValue(smoothGrid || fallbackGrid, yi, mi);
+
+  if (currentLayer === 'raw') {
+    return raw === null ? null : { mode: 'raw', raw, smooth: null };
+  }
+
+  if (_tooltipThornsActive() && smooth !== null && raw !== null) {
+    return { mode: 'pair', smooth, raw };
+  }
+
+  if (smooth !== null) return { mode: 'smooth', smooth, raw: null };
+  if (raw !== null) return { mode: 'raw', raw, smooth: null };
+  return null;
+}
+
+function _tooltipColumnMode(rowData) {
+  if (rowData && rowData.some(r => r && r.vs && r.vs.mode === 'pair')) return 'pair';
+  if (rowData && rowData.some(r => r && r.vs && r.vs.mode === 'smooth')) return 'smooth';
+  return 'raw';
+}
+
+function _tooltipColumnLogicKeyForCurrentState() {
+  if (currentLayer === 'raw') return 'raw';
+  return _tooltipThornsActive() ? 'pair' : 'smooth';
+}
+
+function _refreshVisibleTooltipFromMarkerState() {
+  if (!showTooltip || !tooltip || !surfaceTouchMarkerState) return false;
+  if (tooltip.style.display === 'none') return false;
+
+  const st = surfaceTouchMarkerState;
+  const mi = Number.isFinite(Number(st.mi)) ? Math.round(Number(st.mi)) : -1;
+  const yi = Number.isFinite(Number(st.yi)) ? Math.round(Number(st.yi)) : -1;
+  if (mi < 0 || yi < 0) return false;
+
+  updateSurfaceTouchMarker();
+  if (!surfaceTouchMarkerState || !surfaceTouchMarkerState.point) return false;
+
+  const hit = {
+    sname: st.sname || '',
+    mi,
+    yi,
+    localYi: Number.isFinite(Number(st.localYi)) ? Number(st.localYi) : yi,
+    segmentIndex: Number.isFinite(Number(st.segmentIndex)) ? Number(st.segmentIndex) : -1,
+    valueKind: st.valueKind || '',
+    year: Number.isFinite(Number(st.year)) ? Number(st.year) : NaN,
+    point: surfaceTouchMarkerState.point,
+    pickedValuePoint: surfaceTouchMarkerState.point
+  };
+
+  const html = makeTooltipHTML(mi, yi, hit);
+  if (!html) return false;
+
+  const c = project(surfaceTouchMarkerState.point);
+  if (!c || !Number.isFinite(c.x) || !Number.isFinite(c.y)) return false;
+
+  const rect = wrap.getBoundingClientRect();
+  tooltip.innerHTML = html;
+  placeTooltip(tooltip, rect.left + c.x, rect.top + c.y);
+  return true;
+}
+
+function _refreshTooltipAndBottomFromMarkerState() {
+  if (!surfaceTouchMarkerState) return false;
+
+  const st = surfaceTouchMarkerState;
+  const mi = Number.isFinite(Number(st.mi)) ? Math.round(Number(st.mi)) : -1;
+  const yi = Number.isFinite(Number(st.yi)) ? Math.round(Number(st.yi)) : -1;
+  if (mi < 0 || yi < 0) return false;
+
+  updateSurfaceTouchMarker();
+  if (!surfaceTouchMarkerState) return false;
+
+  const point = surfaceTouchMarkerState.point || st.point || st.geometryPoint || null;
+  const hit = {
+    sname: st.sname || '',
+    mi,
+    yi,
+    localYi: Number.isFinite(Number(st.localYi)) ? Number(st.localYi) : yi,
+    segmentIndex: Number.isFinite(Number(st.segmentIndex)) ? Number(st.segmentIndex) : -1,
+    valueKind: st.valueKind || '',
+    year: Number.isFinite(Number(st.year)) ? Number(st.year) : NaN,
+    point,
+    pickedValuePoint: point
+  };
+
+  const html = makeTooltipHTML(mi, yi, hit);
+  if (!html) {
+    if (tooltip) tooltip.style.display = 'none';
+    return false;
+  }
+
+  const visibleTooltip = !!(showTooltip && tooltip && tooltip.style.display !== 'none');
+  if (visibleTooltip && point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y)) && Number.isFinite(Number(point.z))) {
+    const c = project(point);
+    if (c && Number.isFinite(c.x) && Number.isFinite(c.y)) {
+      const rect = wrap.getBoundingClientRect();
+      tooltip.innerHTML = html;
+      placeTooltip(tooltip, rect.left + c.x, rect.top + c.y);
+    }
+  }
+
+  return true;
+}
+
+function _tooltipHeaderHTML(colMode) {
+  return '';
+}
+
+function _tooltipValueCellsHTML(vs, colMode, showMarkers) {
+  const emptyPair = `<span class="tip-mark"></span><span class="tip-num tip-raw"></span><span class="tip-mark tip-approx"></span><span class="tip-num"></span>`;
+  const emptySingle = `<span class="tip-mark"></span><span class="tip-num"></span>`;
+  if (!vs) return colMode === 'pair' ? emptyPair : emptySingle;
+
+  const smoothVal = Number.isFinite(Number(vs.smooth)) ? Number(vs.smooth).toFixed(1) : '';
+  const rawVal = Number.isFinite(Number(vs.raw)) ? Number(vs.raw).toFixed(1) : '';
+  const rawMark = showMarkers ? '✦' : '';
+  const smoothMark = showMarkers ? '≈' : '';
+
+  if (colMode === 'pair') {
+    return `<span class="tip-mark tip-raw-mark">${rawMark}</span>` +
+      `<span class="tip-num tip-raw">${rawVal}</span>` +
+      `<span class="tip-mark tip-approx">${smoothMark}</span>` +
+      `<span class="tip-num">${smoothVal}</span>`;
+  }
+
+  if (colMode === 'smooth') {
+    return `<span class="tip-mark tip-approx">${smoothMark}</span>` +
+      `<span class="tip-num">${smoothVal || rawVal}</span>`;
+  }
+
+  return `<span class="tip-mark tip-raw-mark">${rawMark}</span>` +
+    `<span class="tip-num tip-raw">${rawVal || smoothVal}</span>`;
+}
+
+function _tooltipBottomText(label, vs) {
+  if (!vs) return label;
+  const rawTxt = Number.isFinite(Number(vs.raw)) ? `✦ ${Number(vs.raw).toFixed(1)}` : '';
+  const smoothTxt = Number.isFinite(Number(vs.smooth)) ? `≈ ${Number(vs.smooth).toFixed(1)}` : '';
+  if (vs.mode === 'pair') return `${label} ${[rawTxt, smoothTxt].filter(Boolean).join('  ')}`;
+  if (vs.mode === 'smooth') return `${label} ${smoothTxt || rawTxt}`;
+  return `${label} ${rawTxt || smoothTxt}`;
+}
+
+let _bottomFitTimer = 0;
+let _bottomPanelLayoutCache = null;
+
+function _bottomPanelMeasureCtx() {
+  const ctx =
+    _bottomPanelMeasureCtx._ctx ||
+    (_bottomPanelMeasureCtx._ctx = document.createElement('canvas').getContext('2d'));
+  ctx.font = '11px Arial, sans-serif';
+  return ctx;
+}
+
+function _bottomPanelScanGridValues(grid, visit) {
+  if (!grid || typeof visit !== 'function') return;
+  const stack = [grid];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (cur == null) continue;
+    if (typeof cur === 'number') {
+      if (Number.isFinite(cur)) visit(cur);
+      continue;
+    }
+    if (Array.isArray(cur)) {
+      for (let i = 0; i < cur.length; i++) stack.push(cur[i]);
+    }
+  }
+}
+
+function _bottomPanelSeriesOwners() {
+  const owners = [];
+  if (data) owners.push(data);
+  if (data && Array.isArray(data.segments)) {
+    for (const seg of data.segments) if (seg && seg.series) owners.push(seg);
+  }
+  return owners;
+}
+
+function _bottomPanelWidestNumberTextFor(sname, layerName) {
+  const ctx = _bottomPanelMeasureCtx();
+  let best = '';
+  let bestW = -1;
+
+  const consider = v => {
+    const txt = Number(v).toFixed(1);
+    const w = ctx.measureText(txt).width || 0;
+    if (w > bestW) {
+      bestW = w;
+      best = txt;
+    }
+  };
+
+  for (const owner of _bottomPanelSeriesOwners()) {
+    const s = owner && owner.series ? owner.series[sname] : null;
+    if (!s) continue;
+    const grid = layerName === 'raw'
+      ? s.raw
+      : (s[layerName] || (layerName !== 'smooth' ? null : s.smooth) || s.smooth);
+    _bottomPanelScanGridValues(grid, consider);
+  }
+
+  return best || '0.0';
+}
+
+function _bottomPanelDateWidthPx() {
+  const ctx = _bottomPanelMeasureCtx();
+  let maxW = 0;
+  const years = new Set();
+
+  const scanYears = axes => {
+    if (!axes || !axes.years) return;
+    for (const y of axes.years) {
+      const yy = Number(y);
+      if (Number.isFinite(yy)) years.add(Math.round(yy));
+    }
+  };
+
+  if (data && data.axes) scanYears(data.axes);
+  if (data && Array.isArray(data.segments)) {
+    for (const seg of data.segments) if (seg && seg.axes) scanYears(seg.axes);
+  }
+  if (!years.size) years.add(new Date().getFullYear());
+
+  const monthNames = [];
+  const nMonths = data && data.axes && Number.isFinite(Number(data.axes.n_months))
+    ? Math.max(1, Math.min(12, Number(data.axes.n_months)))
+    : 12;
+  for (let mi = 0; mi < nMonths; mi++) {
+    const name = ((MONTH_NAMES && MONTH_NAMES[mi]) || cycleMonthName(mi) || '').replace(/^◆/, '') || cycleMonthName(mi);
+    monthNames.push(name);
+  }
+
+  for (const m of monthNames) {
+    for (const y of years) {
+      maxW = Math.max(maxW, ctx.measureText(`${m} ${y}`).width || 0);
+    }
+  }
+  return Math.ceil(maxW + 2);
+}
+
+function _bottomPanelTextWidthForSeries(sname, mode) {
+  const ctx = _bottomPanelMeasureCtx();
+  const label = SERIES && SERIES[sname] ? SERIES[sname].label : sname;
+  const smoothLayer = currentLayer === 'trend' ? 'trend' : 'smooth';
+
+  if (mode === 'pair') {
+    const rawTxt = _bottomPanelWidestNumberTextFor(sname, 'raw');
+    const smoothTxt = _bottomPanelWidestNumberTextFor(sname, smoothLayer);
+    return Math.ceil(ctx.measureText(`${label} ✦ ${rawTxt}  ≈ ${smoothTxt}`).width + 2);
+  }
+
+  if (mode === 'smooth') {
+    const smoothTxt = _bottomPanelWidestNumberTextFor(sname, smoothLayer);
+    return Math.ceil(ctx.measureText(`${label} ≈ ${smoothTxt}`).width + 2);
+  }
+
+  const rawTxt = _bottomPanelWidestNumberTextFor(sname, 'raw');
+  return Math.ceil(ctx.measureText(`${label} ✦ ${rawTxt}`).width + 2);
+}
+
+function _bottomPanelLayoutKey() {
+  const mode = _tooltipColumnLogicKeyForCurrentState();
+  return [
+    currentGeo || '',
+    (_surfaceDatasetKeys && currentGeo && _surfaceDatasetKeys[currentGeo]) || '',
+    currentLayer || '',
+    mode,
+    data && data.axes ? (data.axes.n_years || '') : '',
+    data && data.segments ? data.segments.length : ''
+  ].join('|');
+}
+
+function _bottomPanelMeasuredLayout() {
+  const key = _bottomPanelLayoutKey();
+  if (_bottomPanelLayoutCache && _bottomPanelLayoutCache.key === key) return _bottomPanelLayoutCache;
+
+  const mode = _tooltipColumnLogicKeyForCurrentState();
+  const dotAndGapPx = 14;
+
+  const birthsTextW = _bottomPanelTextWidthForSeries('births', mode);
+  const deathsTextW = _bottomPanelTextWidthForSeries('deaths', mode);
+  const balanceTextW = _bottomPanelTextWidthForSeries('balance', mode);
+
+  _bottomPanelLayoutCache = {
+    key,
+    dateW: _bottomPanelDateWidthPx(),
+    birthsTextW,
+    deathsTextW,
+    balanceTextW,
+    birthsSlotW: birthsTextW + dotAndGapPx,
+    deathsSlotW: deathsTextW + dotAndGapPx,
+    balanceSlotW: balanceTextW + dotAndGapPx
+  };
+  return _bottomPanelLayoutCache;
+}
+
+function fitBottomPanel() {
+  const b = document.getElementById('bottom');
+  if (!b) return;
+
+  b.classList.remove('bottom-tight', 'bottom-ultra');
+
+  const m = _bottomPanelMeasuredLayout();
+  b.style.setProperty('--bottom-date-w', `${m.dateW}px`);
+  b.style.setProperty('--bottom-births-text-w', `${m.birthsTextW}px`);
+  b.style.setProperty('--bottom-deaths-text-w', `${m.deathsTextW}px`);
+  b.style.setProperty('--bottom-balance-text-w', `${m.balanceTextW}px`);
+  b.style.setProperty('--bottom-births-slot-w', `${m.birthsSlotW}px`);
+  b.style.setProperty('--bottom-deaths-slot-w', `${m.deathsSlotW}px`);
+  b.style.setProperty('--bottom-balance-slot-w', `${m.balanceSlotW}px`);
+}
+
+function requestBottomPanelFit() {
+  if (_bottomFitTimer) return;
+  _bottomFitTimer = requestAnimationFrame(() => {
+    _bottomFitTimer = 0;
+    const bottom = document.getElementById('bottom');
+    const oldH = bottom ? bottom.offsetHeight : 0;
+    fitBottomPanel();
+    const newH = bottom ? bottom.offsetHeight : 0;
+    if (newH !== oldH && typeof containWorkPanelToViewport === 'function') {
+      containWorkPanelToViewport();
+      if (typeof resizeRenderer === 'function') resizeRenderer();
+      if (typeof applyCamera === 'function') applyCamera();
+      if (typeof _refreshAnchoredTooltipAfterLayoutChange === 'function') _refreshAnchoredTooltipAfterLayoutChange();
+    }
+  });
+}
+
 function makeTooltipHTML(mi, yi, hit) {
    const bottomDate = document.getElementById('bottomDate');
    const bottomAnchor = document.getElementById('bottomAnchor');
@@ -10307,63 +10835,114 @@ function makeTooltipHTML(mi, yi, hit) {
   if (bottomDate) bottomDate.textContent = `${month} ${year}`;
   if (bottomAnchor) bottomAnchor.textContent = anchorState ._mouseAnchorActive ? '✦':'';
 
-  const valueKind = hit && hit.valueKind ? String(hit.valueKind) : '';
-  const useRawValues = valueKind === 'raw_tip';
-
-  let rows = '';
+  const rowData = [];
   for (const sname of ['births','deaths','balance']) {
-    //const show = (sname==='births'&&showBirths)||(sname==='deaths'&&showDeaths)||(sname==='balance'&&showBalance);
-    //if (!show) continue;
-	
-	const bottomText =
-	  sname === 'births'  ? document.getElementById('bottomBirthsText') :
-	  sname === 'deaths'  ? document.getElementById('bottomDeathsText') :
-	  sname === 'balance' ? document.getElementById('bottomBalanceText') :
-	  null;
-	  
+    const bottomText =
+      sname === 'births'  ? document.getElementById('bottomBirthsText') :
+      sname === 'deaths'  ? document.getElementById('bottomDeathsText') :
+      sname === 'balance' ? document.getElementById('bottomBalanceText') :
+      null;
+
     const s = valueSourceIsSegment ? (hitSegment.series ? hitSegment.series[sname] : null) : data.series[sname];
-    if (!s) 
-	  {
-	   if (bottomText) {
-	    bottomText.textContent = `${SERIES[sname].label}`;
-	   }
-	   continue;
-	  } 
-    const grid = useRawValues && s.raw ? s.raw : (s[currentLayer] || s.smooth);
-    const v = grid && grid[valueYi] && grid[valueYi][mi] !== null ? grid[valueYi][mi] : null;
-    if (v === null) 
-	  {
-	   if (bottomText) {
-	    bottomText.textContent = `${SERIES[sname].label}`;
-	   }
-	   continue;
-	  } 
+    const label = SERIES[sname].label;
+    if (!s) {
+      if (bottomText) bottomText.textContent = label;
+      continue;
+    }
+
+    const vs = _tooltipSeriesValues(s, valueYi, mi);
+    if (!vs) {
+      if (bottomText) bottomText.textContent = label;
+      continue;
+    }
+
     const col = SERIES[sname].color;
-	
-
-	if (bottomText) {
-	  bottomText.textContent = `${SERIES[sname].label}: ${v.toFixed(1)}`;
-	}
-
-    rows += `<div style="display:flex;align-items:center;gap:7px;padding:1px 0;">` +
-      `<span style="width:7px;height:7px;border-radius:50%;background:${col};flex-shrink:0;display:inline-block;"></span>` +
-      `<span style="flex:1;opacity:0.75">${SERIES[sname].label}</span>` +
-      `<span style="font-variant-numeric:tabular-nums;">${v.toFixed(1)}</span></div>`;
+    if (bottomText) bottomText.textContent = _tooltipBottomText(label, vs);
+    rowData.push({ label, col, vs });
   }
+
+  const colMode = _tooltipColumnMode(rowData);
+  let rows = '';
+  for (let ri = 0; ri < rowData.length; ri++) {
+    const r = rowData[ri];
+    rows += `<div class="tip-row">` +
+      `<span class="tip-dot" style="background:${r.col};"></span>` +
+      `<span class="tip-label">${r.label}</span>` +
+      _tooltipValueCellsHTML(r.vs, colMode, ri === 0) + `</div>`;
+  }
+
+  requestBottomPanelFit();
+
   const bs = data.series.births;
   const rough = bs && bs.roughness && bs.roughness[valueYi] ? bs.roughness[valueYi][mi] : null;
   const roughStr = rough !== null ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #444;font-size:10px;opacity:0.55;">roughness ${rough.toFixed(2)}</div>` : '';
-  return `<div style="min-width:160px;">` +
-    `<div style="font-size:12px;font-weight:600;padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid #444;">${month} ${year}</div>` +
-    rows + roughStr + `</div>`;
+  return `<div class="tooltip-shell">` +
+    `<div class="tooltip-head"><div class="tooltip-title">${month} ${year}</div>` +
+    `<button type="button" class="tooltip-close" title="Hide tooltip" aria-label="Hide tooltip">×</button></div>` +
+    `<div class="tip-grid tip-grid-${colMode}">${rows}</div>` + roughStr + `</div>`;
 }
 function placeTooltip(el, x, y) {
-  return;
-  const pad=8, vw=window.innerWidth, vh=window.innerHeight;
-  el.style.display='block'; el.style.left='0'; el.style.top='0';
-  const w=el.offsetWidth, h=el.offsetHeight;
-  el.style.left = Math.max(pad,Math.min(x+10,vw-pad-w))+'px';
-  el.style.top  = Math.max(pad,Math.min(y+10,vh-pad-h))+'px';
+  if (!el || !showTooltip) {
+    if (el) el.style.display = 'none';
+    return;
+  }
+  const pad = 8;
+  const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+  const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+  const maxW = Math.max(80, vw - 2 * pad);
+  const maxH = Math.max(60, vh - 2 * pad);
+
+  el.style.maxWidth = maxW + 'px';
+  el.style.maxHeight = maxH + 'px';
+  el.style.overflow = 'auto';
+  el.style.display = 'block';
+  el.style.left = '0';
+  el.style.top = '0';
+
+  const w = Math.min(el.offsetWidth || 0, maxW);
+  const h = Math.min(el.offsetHeight || 0, maxH);
+  el.style.left = Math.max(pad, Math.min(x + 10, vw - pad - w)) + 'px';
+  el.style.top  = Math.max(pad, Math.min(y + 10, vh - pad - h)) + 'px';
+}
+
+function _positionTooltipAtCurrentMarker() {
+  if (!showTooltip || !tooltip || !_isMarkerAnchored() || !surfaceTouchMarkerState) return false;
+
+  updateSurfaceTouchMarker();
+
+  const p = surfaceTouchMarkerState && surfaceTouchMarkerState.point;
+  if (!p || !Number.isFinite(Number(p.x)) || !Number.isFinite(Number(p.y)) || !Number.isFinite(Number(p.z))) {
+    if (tooltip) tooltip.style.display = 'none';
+    return false;
+  }
+
+  if (!tooltip.innerHTML || tooltip.style.display === 'none') {
+    return _refreshAnchoredTooltipAfterViewOp();
+  }
+
+  const c = project(p);
+  if (!c || !Number.isFinite(c.x) || !Number.isFinite(c.y)) {
+    tooltip.style.display = 'none';
+    return false;
+  }
+
+  const rect = wrap.getBoundingClientRect();
+  placeTooltip(tooltip, rect.left + c.x, rect.top + c.y);
+  repositionHighlightLabels();
+  return true;
+}
+
+function _refreshAnchoredTooltipAfterLayoutChange() {
+  if (!_isMarkerAnchored()) return false;
+  const ok = _positionTooltipAtCurrentMarker();
+
+  requestAnimationFrame(() => {
+    if (!_isMarkerAnchored()) return;
+    if (!_positionTooltipAtCurrentMarker()) _refreshAnchoredTooltipAfterViewOp();
+    requestHighlightWireOverlayRender(false);
+  });
+
+  return ok;
 }
 
 // ---- HIT TEST ----
@@ -11902,6 +12481,11 @@ function resumeHoverAfterViewOp(clientX, clientY, delay) {
     _hoverMoveSeq += 1;
     _lastTipKey = '';
 
+    if (_isMarkerAnchored()) {
+      _refreshAnchoredTooltipAfterViewOp();
+      return;
+    }
+
     if (_lastPointerWasTouch || _touchIsActive || _touchPickPending || _touchAnchorActive || _touchAnchorPickActive) {
       return;
     }
@@ -11911,6 +12495,59 @@ function resumeHoverAfterViewOp(clientX, clientY, delay) {
       lastMouseY = _hoverOpsResumeY;
     }
   }, delay == null ? 160 : delay);
+}
+
+function _refreshAnchoredTooltipAfterViewOp() {
+  if (!surfaceTouchMarkerState || !_isMarkerAnchored()) {
+    if (tooltip) tooltip.style.display = 'none';
+    return false;
+  }
+
+  updateSurfaceTouchMarker();
+
+  if (!showTooltip || !tooltip || !surfaceTouchMarkerState.point) {
+    if (tooltip) tooltip.style.display = 'none';
+    return false;
+  }
+
+  const st = surfaceTouchMarkerState;
+  const mi = Number.isFinite(Number(st.mi)) ? Math.round(Number(st.mi)) : -1;
+  const yi = Number.isFinite(Number(st.yi)) ? Math.round(Number(st.yi)) : -1;
+  if (mi < 0 || yi < 0) {
+    tooltip.style.display = 'none';
+    return false;
+  }
+
+  const hit = {
+    sname: st.sname || '',
+    mi,
+    yi,
+    localYi: Number.isFinite(Number(st.localYi)) ? Number(st.localYi) : yi,
+    segmentIndex: Number.isFinite(Number(st.segmentIndex)) ? Number(st.segmentIndex) : -1,
+    valueKind: st.valueKind || '',
+    year: Number.isFinite(Number(st.year)) ? Number(st.year) : NaN,
+    point: st.point,
+    pickedValuePoint: st.point
+  };
+
+  const html = makeTooltipHTML(mi, yi, hit);
+  if (!html) {
+    tooltip.style.display = 'none';
+    return false;
+  }
+
+  const c = project(st.point);
+  if (!c || !Number.isFinite(c.x) || !Number.isFinite(c.y)) {
+    tooltip.style.display = 'none';
+    return false;
+  }
+
+  const rect = wrap.getBoundingClientRect();
+  tooltip.innerHTML = html;
+  placeTooltip(tooltip, rect.left + c.x, rect.top + c.y);
+  repositionHighlightLabels();
+  requestRightPanelRender();
+  return true;
 }
 
 function releaseMouseAnchor(clientX, clientY) {
@@ -11952,6 +12589,51 @@ function releaseTouchAnchor(clientX, clientY) {
   clearHighlight();
   requestRightPanelRender();
   requestPeelRender();
+}
+
+function _activateMouseInputMode(clientX, clientY) {
+  if (_touchIsActive) return false;
+
+  const hadTouchState =
+    _lastPointerWasTouch ||
+    _touchPickPending ||
+    _touchAnchorActive ||
+    _touchAnchorPickActive;
+
+  if (!hadTouchState) return true;
+
+  cancelPickTask();
+  _cancelPendingHoverCommit();
+
+  _lastPointerWasTouch = false;
+  _touchPickPending = false;
+  _touchPickX = -9999;
+  _touchPickY = -9999;
+  _touchAnchorActive = false;
+  _touchAnchorPickActive = false;
+
+  if (_hoverOpsResumeTimer) {
+    clearTimeout(_hoverOpsResumeTimer);
+    _hoverOpsResumeTimer = 0;
+  }
+  _hoverOpsSuspended = false;
+
+  lastMouseX = Number.isFinite(clientX) ? clientX : -9999;
+  lastMouseY = Number.isFinite(clientY) ? clientY : -9999;
+  _hoverMoveSeq += 1;
+  _lastTipKey = '';
+
+  tooltip.style.display = 'none';
+  hideGuide();
+  clearSurfaceTouchMarker();
+  clearHighlight();
+
+  updateSurfaceTouchMarker();
+  repositionHighlightLabels();
+  requestRightPanelRender();
+  requestPeelRender();
+
+  return true;
 }
 
 function setTouchAnchorAt(clientX, clientY) {
@@ -12015,6 +12697,7 @@ function setMouseAnchorAt(clientX, clientY) {
 
 renderer.domElement.addEventListener('mousedown', e => {
   if (activeView && activeView.id === VIEW_MODE_CYCLE2D && activeView.handlePointerDown && activeView.handlePointerDown(e)) return;
+  if (!_activateMouseInputMode(e.clientX, e.clientY)) return;
   cancelPickTask();
   _lastPointerWasTouch = false;
   isDragging=true; dragBtn=e.button; lastMX=e.clientX; lastMY=e.clientY;
@@ -12068,6 +12751,7 @@ renderer.domElement.addEventListener('mousedown', e => {
 
 renderer.domElement.addEventListener('wheel', function wheelZoomSmooth(e) {
   if (activeView && activeView.id === VIEW_MODE_CYCLE2D && activeView.handleWheel && activeView.handleWheel(e)) return;
+  if (!_activateMouseInputMode(e.clientX, e.clientY)) return;
   cancelPickTask();
   suspendHoverDuringViewOp(e.clientX, e.clientY);
   e.preventDefault();
@@ -12371,6 +13055,7 @@ renderer.domElement.addEventListener('touchcancel', _onTouchEnd, { passive: fals
 renderer.domElement.addEventListener('contextmenu', e=>e.preventDefault());
 const _onMouseLikePointerMove = e => {
   if (e && e.pointerType && e.pointerType !== 'mouse') return;
+  if (!_activateMouseInputMode(e.clientX, e.clientY)) return;
 
   if (_hoverOpsSuspended) {
     resumeHoverAfterViewOp(e.clientX, e.clientY, 220);
@@ -12797,6 +13482,9 @@ function rebuildForCycleStart() {
   const datasets = _datasetsNow();
   if (!datasets || !currentGeo || !datasets[currentGeo]) return;
   data = _compileGeoDataset(currentGeo, datasets[currentGeo]);
+  _cycle2dPrepareAxisLayoutForLoadedGeo();
+  _bottomPanelLayoutCache = null;
+  requestBottomPanelFit();
   clearHighlight();
   hideGuide();
   tooltip.style.display = 'none';
@@ -12810,6 +13498,9 @@ function rebuildForDeathsMirror() {
   const datasets = _datasetsNow();
   if (!datasets || !currentGeo || !datasets[currentGeo]) return;
   data = _compileGeoDataset(currentGeo, datasets[currentGeo]);
+  _cycle2dPrepareAxisLayoutForLoadedGeo();
+  _bottomPanelLayoutCache = null;
+  requestBottomPanelFit();
   _activeFitBounds = _computeComprehensiveFitBounds(currentGeo, datasets[currentGeo]);
   clearHighlight();
   hideGuide();
@@ -13393,6 +14084,9 @@ async function recomputeCurrentGeoFromWasm() {
 }
 
     data = _compileGeoDataset(geo, record);
+    _cycle2dPrepareAxisLayoutForLoadedGeo();
+    _bottomPanelLayoutCache = null;
+    requestBottomPanelFit();
     syncForecastControls();
 
     if (!_activeFitBounds) {
@@ -13401,14 +14095,25 @@ async function recomputeCurrentGeoFromWasm() {
 
     const keepHighlight = _shouldKeepHighlightAcrossRebuild();
 
-    if (!keepHighlight) clearHighlight();
+    if (!keepHighlight) {
+      clearHighlight();
+      if (tooltip) tooltip.style.display = 'none';
+    }
     hideGuide();
-    tooltip.style.display = 'none';
     _lastTipKey = '';
 
     updateHeaderForGeo();
     buildAllSurfaces();
-    if (!keepHighlight) selectDefaultPoint();
+    if (keepHighlight) {
+      _refreshTooltipAndBottomFromMarkerState();
+      _refreshAnchoredTooltipAfterLayoutChange();
+      requestAnimationFrame(() => {
+        _refreshTooltipAndBottomFromMarkerState();
+        _refreshAnchoredTooltipAfterLayoutChange();
+      });
+    } else {
+      selectDefaultPoint();
+    }
 
   } catch (err) {
     _setWasmStatus(String(err && err.message ? err.message : err));
@@ -13510,10 +14215,10 @@ if (forecastConfidenceOpacitySlider) forecastConfidenceOpacitySlider.addEventLis
 
 // ---- CHECKBOXES ----
 function bindCheck(id, fn) { const el = document.getElementById(id); if (el) el.addEventListener('change', e => fn(e.target.checked)); }
-bindCheck('showBirths',     v => { showBirths=v;     buildAllSurfaces(); });
-bindCheck('showDeaths',     v => { showDeaths=v;     buildAllSurfaces(); });
-bindCheck('mirrorDeathsZ',  v => { mirrorDeathsZ=v;  rebuildForDeathsMirror(); });
-bindCheck('showBalance',    v => { showBalance=v;    buildAllSurfaces(); });
+bindCheck('showBirths',     v => { showBirths=v;     buildAllSurfaces(); _refreshTooltipAndBottomFromMarkerState(); });
+bindCheck('showDeaths',     v => { showDeaths=v;     buildAllSurfaces(); _refreshTooltipAndBottomFromMarkerState(); });
+bindCheck('mirrorDeathsZ',  v => { mirrorDeathsZ=v;  rebuildForDeathsMirror(); _refreshTooltipAndBottomFromMarkerState(); });
+bindCheck('showBalance',    v => { showBalance=v;    buildAllSurfaces(); _refreshTooltipAndBottomFromMarkerState(); });
 
 
 const thornBaseScaleSlider = document.getElementById('thornBaseScaleSlider');
@@ -13521,12 +14226,23 @@ if (thornBaseScaleSlider) {
   thornBaseScaleSlider.max = String(THORN_BASE_SCALE_MAX);
   thornBaseScaleSlider.value = String(thornBaseScale);
   thornBaseScaleSlider.addEventListener('input', e => {
+    const prevTooltipColumnLogic = _tooltipColumnLogicKeyForCurrentState();
     const scale = Math.max(0, Math.min(THORN_BASE_SCALE_MAX, Number(e.target.value) || 0));
     thornBaseScale = scale;
     showRawBehind = scale > 0;
+    const nextTooltipColumnLogic = _tooltipColumnLogicKeyForCurrentState();
+
     global_option_set('thorn_base_scale', scale);
     global_option_set('thorn_base_diag_mult', scale);
     global_option_set('thorn_base_max_mult', scale);
+
+    if (prevTooltipColumnLogic !== nextTooltipColumnLogic) {
+      _lastTipKey = '';
+      _bottomPanelLayoutCache = null;
+      requestBottomPanelFit();
+      _refreshTooltipAndBottomFromMarkerState();
+    }
+
     scheduleSmartSurfaceRebuild();
   });
 }
@@ -13554,6 +14270,21 @@ bindCheck('showAxes3D', v => {
 });
 bindCheck('highlightNearest',v=>{ highlightNearest=v; if (!highlightNearest) clearHighlight(); requestRightPanelRender(); });
 bindCheck('swapAxes', v => { axisSwap=v; buildAllSurfaces(); });
+bindCheck('showRightPanel', v => {
+  showRightPanel = !!v;
+  updateWorkSplitLayout();
+  requestPeelRender();
+  if (showRightPanel) requestRightPanelRender();
+});
+bindCheck('showTooltip', v => {
+  showTooltip = !!v;
+  _refreshTooltipAndBottomFromMarkerState();
+  if (!showTooltip && tooltip) {
+    tooltip.style.display = 'none';
+  } else if (showTooltip && _isMarkerAnchored()) {
+    _refreshAnchoredTooltipAfterViewOp();
+  }
+});
 
 // ---- LAYER SELECT ----
 function toggleCsel(id) {
@@ -13568,7 +14299,16 @@ function selectLayer(el) {
   document.getElementById('layerLabel').textContent = el.textContent;
   document.querySelectorAll('#layerList .csel-opt').forEach(o=>o.classList.toggle('selected',o===el));
   document.getElementById('layerList').style.display='none';
+  _lastTipKey = '';
+  _bottomPanelLayoutCache = null;
+  requestBottomPanelFit();
   buildAllSurfaces();
+  _refreshTooltipAndBottomFromMarkerState();
+  requestAnimationFrame(() => {
+    _refreshTooltipAndBottomFromMarkerState();
+    _refreshAnchoredTooltipAfterLayoutChange();
+    requestRightPanelRender();
+  });
 }
 document.addEventListener('click', e => {
   if (!e.target.closest('.csel')) document.querySelectorAll('.csel-list').forEach(l=>l.style.display='none');
@@ -14895,13 +15635,32 @@ function clamp01Range(v, lo, hi) {
 
 function updateWorkSplitLayout() {
   if (!workParent) return;
+
+  if (!showRightPanel) {
+    if (workSplitter) workSplitter.style.display = 'none';
+    if (rightPanel) rightPanel.style.display = 'none';
+    workParent.style.gridTemplateColumns = 'minmax(0, 1fr)';
+
+    resizeRenderer();
+    applyCamera();
+    repositionAxisLabels();
+    _refreshAnchoredTooltipAfterLayoutChange();
+    return;
+  }
+
+  if (workSplitter) workSplitter.style.display = '';
+  if (rightPanel) {
+    rightPanel.style.display = '';
+    rightPanel.style.maxHeight = workParent.clientHeight ? workParent.clientHeight + 'px' : '';
+  }
   workSplitRatio = clamp01Range(workSplitRatio, 0.25, 0.75);
   workParent.style.gridTemplateColumns = `minmax(0, ${workSplitRatio * 100}%) 7px minmax(0, 1fr)`;
 
   resizeRenderer();
-    applyCamera();
-    repositionAxisLabels();
-    requestRightPanelRender();
+  applyCamera();
+  repositionAxisLabels();
+  _refreshAnchoredTooltipAfterLayoutChange();
+  requestRightPanelRender();
 }
 
 function initWorkSplitter() {
@@ -14936,6 +15695,7 @@ function move(ev) {
 }
 
 function requestRightPanelRender() {
+  if (!showRightPanel) return;
   if (_rightRenderPending) return;
   _rightRenderPending = true;
   requestAnimationFrame(() => {
@@ -15051,6 +15811,7 @@ function _rightApplyPick(rec, clientX, clientY) {
 
 function _rightViewHover(rec, clientX, clientY) {
   _markRightPointerActive();
+  if (!_activateMouseInputMode(clientX, clientY)) return;
 
   if (anchorState ._mouseAnchorActive || _mouseAnchorPickActive || _touchPickPending || _lastPointerWasTouch) return;
 
@@ -15060,6 +15821,7 @@ function _rightViewHover(rec, clientX, clientY) {
 
 function _rightViewClick(rec, clientX, clientY) {
   _markRightPointerActive();
+  if (!_activateMouseInputMode(clientX, clientY)) return;
   cancelPickTask();
   _lastPointerWasTouch = false;
 
@@ -16424,6 +17186,7 @@ function _rightRenderExactView(rec) {
 }
 
 function renderRightPanelViews() {
+  if (!showRightPanel) return;
   if (!data || !data.axes) return;
 
   const views = _rightResizeExactViews();
@@ -16439,27 +17202,58 @@ function renderRightPanelViews() {
 }
 
 // ---- RESIZE ----
+function containWorkPanelToViewport() {
+  const h = window.innerHeight || document.documentElement.clientHeight || 0;
+  document.body.style.height = h + 'px';
+
+  if (!workParent) return;
+
+  const topH = document.getElementById('top') ? document.getElementById('top').offsetHeight : 0;
+  const bottomH = document.getElementById('bottom') ? document.getElementById('bottom').offsetHeight : 0;
+  const workH = Math.max(0, h - topH - bottomH);
+
+  workParent.style.height = workH + 'px';
+  workParent.style.maxHeight = workH + 'px';
+
+  if (wrap) wrap.style.maxHeight = workH + 'px';
+  if (rightPanel) rightPanel.style.maxHeight = workH + 'px';
+}
+
 function setAppHeight() {
   invalidatePickCaches();
-  if (tooltip) tooltip.style.display = 'none';
-  hideGuide();
-  lastMouseX = -9999;
-  lastMouseY = -9999;
 
-  const h = window.innerHeight;
-  document.body.style.height = h + 'px';
-  if (workParent) {
-    const topH = document.getElementById('top') ? document.getElementById('top').offsetHeight : 0;
-    const bottomH = document.getElementById('bottom') ? document.getElementById('bottom').offsetHeight : 0;
-    workParent.style.height = Math.max(0, h - topH - bottomH) + 'px';
+  if (!_isMarkerAnchored()) {
+    if (tooltip) tooltip.style.display = 'none';
+    hideGuide();
+    lastMouseX = -9999;
+    lastMouseY = -9999;
   }
 
+  containWorkPanelToViewport();
   initCamera();
   updateWorkSplitLayout();
+  _refreshAnchoredTooltipAfterLayoutChange();
+  requestBottomPanelFit();
   if (typeof clampMenuPopupToViewport === 'function') clampMenuPopupToViewport();
 }
 window.addEventListener('resize', setAppHeight);
 window.addEventListener('orientationchange', () => { setTimeout(setAppHeight, 100); });
+
+if (typeof ResizeObserver !== 'undefined' && workParent) {
+  const _workResizeObserver = new ResizeObserver(() => {
+    containWorkPanelToViewport();
+    resizeRenderer();
+    applyCamera();
+    repositionAxisLabels();
+    _refreshAnchoredTooltipAfterLayoutChange();
+    requestBottomPanelFit();
+    requestRightPanelRender();
+  });
+  _workResizeObserver.observe(workParent);
+  if (wrap) _workResizeObserver.observe(wrap);
+  if (rightPanel) _workResizeObserver.observe(rightPanel);
+}
+
 initWorkSplitter();
 setAppHeight();
 
